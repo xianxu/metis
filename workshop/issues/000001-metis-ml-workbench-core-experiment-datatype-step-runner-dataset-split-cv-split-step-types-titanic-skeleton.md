@@ -59,12 +59,13 @@ M1 = the experiment datatype + CUE schema (`typed-data-prototype`); M2 = the Go 
 Durable plan with per-file/per-test detail: [`workshop/plans/000001-experiment-datatype-plan.md`](../plans/000001-experiment-datatype-plan.md). M1 is fully specced there; M2/M3 are sketched (re-run `sdlc start-plan` before each). `ariadne#155` in the plan's References is a related tooling-gap note, **not** a blocker — metis ships its own `base.manifest` and compiles cleanly.
 
 - [x] M1 — `experiment`/`pipeline`/`step`/`run` datatypes + CUE-validated frontmatter (schema + a fixture experiment)
-- [ ] M2 — Go step-runner: read experiment, run steps sequentially via subprocess, append a Run record; plain streaming output
+- [x] M2 — Go step-runner: read experiment, run steps sequentially via subprocess, append a Run record; plain streaming output
 - [ ] M3 — Dataset/Schema/cv-split Python core + step-types (`cv-split`, `train`, `predict`) with unit tests + the files+subprocess contract (`metrics.json`/`predictions.csv`)
 
 ## Log
 
 ### 2026-07-01
+- 2026-07-01: closed M2 — go test ./... green (pkg/experiment + cmd/metis, cmd/metis uncached); the REWORK Critical is fixed — runDir is absolutized so METIS_STEP_DIR/METIS_RUN_DIR are absolute from any cwd, and a new relative-path regression test (cmd/metis/run_test.go, fails-before/passes-after) exercises the natural `metis run <relative>` invocation the old absolute-path test masked; metrics.json no longer leaks into run.json artifacts; pure/IO separation intact (pkg/experiment has no os/exec).; review verdict: FIX-THEN-SHIP
 - 2026-07-01: closed M1 — M1 verified via ariadne bin/{vocabulary,weave}: valid-baseline passes validate-instance (exit 0); invalid-bad-status rejected with enum diagnostic (exit 1); experiment registered in xx-datatype skill; merge-check catches bad fixture (exit 1) and passes clean by default (exit 0); weave compile applies 97 actions and generates construct/generated/vocabulary/experiment.json.; review verdict: FIX-THEN-SHIP
 
 Created from the `kaggle-ml-base-layer` project brainstorm (brain `data/project/kaggle-ml-base-layer.md`). This is the base of the substrate chain `kbench → kaggle → metis → ariadne`. Explicitly deferred to later projects: TUI polish, caching/DAG-skip, DVC backend, pipeline parameterization (`{param}` — the Run record already captures bound values), and good modeling.
