@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -60,8 +61,12 @@ func TestRunExperiment_EndToEnd(t *testing.T) {
 	if got.Metrics["echoed"] != 1 {
 		t.Errorf("metrics = %v; want echoed=1", got.Metrics)
 	}
-	if len(got.Artifacts) == 0 {
-		t.Errorf("no artifacts recorded in run.json")
+	// Exact artifact set: each step's echoed.json, step-qualified under runs/<id>/,
+	// and NOTHING else — metrics.json (the metrics channel) and with.json (the
+	// input) must not leak into the artifact list.
+	wantArtifacts := []string{"first/echoed.json", "second/echoed.json"}
+	if !reflect.DeepEqual(got.Artifacts, wantArtifacts) {
+		t.Errorf("artifacts = %v; want exactly %v", got.Artifacts, wantArtifacts)
 	}
 
 	// `## Runs` log appended to the experiment.

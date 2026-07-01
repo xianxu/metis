@@ -102,8 +102,10 @@ func readMetrics(path string) (map[string]float64, error) {
 	return m, nil
 }
 
-// collectArtifacts lists the files a step wrote in its dir (excluding with.json,
-// the input), as slash paths relative to runDir (i.e. under runs/<id>/).
+// collectArtifacts lists the artifact files a step wrote in its dir, as slash
+// paths relative to runDir (i.e. under runs/<id>/). The two CONTRACT channels are
+// excluded: with.json (the input config) and metrics.json (already parsed into
+// run.Metrics — it's the metrics channel, not an artifact).
 func collectArtifacts(stepDir, runDir string) ([]string, error) {
 	entries, err := os.ReadDir(stepDir)
 	if err != nil {
@@ -111,7 +113,7 @@ func collectArtifacts(stepDir, runDir string) ([]string, error) {
 	}
 	var arts []string
 	for _, ent := range entries {
-		if ent.IsDir() || ent.Name() == "with.json" {
+		if ent.IsDir() || ent.Name() == "with.json" || ent.Name() == "metrics.json" {
 			continue
 		}
 		rel, err := filepath.Rel(runDir, filepath.Join(stepDir, ent.Name()))
