@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# test/echo — process-level fake step-type for metis#1 M2's end-to-end test.
+# Proves the real os/exec StepExecutor (cmd/metis) works without any M3 Python.
+#
+# Files+subprocess contract (what every real step-type will honor):
+#   - cwd == the step dir; $METIS_STEP_DIR / $METIS_RUN_DIR / $METIS_STEP_ID set.
+#   - read with.json (the step's `with` config), do work, then write metrics.json
+#     (a flat {name: number} object) plus any artifact files into the step dir.
+set -euo pipefail
+d="${METIS_STEP_DIR:-$PWD}"
+cp "$d/with.json" "$d/echoed.json"          # echo the config back out as an artifact
+printf '{"echoed": 1}\n' > "$d/metrics.json" # emit one trivial numeric metric
