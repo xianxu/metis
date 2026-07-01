@@ -1,11 +1,12 @@
 ---
 id: 000001
-status: open
+status: working
 deps: []
 github_issue:
 created: 2026-07-01
 updated: 2026-07-01
 estimate_hours:
+started: 2026-07-01T13:51:21-07:00
 ---
 
 # metis ML-workbench core: experiment datatype + step-runner + Dataset/Split/cv-split + step-types (Titanic skeleton)
