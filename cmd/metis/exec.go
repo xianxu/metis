@@ -57,7 +57,9 @@ func (e execStep) Execute(step experiment.Step, runDir string) (experiment.StepR
 		"METIS_STEP_ID="+step.ID,
 	)
 	if combined, err := cmd.CombinedOutput(); err != nil {
-		return experiment.StepResult{}, fmt.Errorf("step %s (%s) failed: %w\n%s", step.ID, exe, err, combined)
+		// Runner.Run already prefixes `step %q:`; name the executable, not the id
+		// again, to avoid a doubled "step first: step first" prefix.
+		return experiment.StepResult{}, fmt.Errorf("exec %s: %w\n%s", exe, err, combined)
 	}
 
 	metrics, err := readMetrics(filepath.Join(stepDir, "metrics.json"))
