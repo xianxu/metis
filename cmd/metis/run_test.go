@@ -118,6 +118,61 @@ func TestRunExperiment_RelativePath(t *testing.T) {
 	}
 }
 
+// TestRunExperiment_FailedStepStillWritesLedger exercises the ledger-on-failure
+// branch: a step that exits non-zero (via `with: {fail: true}` in the run-fail
+// fixture) must still produce runs/<id>/run.json with status "failed" and a
+// `## Runs` bullet — every attempt that began execution is recorded — while
+// runExperiment surfaces the error. Fixture copied into t.TempDir() first.
+func TestRunExperiment_FailedStepStillWritesLedger(t *testing.T) {
+	root := repoRoot(t)
+	src := filepath.Join(root, "testdata", "experiment", "run-fail.md")
+	b, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	expPath := filepath.Join(dir, "run-fail.md")
+	if err := os.WriteFile(expPath, b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	run, err := runExperiment(runOpts{
+		expPath:  expPath,
+		runID:    "run-001",
+		stepPath: []string{filepath.Join(root, "testdata", "steps")},
+		now:      func() time.Time { return time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC) },
+		out:      io.Discard,
+	})
+	if err == nil {
+		t.Fatal("runExperiment: want an error from the failing step, got nil")
+	}
+	if run.Status != "failed" {
+		t.Errorf("returned run status = %q; want failed", run.Status)
+	}
+
+	// runs/run-001/run.json written with status=failed.
+	rb, err := os.ReadFile(filepath.Join(dir, "runs", "run-001", "run.json"))
+	if err != nil {
+		t.Fatalf("read run.json (failed run should still be recorded): %v", err)
+	}
+	var got experiment.Run
+	if err := json.Unmarshal(rb, &got); err != nil {
+		t.Fatalf("parse run.json: %v", err)
+	}
+	if got.ID != "run-001" || got.Experiment != "run-fail" || got.Status != "failed" {
+		t.Errorf("run.json wrong: %+v", got)
+	}
+
+	// `## Runs` bullet appended for the failed run.
+	updated, err := os.ReadFile(expPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(updated), "- run-001 — failed") {
+		t.Errorf("`## Runs` failed-run line not appended:\n%s", updated)
+	}
+}
+
 // TestRunExperiment_RejectsInvalidAtRunTime is the execution-time enforcement
 // test: a semantically-invalid experiment (a cycle — shape-valid, so CUE accepts
 // it) is rejected by `metis run` BEFORE any step runs, closing the SHAPE-only gap

@@ -9,4 +9,10 @@
 set -euo pipefail
 d="${METIS_STEP_DIR:-$PWD}"
 cp "$d/with.json" "$d/echoed.json"          # echo the config back out as an artifact
+# `with: {fail: true}` makes the step exit non-zero, exercising the runner's
+# failed-run ledger branch (run.json status=failed + ## Runs still written).
+if grep -qE '"fail"[[:space:]]*:[[:space:]]*true' "$d/with.json"; then
+  echo "test/echo: fail flag set in with.json" >&2
+  exit 1
+fi
 printf '{"echoed": 1}\n' > "$d/metrics.json" # emit one trivial numeric metric
