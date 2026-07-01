@@ -74,6 +74,45 @@ func TestRunExperiment_EndToEnd(t *testing.T) {
 	}
 }
 
+// TestRunExperiment_RelativePath is the regression test for the relative-path
+// bug: invoked as a user actually would — cd into the workspace, pass a BARE
+// relative filename — the run must still execute end-to-end. The absolute
+// t.TempDir() path in TestRunExperiment_EndToEnd masked this: unless runDir is
+// absolutized, the injected METIS_STEP_DIR is relative and the child (whose cwd
+// IS the step dir) resolves $METIS_STEP_DIR/with.json under itself and fails. We
+// assert the step's declared output artifact (echoed.json) actually exists.
+func TestRunExperiment_RelativePath(t *testing.T) {
+	root := repoRoot(t)
+	src := filepath.Join(root, "testdata", "experiment", "run-echo.md")
+	b, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "run-echo.md"), b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir) // run from the workspace, like a real invocation
+
+	run, err := runExperiment(runOpts{
+		expPath:  "run-echo.md", // RELATIVE — the normal invocation
+		runID:    "run-rel",
+		stepPath: []string{filepath.Join(root, "testdata", "steps")},
+		now:      func() time.Time { return time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC) },
+		out:      io.Discard,
+	})
+	if err != nil {
+		t.Fatalf("runExperiment with a relative path: %v", err)
+	}
+	if run.Status != "ok" {
+		t.Fatalf("status = %q; want ok", run.Status)
+	}
+	echoed := filepath.Join(dir, "runs", "run-rel", "first", "echoed.json")
+	if _, err := os.Stat(echoed); err != nil {
+		t.Fatalf("step artifact %s not written (relative-path resolution broken): %v", echoed, err)
+	}
+}
+
 // TestRunExperiment_RejectsInvalidAtRunTime is the execution-time enforcement
 // test: a semantically-invalid experiment (a cycle — shape-valid, so CUE accepts
 // it) is rejected by `metis run` BEFORE any step runs, closing the SHAPE-only gap
