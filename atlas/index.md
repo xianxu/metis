@@ -12,7 +12,9 @@ identical on a non-Kaggle platform?* — if yes, it lives here.
   (metis#1 M1.)
 - [workflow/](workflow) — inherited ariadne workflow docs (symlink into the substrate).
 
-**Roadmap (metis#1):** M2 adds the Go step-runner (`metis run`) + the pure parse/validate
-core (the semantic DAG/`needs`/`uses` checks M1 deferred); M3 adds the Python data plane
-(Dataset/Schema/Split + `cv-split`/`train`/`predict` step-types over a files+subprocess
-contract). The end-to-end proof is kbench's Titanic walking skeleton (kbench#1).
+**Roadmap (metis#1):** M1 (experiment datatype) + M2 (Go step-runner: `cmd/metis run` +
+pure `pkg/experiment` `Parse`/`Validate`/`TopoSort`, semantics enforced on read, steps run
+as subprocesses over a `steps/<layer>/<steptype>` + files contract) **shipped**. **M3** adds
+the Python data plane (Dataset/Schema/Split + `cv-split`/`train`/`predict` step-types
+conforming to M2's step contract). The end-to-end proof is kbench's Titanic walking skeleton
+(kbench#1).
