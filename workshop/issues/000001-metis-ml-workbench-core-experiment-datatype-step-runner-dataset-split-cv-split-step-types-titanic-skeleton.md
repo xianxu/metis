@@ -58,7 +58,7 @@ M1 = the experiment datatype + CUE schema (`typed-data-prototype`); M2 = the Go 
 
 Durable plan with per-file/per-test detail: [`workshop/plans/000001-experiment-datatype-plan.md`](../plans/000001-experiment-datatype-plan.md). M1 is fully specced there; M2/M3 are sketched (re-run `sdlc start-plan` before each). `ariadne#155` in the plan's References is a related tooling-gap note, **not** a blocker — metis ships its own `base.manifest` and compiles cleanly.
 
-- [x] M1 — `experiment`/`pipeline`/`step`/`run` datatypes + CUE-validated frontmatter (schema + a fixture experiment)
+- [ ] M1 — `experiment`/`pipeline`/`step`/`run` datatypes + CUE-validated frontmatter (schema + a fixture experiment)
 - [ ] M2 — Go step-runner: read experiment, run steps sequentially via subprocess, append a Run record; plain streaming output
 - [ ] M3 — Dataset/Schema/cv-split Python core + step-types (`cv-split`, `train`, `predict`) with unit tests + the files+subprocess contract (`metrics.json`/`predictions.csv`)
 
