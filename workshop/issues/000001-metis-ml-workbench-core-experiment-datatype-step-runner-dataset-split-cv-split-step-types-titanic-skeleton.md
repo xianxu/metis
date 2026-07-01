@@ -58,7 +58,7 @@ M1 = the experiment datatype + CUE schema (`typed-data-prototype`); M2 = the Go 
 
 Durable plan with per-file/per-test detail: [`workshop/plans/000001-experiment-datatype-plan.md`](../plans/000001-experiment-datatype-plan.md). M1 is fully specced there; M2/M3 are sketched (re-run `sdlc start-plan` before each). `ariadne#155` in the plan's References is a related tooling-gap note, **not** a blocker — metis ships its own `base.manifest` and compiles cleanly.
 
-- [ ] M1 — `experiment`/`pipeline`/`step`/`run` datatypes + CUE-validated frontmatter (schema + a fixture experiment)
+- [x] M1 — `experiment`/`pipeline`/`step`/`run` datatypes + CUE-validated frontmatter (schema + a fixture experiment)
 - [ ] M2 — Go step-runner: read experiment, run steps sequentially via subprocess, append a Run record; plain streaming output
 - [ ] M3 — Dataset/Schema/cv-split Python core + step-types (`cv-split`, `train`, `predict`) with unit tests + the files+subprocess contract (`metrics.json`/`predictions.csv`)
 
@@ -67,3 +67,5 @@ Durable plan with per-file/per-test detail: [`workshop/plans/000001-experiment-d
 ### 2026-07-01
 
 Created from the `kaggle-ml-base-layer` project brainstorm (brain `data/project/kaggle-ml-base-layer.md`). This is the base of the substrate chain `kbench → kaggle → metis → ariadne`. Explicitly deferred to later projects: TUI polish, caching/DAG-skip, DVC backend, pipeline parameterization (`{param}` — the Run record already captures bound values), and good modeling.
+
+**M1 shipped.** The experiment noun is modeled **once** as the CUE schema `#Experiment`/`#Step`/`#Status`/`#Run` (`construct/vocabulary/experiment.cue`), with consumers deriving from it (`ARCH-DRY`): the `xx-datatype` authoring skill (`construct/datatype/experiment.md`, registered in the merged skill), the `vocabulary validate-instance --type experiment` structural validator, and (M2) the Go types. Enforced (`ARCH-PURPOSE`) by `scripts/merge-checks.d/experiment-validate.sh` — it skips `testdata/` fixtures and was proven to both reject `invalid-bad-status` (`status "running"` not in enum) and pass clean by default. M1 owns **shape only**; the semantic checks (DAG acyclicity, `needs` resolution, `uses` format) are deferred to M2's pure Go validator (`ARCH-PURE` — M1 has no business logic to bury, the seam is "author files → run the inherited validator"). Reused ariadne's `datatype`/`vocabulary` compilers unchanged; the fresh-bootstrap tooling gap they exposed is tracked in `ariadne#155` (not a blocker here).
