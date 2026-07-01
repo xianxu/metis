@@ -268,3 +268,47 @@ The post-M1 boundary review (sidecar: `workshop/plans/…-m1-review.md`) found t
 - **C1 (contract + silent-swallow).** The planned hook (`base="${MERGE_CHECK_BASE:-origin/main}"` + hardcoded `HEAD`, scanned via `< <(git diff …)`) ignored `run-merge-checks.sh`'s `<base> <head>` positional args, and silently passed when the base didn't resolve (the `git diff` failure was swallowed by `set -e` inside the process substitution). Rewrote `experiment-validate.sh` to consume `$1`/`$2` and assign the changed-file list to a variable first, so an unresolvable base aborts loudly. Verified: `HEAD HEAD` → exit 0 (scopes nothing), bad base → `fatal: bad revision` exit 128, detection intact → exit 1.
 - **I1 (no automated fixture test).** Added `scripts/merge-checks.d/experiment-schema-selftest.sh` — an always-run (diff-independent) merge-check asserting `valid-baseline` → 0 and `invalid-bad-status` → 1, so a schema regression is caught even though `experiment-validate.sh` skips `testdata/`.
 - **Minor.** The frontmatter probe now parses the `---` fenced block (robust to reordered fields), superseding the earlier `head -5`/`head -8` snippets in Task 3.
+
+## Chunk 2: M2 — Go step-runner (supersedes the M2 sketch in "Later milestones")
+
+**Goal:** `metis run <experiment>` reads an experiment, validates it (the semantic checks M1 deferred), executes its steps in dependency order as subprocesses, and records a Run — the Go control plane over the (M3) Python data plane, **files + subprocess** between them. This is where "CUE-validated" becomes "actually runnable."
+
+### Core concepts
+
+#### Pure entities
+
+| Name | Lives in | Status |
+|------|----------|--------|
+| `Experiment` / `Step` / `Run` (Go structs) | `pkg/experiment/experiment.go` | new |
+| `Parse` | `pkg/experiment/experiment.go` | new |
+| `Validate` | `pkg/experiment/validate.go` | new |
+| `TopoSort` | `pkg/experiment/validate.go` | new |
+| `Runner.Run` (orchestration) | `pkg/experiment/run.go` | new |
+
+- **Experiment/Step/Run** — Go structs mirroring the CUE `#Experiment`/`#Step`/`#Run`. **ARCH-DRY tension (name it):** these restate the CUE shape. Mitigation: a test round-trips `testdata/experiment/valid-baseline.md` through `Parse` **and** asserts `vocabulary validate-instance` still accepts it — so the Go structs cannot silently drift from the CUE source. CUE stays the single *structural* source; Go adds only what CUE can't express.
+- **Parse(content) (Experiment, error)** — reuse ariadne `pkg/frontmatter.Split` (ARCH-DRY — do **not** re-implement fence parsing) + `yaml.v3` unmarshal of the frontmatter. Pure.
+- **Validate(Experiment) error** — the semantics M1 deferred (ARCH-PURPOSE): every `needs` id resolves to a real step, `uses` matches `^[a-z0-9-]+/[a-z0-9-]+$`, the graph is acyclic. Pure; returns a joined error listing all violations (`errors.Join`).
+- **TopoSort(Experiment) ([]Step, error)** — Kahn's algorithm over `needs`; execution order or a cycle error. Pure. Validate calls it for the acyclicity check (one implementation — ARCH-DRY).
+- **Runner.Run** — orchestrates Validate → TopoSort → execute-each → assemble Run. The ordering + wiring is pure/thin; the actual step execution is injected (below), so `Runner.Run` is unit-tested **with a fake executor, no subprocess** (the ARCH-PURE line).
+
+#### Integration points
+
+| Name | Lives in | Status | Wraps |
+|------|----------|--------|-------|
+| `StepExecutor` (interface) | `pkg/experiment/run.go` | new | the seam |
+| `execStep` (subprocess impl) | `cmd/metis/exec.go` | new | `os/exec` |
+| run-ledger writer | `pkg/experiment/run.go` | new | filesystem `runs/<id>/` |
+
+- **StepExecutor** — `Execute(step Step, dir string) (StepResult, error)`. The injected seam: `Runner.Run` takes a `StepExecutor`, so orchestration is testable with a fake; the real subprocess executor is the thin `cmd/metis` impl.
+- **execStep (cmd/metis)** — resolves `uses: <layer>/<steptype>` to an executable (M2 convention: `steps/<layer>/<steptype>` under the repo, `$METIS_STEP_PATH` override), invokes it with the run dir + the step's `with` config (a `with.json` in the step dir), captures exit + reads the step's `metrics.json`. Real step-types (`metis/cv-split` …) arrive in M3; M2 ships a **process-level fake step** (`testdata/steps/echo`) to exercise the real executor end-to-end (per the "model external services with a process-level fake" rule).
+- **run-ledger writer** — writes `runs/<id>/run.json` (`#Run` shape) + appends a `## Runs` line to the experiment. Thin IO.
+
+### Tasks (TDD — bite-sized; mirror M1's per-task commit rhythm)
+
+- **Task 1 — module.** Create `go.mod` (`module github.com/xianxu/metis`, `go 1.26`, `replace github.com/xianxu/ariadne => ../ariadne`). Verify `go build ./...` clean. Commit.
+- **Task 2 — types + Parse.** `pkg/experiment/experiment.go`: `Experiment`/`Step`/`Run` + `Parse` (frontmatter.Split + yaml.v3). Tests: parse `valid-baseline` → expected struct; **CUE-conformance round-trip** guard. Commit.
+- **Task 3 — Validate + TopoSort.** `pkg/experiment/validate.go`. Table-driven pure tests: dangling `needs` → err; cycle → err; bad `uses` → err; valid → topo order. Add `testdata/experiment/invalid-{cycle,dangling-needs}.md`. Commit.
+- **Task 4 — Runner + fake executor.** `pkg/experiment/run.go`: `StepExecutor` interface + `Runner.Run`. Test a 2-step experiment with a fake executor: both run in order, Run assembled, no subprocess. Commit.
+- **Task 5 — cmd/metis run + real subprocess.** `cmd/metis/{main,run,exec}.go` + `steps/`-resolution + `testdata/steps/echo` fake step. E2e test: `metis run <fixture>` → exit 0, `runs/<id>/run.json` written, `## Runs` appended. Commit.
+- **Task 6 — execution-time enforcement.** The runner Validates on read (semantic checks enforced at run time); note in the plan/atlas that this closes the M1 SHAPE-only gap. Commit.
+- **Task 7 — milestone-close M2.** Atlas update (`pkg/experiment` + runner surface, the `steps/` subprocess contract); `sdlc actual`; `--verified`; the boundary review. Fix Critical/Important before crossing.
