@@ -258,3 +258,13 @@ Expected: the auto-dispatched fresh-context review runs (window = branch point �
 - Datatype model to mirror: `ariadne/construct/datatype/project.md`
 - CUE + validation machinery: `ariadne/construct/vocabulary/{issue,pensive}.cue`, `ariadne/cmd/vocabulary/` (`validate-instance`), `ariadne/cmd/datatype/`, `ariadne/pkg/frontmatter`
 - Known gap in the compile tooling this project already filed: `ariadne#155`
+
+## Revisions
+
+### 2026-07-01 — M1 milestone review (FIX-THEN-SHIP → fixed)
+
+The post-M1 boundary review (sidecar: `workshop/plans/…-m1-review.md`) found the Task-3 enforcement merge-check defective; addressed before crossing the boundary:
+
+- **C1 (contract + silent-swallow).** The planned hook (`base="${MERGE_CHECK_BASE:-origin/main}"` + hardcoded `HEAD`, scanned via `< <(git diff …)`) ignored `run-merge-checks.sh`'s `<base> <head>` positional args, and silently passed when the base didn't resolve (the `git diff` failure was swallowed by `set -e` inside the process substitution). Rewrote `experiment-validate.sh` to consume `$1`/`$2` and assign the changed-file list to a variable first, so an unresolvable base aborts loudly. Verified: `HEAD HEAD` → exit 0 (scopes nothing), bad base → `fatal: bad revision` exit 128, detection intact → exit 1.
+- **I1 (no automated fixture test).** Added `scripts/merge-checks.d/experiment-schema-selftest.sh` — an always-run (diff-independent) merge-check asserting `valid-baseline` → 0 and `invalid-bad-status` → 1, so a schema regression is caught even though `experiment-validate.sh` skips `testdata/`.
+- **Minor.** The frontmatter probe now parses the `---` fenced block (robust to reordered fields), superseding the earlier `head -5`/`head -8` snippets in Task 3.
