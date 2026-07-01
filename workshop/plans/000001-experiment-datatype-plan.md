@@ -269,6 +269,13 @@ The post-M1 boundary review (sidecar: `workshop/plans/…-m1-review.md`) found t
 - **I1 (no automated fixture test).** Added `scripts/merge-checks.d/experiment-schema-selftest.sh` — an always-run (diff-independent) merge-check asserting `valid-baseline` → 0 and `invalid-bad-status` → 1, so a schema regression is caught even though `experiment-validate.sh` skips `testdata/`.
 - **Minor.** The frontmatter probe now parses the `---` fenced block (robust to reordered fields), superseding the earlier `head -5`/`head -8` snippets in Task 3.
 
+### 2026-07-01 — M2 boundary review (REWORK → FIX-THEN-SHIP → fixed)
+
+M2's Go step-runner needed two review cycles before crossing:
+- **REWORK (Critical).** The subprocess executor injected `METIS_STEP_DIR`/`METIS_RUN_DIR` as *relative* paths while setting the child cwd to that same dir, so every step failed under the natural `metis run <relative-path>` invocation — masked by an e2e test feeding an absolute `t.TempDir()` path. Fixed: absolutize `runDir` at the runner boundary + `TestRunExperiment_RelativePath` (chdir + bare filename). Also excluded `metrics.json` from the `run.json` artifact set, mapped the step-executable contract into `atlas/experiment.md` (`## Surface (M2)`), and deduped the doubled step-id error prefix.
+- **FIX-THEN-SHIP (2 Important).** (I1) `Validate`/`TopoSort` falsely reported a cycle for a duplicated predecessor (`needs: [a, a]`) — in-degree counted per edge, relaxation per dependent step; fixed by deduping each step's `needs` into a set used for both (self-edges dropped). (I2) added an e2e for the `status:"failed"` ledger-on-failure branch (a `with:{fail:true}` step → `run.json` `failed` + `## Runs` bullet).
+- Minor items (non-recursive `collectArtifacts`, `#Run` CUE drift-guard, `findRepoRoot`-3×) deferred to M3.
+
 ## Chunk 2: M2 — Go step-runner (supersedes the M2 sketch in "Later milestones")
 
 **Goal:** `metis run <experiment>` reads an experiment, validates it (the semantic checks M1 deferred), executes its steps in dependency order as subprocesses, and records a Run — the Go control plane over the (M3) Python data plane, **files + subprocess** between them. This is where "CUE-validated" becomes "actually runnable."
