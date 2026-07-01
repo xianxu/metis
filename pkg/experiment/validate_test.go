@@ -55,6 +55,14 @@ func TestValidate(t *testing.T) {
 			}},
 			wantErr: "duplicate",
 		},
+		{
+			name: "duplicate needs edge is not a cycle",
+			exp: Experiment{Steps: []Step{
+				{ID: "a", Uses: "metis/a"},
+				{ID: "b", Uses: "metis/b", Needs: []string{"a", "a"}},
+			}},
+			wantErr: "", // acyclic — the repeated edge must collapse to one
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -121,6 +129,25 @@ func TestTopoSort(t *testing.T) {
 	cyc := mustParse(t, "invalid-cycle.md")
 	if _, err := TopoSort(cyc); err == nil {
 		t.Fatal("TopoSort accepted a cyclic experiment; want error")
+	}
+
+	// A duplicate needs edge must NOT be read as a cycle (regression: in-degree
+	// counted duplicate needs while relaxation decremented once per dependent, so
+	// needs: [a, a] left b stuck at in-degree 1 and looked cyclic).
+	dup := Experiment{Steps: []Step{
+		{ID: "a", Uses: "metis/a"},
+		{ID: "b", Uses: "metis/b", Needs: []string{"a", "a"}},
+	}}
+	dupOrder, err := TopoSort(dup)
+	if err != nil {
+		t.Fatalf("TopoSort(duplicate needs): %v", err)
+	}
+	if len(dupOrder) != 2 || dupOrder[0].ID != "a" || dupOrder[1].ID != "b" {
+		ids := make([]string, len(dupOrder))
+		for i, s := range dupOrder {
+			ids[i] = s.ID
+		}
+		t.Fatalf("duplicate-needs order = %v; want [a b]", ids)
 	}
 }
 

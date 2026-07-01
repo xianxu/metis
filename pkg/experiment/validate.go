@@ -66,16 +66,26 @@ func TopoSort(exp Experiment) ([]Step, error) {
 		known[s.ID] = true
 	}
 
+	// deps[i] is the SET of distinct step ids exp.Steps[i] depends on — deduped,
+	// self-edges dropped, and edges to unknown ids ignored (Validate reports those
+	// separately). Deduping is load-bearing: in-degree counts these edges and
+	// relaxation decrements one per edge, so counting a repeated `needs: [a, a]`
+	// twice while relaxing once would strand the step and misreport a cycle.
+	deps := make([]map[string]bool, len(exp.Steps))
 	indeg := make(map[string]int, len(exp.Steps))
-	for _, s := range exp.Steps {
+	for i, s := range exp.Steps {
+		set := make(map[string]bool, len(s.Needs))
+		for _, n := range s.Needs {
+			if n == s.ID || !known[n] {
+				continue // self-edge or dangling need — not a topo edge
+			}
+			set[n] = true
+		}
+		deps[i] = set
 		if _, seen := indeg[s.ID]; !seen {
 			indeg[s.ID] = 0
 		}
-		for _, n := range s.Needs {
-			if known[n] {
-				indeg[s.ID]++
-			}
-		}
+		indeg[s.ID] += len(set)
 	}
 
 	// Seed the queue with in-degree-0 steps in declaration order (determinism).
@@ -91,9 +101,10 @@ func TopoSort(exp Experiment) ([]Step, error) {
 		cur := queue[0]
 		queue = queue[1:]
 		order = append(order, cur)
-		// Relax dependents, scanning in declaration order for stable output.
-		for _, s := range exp.Steps {
-			if !dependsOn(s, cur.ID) {
+		// Relax dependents, scanning in declaration order for stable output. deps
+		// is a set, so each edge relaxes exactly once — matching the in-degree count.
+		for i, s := range exp.Steps {
+			if !deps[i][cur.ID] {
 				continue
 			}
 			indeg[s.ID]--
@@ -117,14 +128,4 @@ func TopoSort(exp Experiment) ([]Step, error) {
 		return nil, fmt.Errorf("cycle in step dependencies among: %v", stuck)
 	}
 	return order, nil
-}
-
-// dependsOn reports whether s lists id in its needs.
-func dependsOn(s Step, id string) bool {
-	for _, n := range s.Needs {
-		if n == id {
-			return true
-		}
-	}
-	return false
 }
