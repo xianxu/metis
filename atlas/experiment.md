@@ -33,7 +33,9 @@ in metis; metis carries only test fixtures. Each layer contributes step types
 
 CUE owns **shape** — types, enums, required fields, the `steps` list-of-structs. The
 **semantic** checks — `needs` resolves to a real step id, the graph is acyclic, `uses` is
-`<layer>/<steptype>` — are not expressible in `cue vet` and land with M2's **pure Go
-validator** (`pkg/experiment`), which the runner invokes on read (execution-time
-enforcement). This is the ARCH-PURE seam: M1 is declarative config validated by a
-subprocess; the pure logic arrives with the runner.
+`<layer>/<steptype>` — are not expressible in `cue vet`. As of **M2** they live in the
+**pure Go validator** `pkg/experiment.Validate` (with `TopoSort` for acyclicity), and
+`metis run` invokes it **on read** — a cyclic or dangling-`needs` experiment is rejected
+before any step executes, closing the SHAPE-only gap M1 deferred (execution-time
+enforcement). This is the ARCH-PURE seam: the parse/validate/orchestrate core is pure;
+the subprocess step execution + run-ledger are the thin `cmd/metis` IO layer.

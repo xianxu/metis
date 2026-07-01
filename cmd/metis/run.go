@@ -54,9 +54,6 @@ func runExperiment(o runOpts) (experiment.Run, error) {
 	}
 	baseDir := filepath.Dir(o.expPath)
 	runDir := filepath.Join(baseDir, "runs", runID)
-	if err := os.MkdirAll(runDir, 0o755); err != nil {
-		return experiment.Run{}, err
-	}
 
 	runner := experiment.Runner{
 		Exec: execStep{stepPath: o.stepPath, out: out},
@@ -65,8 +62,17 @@ func runExperiment(o runOpts) (experiment.Run, error) {
 	fmt.Fprintf(out, "metis: run %s of experiment %q\n", runID, exp.ID)
 	run, runErr := runner.Run(exp, runID, runDir)
 
-	// Write the ledger even on failure (the Run captures status=failed) so every
-	// attempt is recorded — the record of truth is runs/<id>/run.json.
+	// Execution-time enforcement: Runner.Run validates the experiment BEFORE any
+	// step executes, so a semantically-invalid experiment (dangling needs, bad
+	// uses, a cycle) is rejected here — closing the SHAPE-only gap M1 left. Such a
+	// rejection never started a run (run.Started is empty), so surface the error
+	// without writing a bogus ledger or touching the ## Runs log.
+	if run.Started == "" {
+		return run, runErr
+	}
+
+	// Write the ledger even on a mid-run step failure (status=failed) so every
+	// attempt that began is recorded — the record of truth is runs/<id>/run.json.
 	if err := writeRunJSON(runDir, run); err != nil {
 		return run, err
 	}
@@ -81,6 +87,9 @@ func runExperiment(o runOpts) (experiment.Run, error) {
 }
 
 func writeRunJSON(runDir string, run experiment.Run) error {
+	if err := os.MkdirAll(runDir, 0o755); err != nil {
+		return err
+	}
 	b, err := json.MarshalIndent(run, "", "  ")
 	if err != nil {
 		return err

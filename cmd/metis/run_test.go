@@ -73,3 +73,46 @@ func TestRunExperiment_EndToEnd(t *testing.T) {
 		t.Errorf("`## Runs` line not appended:\n%s", updated)
 	}
 }
+
+// TestRunExperiment_RejectsInvalidAtRunTime is the execution-time enforcement
+// test: a semantically-invalid experiment (a cycle — shape-valid, so CUE accepts
+// it) is rejected by `metis run` BEFORE any step runs, closing the SHAPE-only gap
+// M1 deferred. No ledger and no `## Runs` line are written for a rejected run.
+func TestRunExperiment_RejectsInvalidAtRunTime(t *testing.T) {
+	root := repoRoot(t)
+	src := filepath.Join(root, "testdata", "experiment", "invalid-cycle.md")
+	b, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	expPath := filepath.Join(dir, "invalid-cycle.md")
+	if err := os.WriteFile(expPath, b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = runExperiment(runOpts{
+		expPath:  expPath,
+		runID:    "run-001",
+		stepPath: []string{filepath.Join(root, "testdata", "steps")},
+		now:      func() time.Time { return time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC) },
+		out:      io.Discard,
+	})
+	if err == nil {
+		t.Fatal("runExperiment accepted a cyclic experiment; want a validation error")
+	}
+	if !strings.Contains(err.Error(), "cycle") {
+		t.Errorf("error = %q; want it to mention the cycle", err)
+	}
+	// No ledger written and the source untouched (no ## Runs bullet appended).
+	if _, statErr := os.Stat(filepath.Join(dir, "runs")); statErr == nil {
+		t.Error("a runs/ dir was created for a rejected experiment; want none")
+	}
+	after, err := os.ReadFile(expPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(after), "- run-001") {
+		t.Errorf("a ## Runs line was appended for a rejected experiment:\n%s", after)
+	}
+}
