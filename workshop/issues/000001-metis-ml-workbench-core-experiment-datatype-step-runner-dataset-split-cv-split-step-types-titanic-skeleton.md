@@ -5,7 +5,7 @@ deps: []
 github_issue:
 created: 2026-07-01
 updated: 2026-07-01
-estimate_hours: 16
+estimate_hours: 6
 started: 2026-07-01T13:51:21-07:00
 ---
 
@@ -36,6 +36,23 @@ Design from the 2026-07-01 brainstorm. **Polyglot by seam**: a Go control plane 
 - Dataset / Schema / Split(cv-split) + `cv-split`/`train`/`predict` step-types exist with **colocated unit tests** (PURE-majority core).
 - The experiment/pipeline/step/run frontmatter is CUE-validated.
 - Exercised end-to-end by kbench#1's Titanic thread reaching a local CV score through this runner.
+
+## Estimate
+
+```estimate
+model: estimate-logic-v3.1
+familiarity: 1.0
+design-buffer: 0.30
+item: typed-data-prototype   design=0.4 impl=0.8
+item: greenfield-go-module   design=0.5 impl=1.5
+item: greenfield-go-module   design=0.4 impl=1.5
+item: milestone-review       design=0.0 impl=0.2
+item: milestone-review       design=0.0 impl=0.2
+item: milestone-review       design=0.0 impl=0.2
+total: 6.09
+```
+
+M1 = the experiment datatype + CUE schema (`typed-data-prototype`); M2 = the Go step-runner + `pkg/experiment` (`greenfield-go-module`); M3 = the Python data-plane step-types + Dataset/Schema/Split (`greenfield-go-module` as the closest proxy — the closed vocab has no Python primitive). Three `milestone-review` items for the M1/M2/M3 boundaries. AI-paired ship-wall-clock (v3.1); provisional — the calibration source flagged stale and metis has no local close history yet.
 
 ## Plan
 
