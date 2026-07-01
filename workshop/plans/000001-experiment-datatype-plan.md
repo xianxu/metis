@@ -319,3 +319,53 @@ M2's Go step-runner needed two review cycles before crossing:
 - **Task 5 — cmd/metis run + real subprocess.** `cmd/metis/{main,run,exec}.go` + `steps/`-resolution + `testdata/steps/echo` fake step. E2e test: `metis run <fixture>` → exit 0, `runs/<id>/run.json` written, `## Runs` appended. Commit.
 - **Task 6 — execution-time enforcement.** The runner Validates on read (semantic checks enforced at run time); note in the plan/atlas that this closes the M1 SHAPE-only gap. Commit.
 - **Task 7 — milestone-close M2.** Atlas update (`pkg/experiment` + runner surface, the `steps/` subprocess contract); `sdlc actual`; `--verified`; the boundary review. Fix Critical/Important before crossing.
+
+## Chunk 3: M3 — Python data plane (Dataset/Schema/Split + cv-split/train/predict step-types)
+
+**Goal:** the real `metis/*` step-types the M2 runner invokes — a **pure Python numeric core** (`Schema`/`Dataset`/`cv_folds`/`train`/`predict`) wrapped by **thin step-executables** honoring M2's step contract (`with.json` in; `metrics.json` + artifacts out; `$METIS_STEP_DIR`/`$METIS_RUN_DIR` env). Completes metis#1: `metis run` a toy pipeline end-to-end to a real CV score.
+
+**Env:** a `metis` Python package via **uv** + `pyproject.toml` (deps: `pandas`, `scikit-learn`, `pyarrow`); hermetic. Step-executables shell to `uv run --project <root> python -m metis.steps.<type>`.
+
+### Core concepts
+
+#### Pure entities (numeric core — pytested, no IO)
+
+| Name | Lives in | Status |
+|------|----------|--------|
+| `Schema` | `metis/schema.py` | new |
+| `Dataset` | `metis/dataset.py` | new |
+| `cv_folds` | `metis/split.py` | new |
+| `train` / `predict` | `metis/model.py` | new |
+
+- **Schema** — columns + roles (`id`/`feature`/`target`/`weight`) + dtypes; the Python mirror of the experiment's data model. Pure; `feature_cols()`/`target_col()`. Serialized as `schema.json`.
+- **Dataset** — `{schema, train_df, test_df, provenance}` (pandas). The canonical form Adapters convert into; a pure data structure (load/save is `metis.io`, thin). Modality-agnostic envelope, **tabular loaders now**.
+- **cv_folds(df, k, stratify_col, seed) → fold assignments** — deterministic k-fold (`StratifiedKFold` when `stratify` set, else `KFold`), seeded; disjoint + covering. Pure (sklearn called, but IO-free + deterministic). This is `Split`/cv-split.
+- **train(X, y, model, seed) → estimator** + **predict(estimator, X) → array** — sklearn `logreg`/`rf` baseline; deterministic given seed. Pure.
+
+#### Integration points (thin IO)
+
+| Name | Lives in | Status | Wraps |
+|------|----------|--------|-------|
+| `metis.io` (contract) | `metis/io.py` | new | the M2 run-dir/env contract |
+| `metis.steps.{cv_split,train,predict}` | `metis/steps/` | new | pure core + `metis.io` |
+| `steps/metis/{cv-split,train,predict}` | `steps/metis/` | new | `uv run … python -m metis.steps.X` |
+
+- **metis.io** — the ONE place M2's contract is encoded (ARCH-DRY): reads `with.json`, `$METIS_STEP_DIR`/`$METIS_RUN_DIR`, and upstream artifacts at `$METIS_RUN_DIR/<step-id>/<file>` (step id from `with`); writes `metrics.json` + artifact files. Tested against a temp run dir.
+- **steps/metis/&lt;type&gt;** — an executable shell wrapper that resolves the metis root from its own path and `exec uv run --project "$ROOT" python -m metis.steps.<type>` — the hermetic bridge from the Go runner. (Runs with cwd = the step dir, so it must resolve `$ROOT` from `$0`, not cwd.)
+- **metis.steps.&lt;type&gt;** — thin entrypoint: `metis.io` → pure core → `metis.io`. `cv_split`: load Dataset, `cv_folds`, write `folds.json` + `metrics.json{k}`. `train`: load Dataset + folds, per-fold train/score → `metrics.json{cv_score}` + fit-on-all → `model.pkl`. `predict`: load model + `Dataset.test` → `predictions.csv`.
+
+### Tasks (TDD)
+
+- **Task 1 — uv env.** `pyproject.toml` + `uv` (pandas, scikit-learn, pyarrow); `uv run python -c "import metis"` clean. If `uv` is unavailable in the env, STOP and report (hermetic uv is the point). Commit.
+- **Task 2 — Schema + Dataset + io load/save.** `metis/{schema,dataset,io}.py` + a **toy** fixture Dataset under `testdata/dataset/toy/` (platform-independent — NOT titanic; that's kbench#1). pytest: schema roles; dataset load/save round-trip. Commit.
+- **Task 3 — cv_folds.** `metis/split.py`. pytest: k folds, stratified balance, deterministic under seed, disjoint+covering. Commit.
+- **Task 4 — train/predict.** `metis/model.py`. pytest: fit+predict shapes, deterministic, `logreg` + `rf`. Commit.
+- **Task 5 — contract IO + step entrypoints + wrappers.** `metis/io.py` + `metis/steps/{cv_split,train,predict}.py` + executable `steps/metis/*` wrappers. pytest each entrypoint against a temp run dir (contract in/out). Commit.
+- **Task 6 — e2e.** A toy experiment (`testdata/experiment/toy-pipeline.md`: `cv-split → train → predict` on the toy Dataset) run via the built `metis run`; assert `metrics.json` carries a `cv_score`, `predictions.csv` written, `run.json` ok. **This is the issue Done-when** (`metis run` end-to-end to a CV score). Commit.
+- **Task 7 — milestone-close M3** (atlas `## Surface (M3)`: the data plane + step-types + the upstream-artifact convention; `sdlc actual`; `--verified`; boundary review), then **`sdlc close --issue 1`** (whole issue — all three milestones done).
+
+### Notes for the implementer
+- **ARCH-PURE:** `cv_folds`/`train`/`predict` are pure + pytested on in-memory DataFrames; `metis.io` + the wrappers are the only IO. Don't bury fold/model logic in the entrypoints.
+- **ARCH-DRY:** `metis.io` is the single encoding of M2's contract; all three steps use it.
+- **ARCH-PURPOSE:** the step-types must *actually* train + score with real sklearn (the Done-when is a real CV score end-to-end), not stub.
+- **Data-flow:** a step reaches an upstream step's outputs via `$METIS_RUN_DIR/<upstream-step-id>/<file>`; the upstream step id comes from the step's `with` (e.g. `train` `with:{dataset: <adapt-id>, folds: <cv-split-id>}`). The toy experiment wires these explicitly.
