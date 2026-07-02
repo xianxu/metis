@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 
 	"github.com/xianxu/metis/pkg/experiment"
@@ -109,25 +111,37 @@ func readMetrics(path string) (map[string]float64, error) {
 	return m, nil
 }
 
-// collectArtifacts lists the artifact files a step wrote in its dir, as slash
-// paths relative to runDir (i.e. under runs/<id>/). The two CONTRACT channels are
-// excluded: with.json (the input config) and metrics.json (already parsed into
-// run.Metrics — it's the metrics channel, not an artifact).
+// collectArtifacts lists the artifact files a step wrote in its dir — recursively,
+// so a step that writes nested outputs (e.g. sub/*.parquet) has them all recorded —
+// as slash paths relative to runDir (i.e. under runs/<id>/). The two CONTRACT
+// channels are excluded, but only at the step-dir TOP level: with.json (the input
+// config) and metrics.json (already parsed into run.Metrics — the metrics channel,
+// not an artifact). A file a step happens to write at a nested path like
+// sub/metrics.json is a genuine artifact. Sorted for a deterministic ledger.
 func collectArtifacts(stepDir, runDir string) ([]string, error) {
-	entries, err := os.ReadDir(stepDir)
+	var arts []string
+	err := filepath.WalkDir(stepDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if filepath.Dir(path) == stepDir {
+			if name := d.Name(); name == "with.json" || name == "metrics.json" {
+				return nil // reserved contract channels (top level only)
+			}
+		}
+		rel, err := filepath.Rel(runDir, path)
+		if err != nil {
+			return err
+		}
+		arts = append(arts, filepath.ToSlash(rel))
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	var arts []string
-	for _, ent := range entries {
-		if ent.IsDir() || ent.Name() == "with.json" || ent.Name() == "metrics.json" {
-			continue
-		}
-		rel, err := filepath.Rel(runDir, filepath.Join(stepDir, ent.Name()))
-		if err != nil {
-			return nil, err
-		}
-		arts = append(arts, filepath.ToSlash(rel))
-	}
+	sort.Strings(arts)
 	return arts, nil
 }

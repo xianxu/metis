@@ -4,6 +4,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -45,5 +46,37 @@ func TestExecStep_InjectsEnv(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("env.txt missing %q; got:\n%s", want, got)
 		}
+	}
+}
+
+// TestCollectArtifacts_RecursiveExcludesReserved covers the M2-deferred fix: the
+// collector now recurses into subdirectories, and excludes with.json/metrics.json
+// only at the step-dir TOP level (a nested sub/metrics.json is a real artifact).
+func TestCollectArtifacts_RecursiveExcludesReserved(t *testing.T) {
+	runDir := t.TempDir()
+	stepDir := filepath.Join(runDir, "s")
+	if err := os.MkdirAll(filepath.Join(stepDir, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writes := map[string]string{
+		"with.json":        "{}", // reserved (top level) — excluded
+		"metrics.json":     "{}", // reserved (top level) — excluded
+		"top.txt":          "x",  // artifact
+		"sub/nested.csv":   "y",  // artifact (recursion)
+		"sub/metrics.json": "{}", // artifact (nested — NOT reserved)
+	}
+	for rel, body := range writes {
+		if err := os.WriteFile(filepath.Join(stepDir, filepath.FromSlash(rel)), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	arts, err := collectArtifacts(stepDir, runDir)
+	if err != nil {
+		t.Fatalf("collectArtifacts: %v", err)
+	}
+	want := []string{"s/sub/metrics.json", "s/sub/nested.csv", "s/top.txt"}
+	if !reflect.DeepEqual(arts, want) {
+		t.Errorf("artifacts = %v; want %v", arts, want)
 	}
 }

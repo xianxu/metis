@@ -2,26 +2,23 @@ package main
 
 import (
 	"os"
-	"path/filepath"
 	"testing"
+
+	"github.com/xianxu/metis/internal/repo"
 )
 
-// repoRoot walks up from the test's cwd to the nearest go.mod (the metis root),
-// so the e2e test can address testdata/ regardless of where `go test` runs.
+// repoRoot returns the metis module root (nearest ancestor go.mod), so tests can
+// address testdata/ regardless of where `go test` runs. Thin wrapper over the
+// shared repo.Root (ARCH-DRY — one walk implementation).
 func repoRoot(t *testing.T) string {
 	t.Helper()
-	dir, err := os.Getwd()
+	wd, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
 	}
-	for {
-		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-			return dir
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			t.Fatal("repoRoot: no go.mod found above cwd")
-		}
-		dir = parent
+	root, err := repo.Root(wd)
+	if err != nil {
+		t.Fatal(err)
 	}
+	return root
 }

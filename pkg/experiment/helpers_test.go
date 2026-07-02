@@ -4,28 +4,25 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/xianxu/metis/internal/repo"
 )
 
-// repoRoot walks up from the test's working directory (the package dir) to the
-// nearest ancestor holding go.mod — the metis repo root. Shared by the fixture
-// reader and the CUE-conformance drift guard so both address testdata/ and the
-// sibling ariadne/bin the same way regardless of where `go test` is invoked.
+// repoRoot returns the metis module root (nearest ancestor go.mod). Shared by the
+// fixture reader and the CUE-conformance drift guards so both address testdata/
+// and the sibling ariadne/bin the same way regardless of where `go test` runs.
+// Thin wrapper over the shared repo.Root (ARCH-DRY — one walk implementation).
 func repoRoot(t *testing.T) string {
 	t.Helper()
-	dir, err := os.Getwd()
+	wd, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
 	}
-	for {
-		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-			return dir
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			t.Fatal("repoRoot: no go.mod found above cwd")
-		}
-		dir = parent
+	root, err := repo.Root(wd)
+	if err != nil {
+		t.Fatal(err)
 	}
+	return root
 }
 
 // readFixture returns the contents of testdata/experiment/<name>.

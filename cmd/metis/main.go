@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/xianxu/metis/internal/repo"
 )
 
 func main() {
@@ -57,25 +59,10 @@ func stepPath() []string {
 	if v := os.Getenv("METIS_STEP_PATH"); v != "" {
 		return filepath.SplitList(v)
 	}
-	if root, err := findRepoRoot(); err == nil {
-		return []string{filepath.Join(root, "steps")}
+	if wd, err := os.Getwd(); err == nil {
+		if root, err := repo.Root(wd); err == nil {
+			return []string{filepath.Join(root, "steps")}
+		}
 	}
 	return []string{"steps"}
-}
-
-func findRepoRoot() (string, error) {
-	dir, err := os.Getwd()
-	if err != nil {
-		return "", err
-	}
-	for {
-		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-			return dir, nil
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return "", fmt.Errorf("no go.mod above cwd")
-		}
-		dir = parent
-	}
 }
