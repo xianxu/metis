@@ -8,13 +8,14 @@ identical on a non-Kaggle platform?* — if yes, it lives here.
 
 - [experiment datatype](experiment.md) — the reproducible pipeline noun: the CUE schema
   (`#Experiment`/`#Step`/`#Status`/`#Run`), the `xx-datatype` authoring prototype, the
-  `vocabulary validate-instance` structural validator, and the enforcement merge-check.
-  (metis#1 M1.)
+  `vocabulary validate-instance` structural validator, the enforcement merge-check (M1), the
+  Go step-runner (M2), and the Python data plane — Dataset/Schema/Split + `cv-split`/`train`/
+  `predict` step-types run hermetically via uv (M3).
 - [workflow/](workflow) — inherited ariadne workflow docs (symlink into the substrate).
 
-**Roadmap (metis#1):** M1 (experiment datatype) + M2 (Go step-runner: `cmd/metis run` +
-pure `pkg/experiment` `Parse`/`Validate`/`TopoSort`, semantics enforced on read, steps run
-as subprocesses over a `steps/<layer>/<steptype>` + files contract) **shipped**. **M3** adds
-the Python data plane (Dataset/Schema/Split + `cv-split`/`train`/`predict` step-types
-conforming to M2's step contract). The end-to-end proof is kbench's Titanic walking skeleton
-(kbench#1).
+**Roadmap (metis#1 — all milestones shipped):** M1 (experiment datatype), M2 (Go step-runner:
+`cmd/metis run` + pure `pkg/experiment` `Parse`/`Validate`/`TopoSort`, semantics enforced on
+read, steps run as subprocesses over a `steps/<layer>/<steptype>` + files contract), and M3
+(Python data plane: pure `metis/` core + thin `metis/io` contract + `cv-split`/`train`/`predict`
+entrypoints + uv env; `metis run` walks a toy pipeline to a real CV score). The end-to-end
+Kaggle proof is kbench's Titanic walking skeleton (kbench#1), which builds on this base.

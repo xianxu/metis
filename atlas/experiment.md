@@ -50,7 +50,9 @@ if set, else `<repo-root>/steps`; first existing file wins.
 - **Working dir:** `runs/<run-id>/<step-id>/`, created by the runner; the child runs with
   its **cwd set to this dir**.
 - **Env:** `METIS_STEP_DIR` (that dir, absolute), `METIS_RUN_DIR` (the run dir, absolute),
-  `METIS_STEP_ID`.
+  `METIS_STEP_ID`, plus (M3) `METIS_EXP_DIR` (the experiment dir, absolute — the stable
+  anchor for experiment-relative inputs, since the run dir is ephemeral) and `METIS_SEED`
+  (the experiment's seed, so steps are reproducible without duplicating it into every `with`).
 - **In:** `with.json` — the step's `with` config, written into the step dir by the runner.
 - **Out:** an optional `metrics.json` (flat `{name: number}`, merged into `Run.metrics`) plus
   any **artifact files** the step writes into its dir. `with.json` and `metrics.json` are the
@@ -61,6 +63,41 @@ if set, else `<repo-root>/steps`; first existing file wins.
   summary appended to the experiment's `## Runs` section. A run rejected at validation time
   writes neither. M2 ships a process-level fake step (`testdata/steps/test/echo`) exercising
   this contract end-to-end; real `metis/*` step-types arrive in M3.
+
+## Surface (M3) — the Python data plane
+
+The real `metis/*` step-types the M2 runner invokes: a **pure Python numeric core**
+wrapped by **thin step-executables** honoring the contract above. Hermetic via **uv**
+(pinned CPython 3.12 — the system 3.14 has no scientific-stack wheels yet).
+
+- **Pure core — `metis/`** (pytested on in-memory frames, no IO — ARCH-PURE):
+  - `schema.py` `Schema` — column roles (`id`/`feature`/`target`/`weight`) + dtypes;
+    `feature_cols()`/`target_col()`/`id_col()`.
+  - `dataset.py` `Dataset` — `{schema, train, test?, provenance}` (pandas) + `X()`/`y()`
+    selectors. The modality-agnostic envelope adapters produce (tabular now).
+  - `split.py` `cv_folds(df, k, seed, stratify_col?)` — deterministic (Stratified)KFold
+    fold assignment.
+  - `model.py` `train`/`predict`/`cv_score` — sklearn `logreg`/`rf`, deterministic by seed;
+    `cv_score` averages per-fold validation accuracy.
+- **Thin IO — `metis/io.py`:** the SINGLE Python encoding of the step contract (ARCH-DRY):
+  `step_context()` (reads the `METIS_*` env), `read_with`, `exp_path` (experiment-relative),
+  `upstream_path` (`$METIS_RUN_DIR/<step-id>/<file>`), `out_path`, `write_metrics`, plus
+  Dataset `load_dataset`/`save_dataset` (parquet canonical; CSV also read, so fixtures stay
+  git-legible).
+- **Step entrypoints — `metis/steps/{cv_split,train,predict}.py`:** thin `io → pure core → io`.
+  - `cv-split`: load Dataset (`with.dataset`, exp-relative) → `cv_folds` → `folds.json` + `{k,n}`.
+  - `train`: load Dataset + upstream `folds.json` → `cv_score` + fit-on-all → `model.pkl` + `{cv_score}`.
+  - `predict`: load Dataset + upstream `model.pkl` → predict test rows → `predictions.csv` + `{n_predictions}`.
+- **Wrappers — `steps/metis/{cv-split,train,predict}`:** bash bridges that `exec uv run
+  --project <root> python -m metis.steps.<type>`, resolving `<root>` from `$0` (cwd is the
+  step dir, not the root).
+- **Data-flow:** the dataset is referenced experiment-relative (`METIS_EXP_DIR`); `folds` and
+  `model` flow between steps via the upstream-artifact convention (the step id is named in the
+  consumer's `with`, e.g. `train` `with:{folds: split}`).
+- **Proof:** `testdata/experiment/toy-pipeline.md` (cv-split → train → predict on the toy
+  `testdata/dataset/toy/`) runs end-to-end via `metis run` to a real CV score — the metis#1
+  Done-when. `cmd/metis` `TestToyPipeline_EndToEnd` drives the real wrappers (skips without uv);
+  the pure core + contract are pytested under `tests/`. The Titanic thread is kbench#1.
 
 ## Ownership & instances
 
