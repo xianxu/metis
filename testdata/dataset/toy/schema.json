@@ -1,0 +1,18 @@
+{
+  "columns": {
+    "f0": "feature",
+    "f1": "feature",
+    "f2": "feature",
+    "f3": "feature",
+    "id": "id",
+    "target": "target"
+  },
+  "dtypes": {
+    "f0": "float64",
+    "f1": "float64",
+    "f2": "float64",
+    "f3": "float64",
+    "id": "int64",
+    "target": "int64"
+  }
+}
