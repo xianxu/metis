@@ -1,0 +1,29 @@
+[project]
+name = "metis"
+version = "0.1.0"
+description = "metis Python data plane — pure Dataset/Schema/cv-split + train/predict step-types for the metis ML workbench (metis#1 M3)."
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "pandas>=2.2",
+    "scikit-learn>=1.5",
+    "pyarrow>=17",
+]
+
+# Pin the interpreter (not the system 3.14, which has no binary wheels for the
+# scientific stack yet). uv provisions a managed CPython 3.12 with wheels for
+# pandas/scikit-learn/pyarrow on aarch64-apple-darwin. See workshop/lessons.md.
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+# The pure numeric core + thin contract-IO + step entrypoints. Installed editable
+# by `uv sync` so the `steps/metis/*` wrappers can `python -m metis.steps.<type>`.
+packages = ["metis"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -7,3 +7,10 @@
 /.colima/
 /construct/scripts/vm-log.sh
 /construct/generated/
+
+# Python data plane (metis#1 M3) — uv env + bytecode caches. uv.lock IS committed
+# (reproducible resolution); the venv and caches are not.
+/.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
