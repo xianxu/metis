@@ -1,12 +1,13 @@
 ---
 id: 000001
-status: working
+status: done
 deps: []
 github_issue:
 created: 2026-07-01
 updated: 2026-07-01
-estimate_hours:
+estimate_hours: 6
 started: 2026-07-01T13:51:21-07:00
+actual_hours: 3.83
 ---
 
 # metis ML-workbench core: experiment datatype + step-runner + Dataset/Split/cv-split + step-types (Titanic skeleton)
@@ -37,14 +38,47 @@ Design from the 2026-07-01 brainstorm. **Polyglot by seam**: a Go control plane 
 - The experiment/pipeline/step/run frontmatter is CUE-validated.
 - Exercised end-to-end by kbench#1's Titanic thread reaching a local CV score through this runner.
 
+## Estimate
+
+```estimate
+model: estimate-logic-v3.1
+familiarity: 1.0
+design-buffer: 0.30
+item: typed-data-prototype   design=0.4 impl=0.8
+item: greenfield-go-module   design=0.5 impl=1.5
+item: greenfield-go-module   design=0.4 impl=1.5
+item: milestone-review       design=0.0 impl=0.2
+item: milestone-review       design=0.0 impl=0.2
+item: milestone-review       design=0.0 impl=0.2
+total: 6.09
+```
+
+M1 = the experiment datatype + CUE schema (`typed-data-prototype`); M2 = the Go step-runner + `pkg/experiment` (`greenfield-go-module`); M3 = the Python data-plane step-types + Dataset/Schema/Split (`greenfield-go-module` as the closest proxy — the closed vocab has no Python primitive). Three `milestone-review` items for the M1/M2/M3 boundaries. AI-paired ship-wall-clock (v3.1); provisional — the calibration source flagged stale and metis has no local close history yet.
+
 ## Plan
 
-- [ ] M1 — `experiment`/`pipeline`/`step`/`run` datatypes + CUE-validated frontmatter (schema + a fixture experiment)
-- [ ] M2 — Go step-runner: read experiment, run steps sequentially via subprocess, append a Run record; plain streaming output
-- [ ] M3 — Dataset/Schema/cv-split Python core + step-types (`cv-split`, `train`, `predict`) with unit tests + the files+subprocess contract (`metrics.json`/`predictions.csv`)
+Durable plan with per-file/per-test detail: [`workshop/plans/000001-experiment-datatype-plan.md`](../plans/000001-experiment-datatype-plan.md). M1 is fully specced there; M2/M3 are sketched (re-run `sdlc start-plan` before each). `ariadne#155` in the plan's References is a related tooling-gap note, **not** a blocker — metis ships its own `base.manifest` and compiles cleanly.
+
+- [x] M1 — `experiment`/`pipeline`/`step`/`run` datatypes + CUE-validated frontmatter (schema + a fixture experiment)
+- [x] M2 — Go step-runner: read experiment, run steps sequentially via subprocess, append a Run record; plain streaming output
+- [x] M3 — Dataset/Schema/cv-split Python core + step-types (`cv-split`, `train`, `predict`) with unit tests + the files+subprocess contract (`metrics.json`/`predictions.csv`)
 
 ## Log
 
 ### 2026-07-01
+- 2026-07-01: closed — metis#1 complete: experiment datatype (M1) + Go step-runner (M2) + Python data plane (M3); metis run toy-pipeline e2e → real CV score 0.9167, reproducible (byte-identical re-run); go test ./... + 27 pytest green. All 3 milestones reviewed (M1/M2 FIX-THEN-SHIP→fixed, M3 SHIP).; review verdict: SHIP
+- 2026-07-01: closed M3 — e2e: metis run toy-pipeline → run.json ok, cv_score 0.9167, predictions.csv 20 rows, byte-identical on re-run; go test ./... green (3 pkg) + 27 pytest green; independently re-verified in main; review verdict: SHIP
+- 2026-07-01: closed M2 — go test ./... green (pkg/experiment + cmd/metis, cmd/metis uncached); the REWORK Critical is fixed — runDir is absolutized so METIS_STEP_DIR/METIS_RUN_DIR are absolute from any cwd, and a new relative-path regression test (cmd/metis/run_test.go, fails-before/passes-after) exercises the natural `metis run <relative>` invocation the old absolute-path test masked; metrics.json no longer leaks into run.json artifacts; pure/IO separation intact (pkg/experiment has no os/exec).; review verdict: FIX-THEN-SHIP
+- 2026-07-01: closed M1 — M1 verified via ariadne bin/{vocabulary,weave}: valid-baseline passes validate-instance (exit 0); invalid-bad-status rejected with enum diagnostic (exit 1); experiment registered in xx-datatype skill; merge-check catches bad fixture (exit 1) and passes clean by default (exit 0); weave compile applies 97 actions and generates construct/generated/vocabulary/experiment.json.; review verdict: FIX-THEN-SHIP
 
 Created from the `kaggle-ml-base-layer` project brainstorm (brain `data/project/kaggle-ml-base-layer.md`). This is the base of the substrate chain `kbench → kaggle → metis → ariadne`. Explicitly deferred to later projects: TUI polish, caching/DAG-skip, DVC backend, pipeline parameterization (`{param}` — the Run record already captures bound values), and good modeling.
+
+**M1 shipped.** The experiment noun is modeled **once** as the CUE schema `#Experiment`/`#Step`/`#Status`/`#Run` (`construct/vocabulary/experiment.cue`), with consumers deriving from it (`ARCH-DRY`): the `xx-datatype` authoring skill (`construct/datatype/experiment.md`, registered in the merged skill), the `vocabulary validate-instance --type experiment` structural validator, and (M2) the Go types. Enforced (`ARCH-PURPOSE`) by `scripts/merge-checks.d/experiment-validate.sh` — it skips `testdata/` fixtures and was proven to both reject `invalid-bad-status` (`status "running"` not in enum) and pass clean by default. M1 owns **shape only**; the semantic checks (DAG acyclicity, `needs` resolution, `uses` format) are deferred to M2's pure Go validator (`ARCH-PURE` — M1 has no business logic to bury, the seam is "author files → run the inherited validator"). Reused ariadne's `datatype`/`vocabulary` compilers unchanged; the fresh-bootstrap tooling gap they exposed is tracked in `ariadne#155` (not a blocker here).
+
+**M1 review (FIX-THEN-SHIP) findings addressed.** The boundary review caught a real bug in the enforcement merge-check (the milestone's ARCH-PURPOSE headline). **C1:** `experiment-validate.sh` ignored `run-merge-checks.sh`'s `<base> <head>` contract and silently passed when the base didn't resolve (git failure swallowed inside a `< <(…)` process substitution under `set -e`). Rewrote it to consume the positional args and assign the file list to a variable first — verified `HEAD HEAD`→exit 0, bad base→`fatal` exit 128, detection→exit 1. **I1:** added `experiment-schema-selftest.sh`, an always-run merge-check asserting valid→0 + invalid→1 (verified exit 0), so a schema regression can't ship unnoticed. **Minor:** the frontmatter probe now parses the `---` block. Plan `## Revisions` records the delta.
+
+**M2 shipped.** The Go step-runner. Pure `pkg/experiment` core — `Parse` (reusing ariadne `frontmatter.Split`), `Validate` + `TopoSort` (the semantic checks M1 deferred: `needs`-resolution, DAG acyclicity, `uses` format) — behind a thin `cmd/metis` IO layer: a `StepExecutor` interface with a subprocess impl over a `steps/<layer>/<steptype>` + files contract (`with.json` in, `metrics.json`/artifacts out), and a run-ledger writer (`runs/<id>/run.json` + `## Runs`). `metis run` Validates on read, so a cyclic/dangling experiment is rejected before any step runs — closing M1's SHAPE-only gap (`ARCH-PURE`: pure orchestration, thin subprocess IO; `ARCH-DRY`: a drift-guard test shells the real `vocabulary validate-instance` so Go structs can't diverge from the CUE source). Implemented by a fresh agent from the durable plan (Chunk 2); `go test ./...` green, pure/IO separation verified independently. Real Python step-types land in M3.
+
+**M2 review (REWORK → FIX-THEN-SHIP) findings addressed.** Two review cycles before crossing. **REWORK (Critical):** the subprocess executor injected `METIS_STEP_DIR`/`METIS_RUN_DIR` as *relative* paths while the child cwd was that same dir, so every step failed under the natural `metis run <relative-path>` invocation — masked by an absolute-`t.TempDir()` e2e test. Fixed (absolutize `runDir` at the boundary + `TestRunExperiment_RelativePath`); also excluded `metrics.json` from `run.json` artifacts, mapped the step contract into `atlas/experiment.md` (`## Surface (M2)`), deduped the doubled step-id error. **FIX-THEN-SHIP (2 Important):** (I1) `Validate`/`TopoSort` falsely reported a cycle for a duplicated `needs: [a, a]` edge — deduped each step's needs into a set used for both in-degree + relaxation (fail-before/pass-after verified); (I2) added the `status:"failed"` ledger-on-failure e2e (`with:{fail:true}` step). Minor items (non-recursive `collectArtifacts`, `#Run` drift-guard, `findRepoRoot`-3×) deferred to M3. Plan `## Revisions` records the full delta.
+
+**M3 shipped (boundary review + close both SHIP).** The Python data plane — the real `metis/*` step-types the M2 runner invokes. A **pure numeric core** (`ARCH-PURE`, pytested on in-memory frames): `metis/schema.py` (`Schema` column roles), `metis/dataset.py` (`Dataset` envelope + `X`/`y`), `metis/split.py` (`cv_folds` — deterministic stratified k-fold), `metis/model.py` (`train`/`predict`/`cv_score` — sklearn logreg/rf). A **thin IO layer** `metis/io.py` — the SINGLE Python encoding of M2's step contract (`ARCH-DRY`): env + `with.json` + upstream-artifact resolution + `metrics.json`, plus Dataset parquet/CSV serialization. Three thin entrypoints `metis/steps/{cv_split,train,predict}.py` (`io → pure core → io`) with `steps/metis/*` bash wrappers that `exec uv run` in a hermetic uv env (pinned **CPython 3.12** — the system 3.14 has no scientific-stack wheels yet). **Contract additions** (injected by the runner, `cmd/metis/exec.go`): `METIS_EXP_DIR` (stable anchor for experiment-relative inputs — the run dir is ephemeral) and `METIS_SEED` (the experiment's single seed → reproducible steps without duplicating it into every `with`, `ARCH-DRY`). **Done-when met** (`ARCH-PURPOSE`): `testdata/experiment/toy-pipeline.md` (cv-split → train → predict on the toy dataset) runs end-to-end via `metis run` to a **real CV score (0.9167)**, writes `predictions.csv`, records an ok ledger — and is **reproducible** (a re-run yields the identical score + predictions). The three M2-deferred minor items are also cleared: `collectArtifacts` recurses; a `#Run` CUE drift-guard (`cue vet -d '#Run'`); the 3× go.mod walk deduped into `internal/repo.Root`. Verification: `go test ./...` green (incl. `TestToyPipeline_EndToEnd`), `uv run pytest` 27 passed. **Deviations from the plan** (both documented, both raise fidelity): (1) added `METIS_EXP_DIR`/`METIS_SEED` to the step contract — needed because the toy has no upstream dataset-producer (kbench's `adapt` does that in the real thread) and steps need the seed; (2) no extra `load` step — kept the plan's literal 3-step toy, dataset by exp-relative path while `folds`/`model` still flow via the upstream convention.

@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# metis/cv-split — step-type wrapper. The runner invokes this with cwd == the step
+# dir, so resolve the metis root from $0 (NOT cwd: ../../ up from steps/metis/) and
+# exec the entrypoint in the hermetic uv env. See atlas/experiment.md (M3 surface).
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+exec uv run --project "$ROOT" python -m metis.steps.cv_split
