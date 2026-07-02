@@ -1,12 +1,13 @@
 ---
 id: 000001
-status: working
+status: done
 deps: []
 github_issue:
 created: 2026-07-01
 updated: 2026-07-01
 estimate_hours: 6
 started: 2026-07-01T13:51:21-07:00
+actual_hours: 3.83
 ---
 
 # metis ML-workbench core: experiment datatype + step-runner + Dataset/Split/cv-split + step-types (Titanic skeleton)
@@ -65,6 +66,7 @@ Durable plan with per-file/per-test detail: [`workshop/plans/000001-experiment-d
 ## Log
 
 ### 2026-07-01
+- 2026-07-01: closed — metis#1 complete: experiment datatype (M1) + Go step-runner (M2) + Python data plane (M3); metis run toy-pipeline e2e → real CV score 0.9167, reproducible (byte-identical re-run); go test ./... + 27 pytest green. All 3 milestones reviewed (M1/M2 FIX-THEN-SHIP→fixed, M3 SHIP).; review verdict: SHIP
 - 2026-07-01: closed M3 — e2e: metis run toy-pipeline → run.json ok, cv_score 0.9167, predictions.csv 20 rows, byte-identical on re-run; go test ./... green (3 pkg) + 27 pytest green; independently re-verified in main; review verdict: SHIP
 - 2026-07-01: closed M2 — go test ./... green (pkg/experiment + cmd/metis, cmd/metis uncached); the REWORK Critical is fixed — runDir is absolutized so METIS_STEP_DIR/METIS_RUN_DIR are absolute from any cwd, and a new relative-path regression test (cmd/metis/run_test.go, fails-before/passes-after) exercises the natural `metis run <relative>` invocation the old absolute-path test masked; metrics.json no longer leaks into run.json artifacts; pure/IO separation intact (pkg/experiment has no os/exec).; review verdict: FIX-THEN-SHIP
 - 2026-07-01: closed M1 — M1 verified via ariadne bin/{vocabulary,weave}: valid-baseline passes validate-instance (exit 0); invalid-bad-status rejected with enum diagnostic (exit 1); experiment registered in xx-datatype skill; merge-check catches bad fixture (exit 1) and passes clean by default (exit 0); weave compile applies 97 actions and generates construct/generated/vocabulary/experiment.json.; review verdict: FIX-THEN-SHIP
