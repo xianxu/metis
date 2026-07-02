@@ -53,17 +53,21 @@ func runExperiment(o runOpts) (experiment.Run, error) {
 		runID = "run-" + now().UTC().Format("20060102T150405Z")
 	}
 	baseDir := filepath.Dir(o.expPath)
-	// Absolutize at the runner boundary: execStep injects runDir/stepDir into the
-	// child's env, and the child's cwd IS the step dir — a relative path would
+	// Absolutize at the runner boundary: execStep injects runDir/stepDir/expDir into
+	// the child's env, and the child's cwd IS the step dir — a relative path would
 	// resolve $METIS_STEP_DIR/with.json under itself. Absolute paths are correct
 	// from any cwd, so `metis run pipelines/foo.md` (a relative arg) works.
 	runDir, err := filepath.Abs(filepath.Join(baseDir, "runs", runID))
 	if err != nil {
 		return experiment.Run{}, err
 	}
+	expDir, err := filepath.Abs(baseDir)
+	if err != nil {
+		return experiment.Run{}, err
+	}
 
 	runner := experiment.Runner{
-		Exec: execStep{stepPath: o.stepPath, out: out},
+		Exec: execStep{stepPath: o.stepPath, expDir: expDir, seed: exp.Seed, out: out},
 		Now:  now,
 	}
 	fmt.Fprintf(out, "metis: run %s of experiment %q\n", runID, exp.ID)

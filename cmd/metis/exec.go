@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 
 	"github.com/xianxu/metis/pkg/experiment"
 )
@@ -18,11 +19,13 @@ import (
 // Contract per step (what every real step-type honors):
 //   - working dir = <runDir>/<stepID>/, created here;
 //   - input: with.json (the step's `with` config) written into that dir;
-//   - env: METIS_STEP_DIR / METIS_RUN_DIR / METIS_STEP_ID;
+//   - env: METIS_STEP_DIR / METIS_RUN_DIR / METIS_STEP_ID / METIS_EXP_DIR / METIS_SEED;
 //   - output: an optional metrics.json (flat {name: number}) + any artifact files
 //     the step writes into its dir, which execStep reads back.
 type execStep struct {
 	stepPath []string  // dirs searched for <layer>/<steptype>
+	expDir   string    // absolute experiment dir; anchor for exp-relative step inputs
+	seed     int       // the experiment's seed, exposed to every step for reproducibility
 	out      io.Writer // plain streaming progress
 }
 
@@ -55,6 +58,8 @@ func (e execStep) Execute(step experiment.Step, runDir string) (experiment.StepR
 		"METIS_STEP_DIR="+stepDir,
 		"METIS_RUN_DIR="+runDir,
 		"METIS_STEP_ID="+step.ID,
+		"METIS_EXP_DIR="+e.expDir,
+		"METIS_SEED="+strconv.Itoa(e.seed),
 	)
 	if combined, err := cmd.CombinedOutput(); err != nil {
 		// Runner.Run already prefixes `step %q:`; name the executable, not the id

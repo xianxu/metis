@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import os
+from dataclasses import dataclass
 
 import pandas as pd
 
@@ -57,6 +58,73 @@ def _read_table(path: str, stem: str) -> pd.DataFrame | None:
     if os.path.exists(csv):
         return pd.read_csv(csv)
     return None
+
+
+# ── The M2 step contract (single Python encoding — ARCH-DRY) ─────────────────
+# The Go runner (cmd/metis/exec.go) speaks this contract; this is the ONE place
+# the Python side decodes it, so every step-type stays consistent. A step runs
+# with cwd == its step dir and these env vars set by the runner:
+#   METIS_STEP_DIR  absolute step dir (== cwd); where with.json lands + outputs go
+#   METIS_RUN_DIR   absolute run dir; upstream steps' outputs live at <run>/<id>/
+#   METIS_STEP_ID   this step's id
+#   METIS_EXP_DIR   absolute experiment dir; anchor for experiment-relative inputs
+#                   (M3 addition — the run dir is ephemeral, the exp dir is stable)
+#   METIS_SEED      the experiment's seed, so steps are reproducible without
+#                   duplicating the seed into every step's `with` (M3 addition)
+
+
+@dataclass(frozen=True)
+class StepContext:
+    step_dir: str
+    run_dir: str
+    step_id: str
+    exp_dir: str
+    seed: int
+
+
+def step_context() -> StepContext:
+    """Read the step contract env the runner injected. Raises if a required var is
+    missing (a step must be launched by `metis run`, not run bare)."""
+    return StepContext(
+        step_dir=_require_env("METIS_STEP_DIR"),
+        run_dir=_require_env("METIS_RUN_DIR"),
+        step_id=_require_env("METIS_STEP_ID"),
+        exp_dir=_require_env("METIS_EXP_DIR"),
+        seed=int(_require_env("METIS_SEED")),
+    )
+
+
+def read_with(ctx: StepContext) -> dict:
+    """The step's `with` config, written by the runner as with.json in the step dir."""
+    return _read_json(os.path.join(ctx.step_dir, "with.json"))
+
+
+def exp_path(ctx: StepContext, rel: str) -> str:
+    """Resolve an experiment-relative path (e.g. a committed dataset dir)."""
+    return os.path.normpath(os.path.join(ctx.exp_dir, rel))
+
+
+def upstream_path(ctx: StepContext, step_id: str, filename: str) -> str:
+    """Path to an output file an upstream step wrote: <run_dir>/<step_id>/<filename>."""
+    return os.path.join(ctx.run_dir, step_id, filename)
+
+
+def out_path(ctx: StepContext, filename: str) -> str:
+    """Path for an output file this step writes into its own step dir."""
+    return os.path.join(ctx.step_dir, filename)
+
+
+def write_metrics(ctx: StepContext, metrics: dict) -> None:
+    """Write the step's metrics.json (flat {name: number}); the runner merges it
+    into Run.metrics. This is a reserved contract channel, not an artifact."""
+    _write_json(os.path.join(ctx.step_dir, "metrics.json"), metrics)
+
+
+def _require_env(name: str) -> str:
+    val = os.environ.get(name)
+    if not val:
+        raise RuntimeError(f"{name} not set — a step must be launched by `metis run`")
+    return val
 
 
 # ── JSON helpers ─────────────────────────────────────────────────────────────
