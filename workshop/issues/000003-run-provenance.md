@@ -12,7 +12,11 @@ estimate_hours:
 
 **Stage: DESIGN — do not build yet.** Operator: "don't fix yet, we need to design
 this well." The skeleton is already useful for discussing direction; this captures
-the gap + intent.
+the gap + intent. Part of the **metis v1** project (`brain/data/project/metis-v1.md`);
+this issue is **L0** in the v1 layering — the resolved-**point** content-address
+`(resolved-with, three repo SHAs, seed)` that is the cache key, repro key, and run
+identity everything else keys on. Design:
+`brain/workshop/pensive/2026-07-03-01-pensive-experiment-shape-workbench-design.md`.
 
 ## Problem
 

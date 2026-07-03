@@ -12,6 +12,10 @@ estimate_hours:
 
 **Stage: DESIGN — do not build yet.** Captured from the kbench#1 post-live-run
 discussion; the design must come first. This ticket holds the intent + constraints.
+Part of the **metis v1** project (`brain/data/project/metis-v1.md`); the caching
+design is worked out in `brain/workshop/pensive/2026-07-03-01-pensive-experiment-shape-workbench-design.md`
+(§Caching) — content-addressed `cas/<hash>` pool, working-tree paths become pointers,
+key folds in step-code-version, orthogonal to git so branch-switch never invalidates.
 
 ## Problem
 
