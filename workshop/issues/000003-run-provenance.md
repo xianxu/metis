@@ -5,7 +5,7 @@ deps: []
 github_issue:
 created: 2026-07-02
 updated: 2026-07-05
-estimate_hours:
+estimate_hours: 1.9
 started: 2026-07-05T13:37:57-07:00
 ---
 
@@ -38,7 +38,7 @@ experiment file as ~immutable; fork a new file per variation** so each file owns
 own `## Runs` history. Provenance-snapshot is what would later make in-place editing
 safe.
 
-## Spec (intent, not yet a plan)
+## Spec
 
 On each run, capture enough to answer "what config produced this score," durably:
 
@@ -138,14 +138,53 @@ Refined by the #8 ledger/durability discussion:
 
 ## Done when
 
-- (design-stage) A design note settles what gets snapshotted (config shape, git
-  binding), where it lives, how `## Runs` surfaces knob→score, and the
-  relationship to the fork-per-experiment convention + caching keys.
+- (design-stage — **met**) A design note settles what gets snapshotted (config shape, git
+  binding), where it lives, how `## Runs` surfaces knob→score, and the relationship to the
+  fork-per-experiment convention + caching keys. (settled 2026-07-03, see `## Design`.)
+- (implementation) A pure `pkg/record` defines the unified `StepRecord`/`RunRecord` (all
+  key-material + provenance-extra fields) with a `#RunRecord` CUE type + drift guard, and mints
+  the **point-address** (`hash(resolved-with across the DAG, repo-SHAs, seed)`) — deterministic
+  and map-order-independent, unit-tested for stability + sensitivity.
+- (implementation) A run assembles + writes `runs/<id>/record.json` (git-trackable) with repo-SHAs,
+  per-step resolved-with, output-hashes (`cas.HashOf`), metrics, and the minted point-address; two
+  identical runs mint the **same** point-address (e2e).
+- (implementation) `## Runs` renders a **knob→score** line from the record (config beside metric),
+  superseding the freeform summary.
+- Scope line honored: the traced read-set `D` + cache key + skip/recompute are **#2**; side-ref code
+  *capture* is **#7/#8** — #3 records the current commit + dirty flag honestly. Atlas updated.
 
 ## Plan
 
-- [x] Design note: provenance record shape + git binding + ## Runs legibility + relation to #2 and fork-per-experiment. **(settled 2026-07-03 — see `## Design`)**
-- [ ] (post-design) split implementation milestones from the `## Design` note.
+Durable impl plan: `workshop/plans/000003-run-provenance-plan.md` (scope line #3-vs-#2-vs-#7/#8;
+2 review boundaries). TDD; the pure core (M1) is reviewed before IO builds on it (M2).
+
+- [x] Design note: provenance record shape + git binding + ## Runs legibility + relation to #2 and fork-per-experiment. **(settled 2026-07-03 — see `## Design`)**; impl decomposed into the durable plan (2026-07-05).
+- [x] **M1 — pure record core** (+ pure-core runner change, reviewed at this boundary). `pkg/experiment`: add `StepRun{Step, Result}`; `Runner.Run` → `(Run, []StepRun, error)` so per-step metrics/artifacts are retained (today they're flat-merged + discarded — the record can't reach them otherwise). `pkg/record`: `StepRecord`/`RunRecord`/`CodeManifest`/`FileHash` (all key-material + provenance slots; `D`/`Deps` are #2-populated slots), pure `PointAddress(resolvedWith, repoSHAs, seed)` (canonical `json.Marshal` → `cas.HashOf`), pure `OutputHash([]FileHash)` (**multi-file reduction**: hash of the sorted `(relpath, content-hash)` manifest). `#StepRecord`/`#RunRecord` CUE + drift guard. Unit tests: point-address determinism/sensitivity, `OutputHash` order-independence/sensitivity/empty, per-step retention, JSON round-trip. (No `CacheKeyMaterial` — deferred to #2 where it's testable.)
+- [ ] **M2 — populate + persist + legibility.** `cmd/metis`: assemble the record during `runExperiment` from `exp.Steps` + `[]StepRun` (repo-SHAs+dirty via an injected `gitProbe` seam; per-step metrics + `OutputHash` from `cas.HashOf`-ing each artifact file), mint the point-address, write `runs/<id>/record.json` (git-trackable). `## Runs` → knob→score line, **reusing `runSummary`'s metric formatting** (ARCH-DRY). e2e (record conforms to `#RunRecord`; point-address stable across two identical runs; `## Runs` line). Atlas: `pkg/record` + record datatype + the #3/#2 scope line.
+
+## Estimate
+
+*Produced via `brain/data/life/42shots/velocity/estimate-logic-v3.1.md` against `baseline-v3.1.md`. Method A only.*
+
+```estimate
+model: estimate-logic-v3.1
+familiarity: 1.0
+item: greenfield-go-module   design=0.5 impl=0.4
+item: smaller-go-module      design=0.2 impl=0.2
+item: milestone-review       design=0.0 impl=0.2
+item: milestone-review       design=0.0 impl=0.2
+item: atlas-docs             design=0.05 impl=0.05
+design-buffer: 0.15
+total: 1.91
+```
+
+Design pre-settled → greenfield `pkg/record` (M1: point-address + `OutputHash` multi-file reducer +
+the pure-core `Runner.Run` per-step-retention change + CUE + drift guard) at the design floor, impl
+bumped to 0.4 for the extra pure-core work the plan-judge surfaced; the runner integration (M2) is a
+smaller-go-module *extend* of `cmd/metis`; **two** `milestone-review` items — one per review boundary
+(M1 milestone-close + M2 final close, each auto-dispatches a fresh-eyes review; #9 showed reviews are
+real work, and the estimate-quality judge flagged the second boundary as un-costed). A small atlas note.
+Impl at 40%-of-v2 (v3.1). +15% thorough-plan buffer.
 
 ## Log
 
@@ -154,3 +193,7 @@ Refined by the #8 ledger/durability discussion:
 
 ### 2026-07-03
 - **Design settled** (unified with #2's caching design, multi-round brainstorm). Key move: provenance and the cache key are the *same determinant set*, different operation (reconstruct vs. compare) → **one unified per-step record**, key-material (hashed = cache key) vs. provenance-only extras (repo-SHAs, fetched, metrics). Three derived views: cache key (#2) / point-address (this issue, #8 derives) / output key. Durability contract: CAS is a pure wipeable cache; records must be **recipe-complete against durable homes** (git + refetch) so the DAG reconstructs from an empty cache; clean-vs-dirty demoted to a *legibility* choice (promotable runs → clean). Dropped the stale "point-address is the cache key" self-label. Split the CAS storage primitive out as **metis#9**. Full spec in `## Design`.
+
+### 2026-07-05
+- **Impl decomposed** into `workshop/plans/000003-run-provenance-plan.md` (2 review boundaries, scope line #3-vs-#2-vs-#7/#8). `change-code` plan-quality: **CLEAN** (after revising the plan for the 2 gaps below); estimate-quality: INFO (added the 2nd milestone-review item).
+- **M1 built — the pure record core** (TDD, all green; build+vet+full-suite clean). `pkg/experiment`: `StepRun{Step, Result}` + `Runner.Run` → `(Run, []StepRun, error)` for **per-step retention** (plan-judge Finding 1: the flat `Run` merge discarded per-step data the record needs; callers/tests updated). `pkg/record` (new pure pkg): `StepRecord`/`RunRecord`/`CodeManifest`/`FileHash`/`CodeRef` (`Hash` re-exports `cas.Hash`), pure `PointAddress` (canonical `json.Marshal`→`cas.HashOf`; deterministic-across-calls + sensitivity tests), pure `OutputHash([]FileHash)` (**multi-file reducer** — plan-judge Finding 2 — sorted `(path,hash)` manifest; order-independence + sensitivity + nil==empty tests). CUE `#StepRecord`/`#RunRecord` in `experiment.cue` + `TestRunRecordConformsToCUE` drift guard (passes). Next: M2 (populate during a run + persist `record.json` + `## Runs` legibility).

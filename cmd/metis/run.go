@@ -71,7 +71,7 @@ func runExperiment(o runOpts) (experiment.Run, error) {
 		Now:  now,
 	}
 	fmt.Fprintf(out, "metis: run %s of experiment %q\n", runID, exp.ID)
-	run, runErr := runner.Run(exp, runID, runDir)
+	run, _, runErr := runner.Run(exp, runID, runDir)
 
 	// Execution-time enforcement: Runner.Run validates the experiment BEFORE any
 	// step executes, so a semantically-invalid experiment (dangling needs, bad
