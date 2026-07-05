@@ -1,12 +1,13 @@
 ---
 id: 000003
-status: working
+status: codecomplete
 deps: []
 github_issue:
 created: 2026-07-02
 updated: 2026-07-05
 estimate_hours: 1.9
 started: 2026-07-05T13:37:57-07:00
+actual_hours: 0.94
 ---
 
 # Run provenance: snapshot the resolved pipeline config (+ experiment git sha) so ## Runs is knob→score legible
@@ -195,6 +196,7 @@ Impl at 40%-of-v2 (v3.1). +15% thorough-plan buffer.
 - **Design settled** (unified with #2's caching design, multi-round brainstorm). Key move: provenance and the cache key are the *same determinant set*, different operation (reconstruct vs. compare) → **one unified per-step record**, key-material (hashed = cache key) vs. provenance-only extras (repo-SHAs, fetched, metrics). Three derived views: cache key (#2) / point-address (this issue, #8 derives) / output key. Durability contract: CAS is a pure wipeable cache; records must be **recipe-complete against durable homes** (git + refetch) so the DAG reconstructs from an empty cache; clean-vs-dirty demoted to a *legibility* choice (promotable runs → clean). Dropped the stale "point-address is the cache key" self-label. Split the CAS storage primitive out as **metis#9**. Full spec in `## Design`.
 
 ### 2026-07-05
+- 2026-07-05: closed — metis#3 L0 record complete (M1 pure core SHIP + M2 integration). go build+vet+test ./... green incl -race. Verified in the real CLI: record.json with real HEAD sha + dirty + per-step output-hashes; ## Runs rendered knob->score. Hermetic e2e (no uv): #RunRecord conformance, point-address stable across 2 identical runs, no-git degraded path. --no-verdict: M2 is the FINAL milestone; its boundary review IS this issue-close integration review (redundant second pass avoided, #69). --no-plan-check: both M1+M2 are [x] and shipped. --no-project: brain metis-v1.md ticked by hand.; review verdict: SHIP
 - 2026-07-05: closed M2 — M2 runner integration: go build+vet+test ./... green incl -race. Hermetic e2e (test/echo, no uv): record.json conforms to #RunRecord, point-address stable across 2 identical runs, ## Runs knob->score line, no-git degraded path. Verified in the REAL CLI: record.json carried the real HEAD sha + dirty flag + per-step output-hashes; ## Runs rendered knobs+metrics. Root-caused M1-review Minor (PointAddress returns error on non-finite config); graceful git degradation (no-repo run warns, not fails). --no-project: brain/data/project/metis-v1.md uses issue-link convention, not the close <a id> anchors; ticked metis#3 + est/actual by hand (committed in brain).
 - 2026-07-05: closed M1 — M1 pure core: go build+vet+test ./... green. pkg/experiment Runner.Run -> (Run, []StepRun, error) with per-step-retention test; pkg/record 6 unit tests (PointAddress determinism-across-25-calls + sensitivity; OutputHash order-independence/sensitivity/nil==empty; JSON round-trip) + TestRunRecordConformsToCUE drift guard (cue present, passes). BYPASS --no-atlas + --no-project: M1 is the pure core — the atlas + project-tracker updates are deliberately M2/final-close work (record datatype + #3/#2 scope line land with the runner integration); milestone progress is tracked in the issue Plan/Log.; review verdict: SHIP
 - **Impl decomposed** into `workshop/plans/000003-run-provenance-plan.md` (2 review boundaries, scope line #3-vs-#2-vs-#7/#8). `change-code` plan-quality: **CLEAN** (after revising the plan for the 2 gaps below); estimate-quality: INFO (added the 2nd milestone-review item).
