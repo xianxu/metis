@@ -1,11 +1,12 @@
 ---
 id: 000006
-status: open
+status: working
 deps: []
 github_issue:
 created: 2026-07-03
-updated: 2026-07-04
+updated: 2026-07-05
 estimate_hours:
+started: 2026-07-05T16:41:40-07:00
 ---
 
 # experiment-shape datatype: lift the experiment config schema into a config-space (Space[T])
