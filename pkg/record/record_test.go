@@ -7,6 +7,32 @@ import (
 	"testing"
 )
 
+// CanonicalHash is the shared hashing primitive: deterministic over map order,
+// content-sensitive, and errors (not panics) on a non-finite value.
+func TestCanonicalHash_DeterministicAndSensitive(t *testing.T) {
+	a, err := CanonicalHash(map[string]any{"x": 1, "y": 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := CanonicalHash(map[string]any{"y": 2, "x": 1}) // same content, different literal order
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a != b {
+		t.Errorf("CanonicalHash must be map-order-independent: %q != %q", a, b)
+	}
+	c, _ := CanonicalHash(map[string]any{"x": 1, "y": 3})
+	if a == c {
+		t.Error("CanonicalHash must change when content changes")
+	}
+	if len(a) != 64 {
+		t.Errorf("CanonicalHash should be a 64-hex hash, got %d chars", len(a))
+	}
+	if _, err := CanonicalHash(map[string]any{"lr": math.Inf(1)}); err == nil {
+		t.Error("CanonicalHash(+Inf) must return an error, not panic")
+	}
+}
+
 // mustAddr mints a point-address, failing the test on the (well-formed-input) error.
 func mustAddr(t *testing.T, rw map[string]map[string]any, shas map[string]string, seed int) Hash {
 	t.Helper()

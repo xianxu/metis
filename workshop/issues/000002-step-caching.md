@@ -5,7 +5,7 @@ deps: [metis#9, metis#3]
 github_issue:
 created: 2026-07-02
 updated: 2026-07-05
-estimate_hours:
+estimate_hours: 3
 started: 2026-07-05T14:32:51-07:00
 ---
 
@@ -29,7 +29,7 @@ re-downloads from Kaggle (`get-data`, network) and re-trains (compute) even when
 nothing about those steps changed. For a **learning bench** whose loop is "tinker
 one knob, re-run," that is needlessly slow and re-hits external services each run.
 
-## Spec (intent, not yet a plan)
+## Spec
 
 A **uniform, consistent** cache — the same mechanism whether the step downloads
 data, engineers features, splits folds, or trains. The runner resolves **what
@@ -186,14 +186,57 @@ The durability model above is refined by the #8 ledger design (git-native code c
 
 ## Done when
 
-- (design-stage) A design note settles: cache-key composition, where cached
-  outputs live + are keyed, code-version invalidation, the external-fetch policy,
-  and the interaction with run provenance. Only then split into build milestones.
+- (design-stage — **met**) A design note settles cache-key composition, where cached outputs live +
+  are keyed, code-version invalidation, the external-fetch policy, and the interaction with run
+  provenance. (settled 2026-07-03, see `## Design`.)
+- (implementation) A pure `pkg/cache` computes `K_pre` (from the #3 record's key-material) and
+  `Validate`s a stored read-set `D` by re-hashing, deciding HIT/MISS — unit-tested for determinism,
+  sensitivity, and each hit/miss path.
+- (implementation) A Python read-sensor records each step's `D` (`sys.addaudithook`; first-party
+  reads only), and the Go side turns it into `(path, git-blob-hash)` pairs.
+- (implementation) The runner **skips** a HIT step (materializing its output from the CAS #9) and on
+  a MISS records `D` + stores the output; the v1 leaf policy caches an immutable external fetch.
+- (implementation, the payoff) An **e2e proves cheap sweeps**: a re-run HITs every step (no
+  subprocess); changing one downstream knob HITs the upstream (`get-data`/`adapt`) and re-runs only
+  the changed step + downstream. Atlas updated (validating-trace flow + the sensor's lower-bound
+  limit + the #2/#7/#8 scope line).
+- Scope honored: the side-ref **commit** of dirty closure files is **#8** (#2 hashes via
+  `git hash-object`, needs no commit for cache correctness); the airtight syscall sensor is a later
+  swap (unchanged `D`).
 
 ## Plan
 
-- [x] Design note: cache-key composition + invalidation + storage + external-fetch policy + interaction with #3. **(settled 2026-07-03 — see `## Design`)**
-- [ ] (post-design) split implementation milestones from the `## Design` note.
+Durable impl plan: `workshop/plans/000002-step-caching-plan.md` (mechanism recap, scope line vs.
+#7/#8, 3 review boundaries). TDD; the risky novel sensor (M2) is de-risked as its own boundary.
+
+- [x] Design note: cache-key composition + invalidation + storage + external-fetch policy + interaction with #3. **(settled 2026-07-03 — see `## Design`)**; impl decomposed into the durable plan (2026-07-05).
+- [ ] **M1 — pure cache core** (`pkg/cache`, Go). First **extract `record.CanonicalHash`** (no shared helper exists; refactor `PointAddress`/`OutputHash` onto it — ARCH-DRY, plan-judge). `Kpre(rec record.StepRecord, seed int)` = `CanonicalHash{step-id, **uses**, resolved-with, seed, upstream-output-hashes}` — **seed is an explicit arg** (lives on `RunRecord`, not the step); **uses included** (guards the wrong-step-type false-HIT). `Validate(storedD, hasher)` (re-hash D → HIT/MISS, pure over an injected hasher), `OutputKey(kpre, D)`, cache-index codec (`K_pre → {D, output_key}`). Unit tests: K_pre determinism + sensitivity (each of the 5 terms moves it), Validate hit/miss (clean / one-changed / missing), OutputKey, index round-trip.
+- [ ] **M2 — the read-sensor (Python) + blob-hasher (Go).** `sys.addaudithook` sensor module the step wrappers import → `reads.json` (first-party reads only; site-packages → `uv.lock` digest; drop stdlib/writes/own-output). Go `gitBlobHash(path)` (`git hash-object`) turns reads.json → `D = [(path, blob-hash)]`. Tests: sensor records a known read (uv-gated); D-builder maps reads.json → D (fake-hasher unit + real `git hash-object` skip-guarded); filtering excludes site-packages/stdlib.
+- [ ] **M3 — runner integration + leaf policy + sweep-reuse e2e.** **First populate `StepRecord.Upstream`** in `buildRecord` (map each step's `needs` → upstream output-hashes — the DAG-wiring K_pre depends on; #3 left the slot empty; plan-judge caught this was unlisted). Runner: per step compute `cache.Kpre(stepRecord, run.Seed)` → look up index → `Validate`; **HIT** materialize outputs from CAS (#9) + skip subprocess; **MISS** run + build D + `cas.Put` outputs + write index + record `Code.D`. Leaf policy (`cache: {leaf: immutable}` fetch-once). e2e: re-run HITs all steps; one-knob-change HITs upstream + re-runs only downstream (the "cheap sweeps" proof). Atlas.
+
+## Estimate
+
+*Produced via `brain/data/life/42shots/velocity/estimate-logic-v3.1.md` against `baseline-v3.1.md`. Method A only.*
+
+```estimate
+model: estimate-logic-v3.1
+familiarity: 1.0
+item: greenfield-go-module   design=0.5 impl=0.4
+item: greenfield-go-module   design=0.3 impl=0.4
+item: smaller-go-module      design=0.2 impl=0.4
+item: milestone-review       design=0.0 impl=0.2
+item: milestone-review       design=0.0 impl=0.2
+item: milestone-review       design=0.0 impl=0.2
+item: atlas-docs             design=0.05 impl=0.05
+design-buffer: 0.15
+total: 3.06
+```
+
+#2 is the largest v1 issue (cross-language: Go cache core + Python read-sensor + runner integration).
+M1 pure Go core (greenfield); M2 the novel sensor + blob-hasher (greenfield, cross-language — its own
+boundary to de-risk); M3 the runner integration (smaller-go-module extend + 2 e2es); three
+`milestone-review` items (3 boundaries). Design pre-settled → design at/near the floor. Impl at
+40%-of-v2 (v3.1); +15% thorough-plan buffer.
 
 ## Log
 
@@ -202,3 +245,7 @@ The durability model above is refined by the #8 ledger design (git-native code c
 
 ### 2026-07-03
 - **Design settled** (5-round brainstorm with the operator). Cache = a single **validating trace**: ex-ante `K_pre` + recorded read-set `D`, output at `hash(K_pre, content_hash(D))`; validate by **re-hashing `D`, not re-running**; code-version invalidation falls out for free (dropped the git-SHA / static-import-closure idea). Central invariant: *"a step's input-set changes only if a recorded input changes."* Two input classes (keyed immutable artifacts vs. traced source files) + one quarantine (network/env/clock at explicit ingest boundaries). Key subtleties surfaced: downstream must reference upstream by **output-hash**, not cache-key; the key-chain is only as sound as its leaves, so ingest leaves need pin (immutable bet) or etag (version-in-key); folder-scoped git-log was rejected as *unsound* (shared imports leak the boundary). Full spec now in `## Design`. Design-stage done-when met; next is splitting impl milestones.
+
+### 2026-07-05
+- **Impl decomposed** into `workshop/plans/000002-step-caching-plan.md` (3 review boundaries; scope line #2-vs-#7/#8). `change-code` plan-quality **caught 3 load-bearing K_pre bugs** (all would silently produce an unsound cache): `seed` is on `RunRecord` not `StepRecord` (→ `Kpre(rec, seed)` explicit arg); `StepRecord.Upstream` is an empty #3 slot #2 must populate (M3 wiring); `uses` was dropped from K_pre (→ wrong-step-type false-HIT — folded in). Re-plan verified CLEAN; estimate INFO. Operator chose "build #2 fully now."
+- **M1 built — the pure cache core** (TDD, all green; build+vet+full-suite clean). Extracted `record.CanonicalHash(any) (Hash, error)` (ARCH-DRY, plan-judge — refactored `PointAddress`/`OutputHash` onto it; `OutputHash` keeps its total signature via an internal unreachable-panic). New `pkg/cache`: `Kpre(rec, seed)` = `CanonicalHash{step-id, uses, resolved-with, seed, sorted-upstream}` (5-term sensitivity + upstream-order-invariance + non-finite-error tests), `Validate(D, hasher)` (re-hash → HIT/MISS; vanished/changed = MISS; empty-D = vacuous HIT), `OutputKey(kpre, D)` = `hash(K_pre, hash(D))` (D-order invariant), `Entry` index codec + round-trip. Next: M2 (Python read-sensor + git blob-hasher).
