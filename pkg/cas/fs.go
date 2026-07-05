@@ -17,6 +17,16 @@ const tmpPrefix = ".tmp-"
 // mtime from the injected clock so eviction recency is deterministic. Size-bounded
 // LRU eviction (maxBytes; ≤ 0 = unbounded) keeps the pool under budget — because
 // the store is a pure wipeable cache, any evicted blob is simply recomputed.
+//
+// Concurrency: individual Put/Get/Has are safe to call from multiple goroutines
+// (atomic writes, content-addressed paths). But under a tight maxBytes with
+// concurrent Puts the store is best-effort, NOT strictly isolating: each Put's
+// evict pass protects only its own just-written blob, so goroutine A's eviction may
+// delete a blob goroutine B just wrote, after which B's next Get returns
+// ErrNotFound. That is deliberately tolerable under the wipeable-cache contract — a
+// missing blob is recomputed — but a consumer must not assume a Put by another
+// goroutine stays resident. The recency stamp (Chtimes) is likewise best-effort: a
+// failed stamp never fails an otherwise-valid Put or Get (see touch).
 type FSStore struct {
 	root     string
 	maxBytes int64
@@ -50,9 +60,7 @@ func (s *FSStore) Put(data []byte) (Hash, error) {
 	}
 	if _, err := os.Stat(p); err == nil {
 		// Already stored (dedup) — just refresh recency, then re-check the budget.
-		if err := s.touch(p); err != nil {
-			return "", err
-		}
+		s.touch(p)
 		return h, s.evict(h)
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return "", err
@@ -60,9 +68,7 @@ func (s *FSStore) Put(data []byte) (Hash, error) {
 	if err := s.writeAtomic(p, data); err != nil {
 		return "", err
 	}
-	if err := s.touch(p); err != nil {
-		return "", err
-	}
+	s.touch(p)
 	return h, s.evict(h)
 }
 
@@ -91,10 +97,13 @@ func (s *FSStore) writeAtomic(p string, data []byte) error {
 }
 
 // touch stamps p's mtime from the injected clock — the LRU recency signal, so
-// eviction order is deterministic and independent of wall-clock.
-func (s *FSStore) touch(p string) error {
+// eviction order is deterministic and independent of wall-clock. Best-effort: a
+// failed stamp (e.g. read-only metadata mount) must never fail an otherwise-valid
+// Put or Get. The only cost is a stale recency signal, which at worst evicts a
+// slightly-wrong victim — and the wipeable-cache contract recomputes either way.
+func (s *FSStore) touch(p string) {
 	t := s.now()
-	return os.Chtimes(p, t, t)
+	_ = os.Chtimes(p, t, t)
 }
 
 func (s *FSStore) Get(h Hash) ([]byte, error) {
@@ -112,9 +121,7 @@ func (s *FSStore) Get(h Hash) ([]byte, error) {
 	if HashOf(data) != h {
 		return nil, ErrCorrupt
 	}
-	if err := s.touch(p); err != nil {
-		return nil, err
-	}
+	s.touch(p)
 	return data, nil
 }
 
@@ -188,7 +195,7 @@ func (s *FSStore) list() ([]entry, error) {
 			entries = append(entries, entry{
 				hash:  Hash(f.Name()),
 				size:  info.Size(),
-				atime: info.ModTime(),
+				mtime: info.ModTime(),
 			})
 		}
 	}

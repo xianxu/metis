@@ -1,12 +1,13 @@
 ---
 id: 000009
-status: working
+status: codecomplete
 deps: []
 github_issue:
 created: 2026-07-03
 updated: 2026-07-05
 estimate_hours: 1
 started: 2026-07-05T12:50:01-07:00
+actual_hours: 0.31
 ---
 
 # Content-addressed blob store (CAS): put/get by content-hash, size-bounded eviction
@@ -104,4 +105,6 @@ both floor and discount; reconciled to floor-only.)
 - Filed as the storage floor of the metis-v1 cache chain (**CAS ‹ #3 record ‹ #2 cache**), split out of #2 during the caching design so the blob-store *mechanism* stays separate from cache *policy*. Sole MVP consumer is #2 (+ pointer materialization); #3's record only *references* CAS addresses (hashing ≠ storing), so #3 does not depend on it. v1 scope: pure wipeable cache with size-bounded eviction; rooted/durable archival deferred to the #8 promotion hook. Full design: metis-v1 project file + pensive §Caching + metis#2/#3 `## Design`.
 
 ### 2026-07-05
+- 2026-07-05: closed — go build ./... + go vet ./... clean; go test ./... all green — pkg/cas 14 tests: Store contract (round-trip/dedup/Has/ErrNotFound) for both MemStore+FSStore, HashOf content-addressing, integrity→ErrCorrupt on tampered blob, deterministic LRU eviction (fake clock), evict-then-refetch restore, touch-on-Get recency (true LRU), pure selectEvictions math. Design pre-amortized (settled 2026-07-03, prior session); actual reflects impl-only.; review verdict: FIX-THEN-SHIP
 - **Built `pkg/cas`** (TDD, 14 tests green; build+vet+full-suite clean). `cas.go` (`Hash`/`HashOf` sha256, `Store`, `ErrNotFound`/`ErrCorrupt`, pure `selectEvictions`), `mem.go` (`MemStore` fake), `fs.go` (`FSStore`: sharded `root/<h[:2]>/<h>`, atomic temp+rename, integrity-verify on read, injected-clock mtime-LRU eviction). **Adopted all three `change-code` plan-judge findings** (INFO): (1) ARCH-DRY — matched `pkg/experiment`'s `Clock` convention (local type, no cross-layer dep — CAS is the floor); (2) determinism — `Put`/`Get` stamp mtime via `os.Chtimes(clock())` so eviction ordering is wall-clock-independent (test uses a fake clock, no flakiness); (3) ARCH-PURE — eviction victim-selection is the pure `selectEvictions(entries, maxBytes, keep)`, unit-tested with no filesystem. Estimate-quality judge's advisory (floor-vs-×0.2-discount double-justification) reconciled in `## Estimate` (floor-only, as a design-recurrence hedge).
+- **FIX-THEN-SHIP applied** (close-review, 2 Important + minors, 0 Critical): (1) **`touch` is now best-effort** — a failed `os.Chtimes` (e.g. read-only-metadata mount) no longer fails an otherwise-valid `Get`/`Put` (was returning a non-sentinel error a recompute-keyed consumer wouldn't recognize → every Get hard-failing on such a mount); (2) **documented `FSStore` concurrency** — safe per-op, but best-effort/not-strictly-isolating under a tight `maxBytes` (a concurrent evict may drop another goroutine's just-written blob; recompute covers it), stated so #2 has the guarantee. Minors: renamed the misleading `entry.atime`→`mtime` (it holds `ModTime`); added empty-blob round-trip (both stores) + `MemStore` copy-isolation tests. Suite now 25 leaf-passes, build+vet+full-suite green.

@@ -98,6 +98,24 @@ func runStoreContract(t *testing.T, newStore storeFactory) {
 			t.Errorf("re-Put of identical bytes gave %q then %q", h1, h2)
 		}
 	})
+
+	t.Run("empty blob round-trips", func(t *testing.T) {
+		s := newStore(t)
+		h, err := s.Put([]byte{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := s.Get(h)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got) != 0 {
+			t.Errorf("empty-blob Get = %q, want empty", got)
+		}
+		if ok, _ := s.Has(h); !ok {
+			t.Errorf("Has(empty) = false, want true")
+		}
+	})
 }
 
 func TestMemStore_Contract(t *testing.T) {
@@ -116,8 +134,8 @@ func TestFSStore_Contract(t *testing.T) {
 func TestSelectEvictions_UnderBudgetEvictsNothing(t *testing.T) {
 	base := time.Unix(0, 0)
 	entries := []entry{
-		{hash: "a", size: 100, atime: base},
-		{hash: "b", size: 100, atime: base.Add(time.Second)},
+		{hash: "a", size: 100, mtime: base},
+		{hash: "b", size: 100, mtime: base.Add(time.Second)},
 	}
 	if got := selectEvictions(entries, 250, "b"); len(got) != 0 {
 		t.Errorf("under budget should evict nothing, got %v", got)
@@ -125,7 +143,7 @@ func TestSelectEvictions_UnderBudgetEvictsNothing(t *testing.T) {
 }
 
 func TestSelectEvictions_UnboundedEvictsNothing(t *testing.T) {
-	entries := []entry{{hash: "a", size: 1 << 30, atime: time.Unix(0, 0)}}
+	entries := []entry{{hash: "a", size: 1 << 30, mtime: time.Unix(0, 0)}}
 	if got := selectEvictions(entries, 0, "a"); got != nil {
 		t.Errorf("maxBytes<=0 is unbounded, got %v", got)
 	}
@@ -134,9 +152,9 @@ func TestSelectEvictions_UnboundedEvictsNothing(t *testing.T) {
 func TestSelectEvictions_EvictsOldestFirstUntilUnderBudget(t *testing.T) {
 	base := time.Unix(0, 0)
 	entries := []entry{
-		{hash: "new", size: 100, atime: base.Add(2 * time.Second)},
-		{hash: "old", size: 100, atime: base},
-		{hash: "mid", size: 100, atime: base.Add(time.Second)},
+		{hash: "new", size: 100, mtime: base.Add(2 * time.Second)},
+		{hash: "old", size: 100, mtime: base},
+		{hash: "mid", size: 100, mtime: base.Add(time.Second)},
 	}
 	got := selectEvictions(entries, 150, "new") // 300 total, keep 'new', trim to <=150
 	// Must drop the two oldest (old, then mid) — 'new' is protected.
@@ -150,8 +168,8 @@ func TestSelectEvictions_NeverEvictsProtectedEntry(t *testing.T) {
 	base := time.Unix(0, 0)
 	// One oversized blob that alone exceeds the budget; it is the just-written 'keep'.
 	entries := []entry{
-		{hash: "keep", size: 500, atime: base.Add(time.Second)},
-		{hash: "other", size: 100, atime: base},
+		{hash: "keep", size: 500, mtime: base.Add(time.Second)},
+		{hash: "other", size: 100, mtime: base},
 	}
 	got := selectEvictions(entries, 200, "keep")
 	for _, h := range got {

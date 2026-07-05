@@ -59,11 +59,12 @@ type Store interface {
 }
 
 // entry is a stored blob's eviction-relevant metadata: its hash, byte size, and
-// last-access time (an FS store stamps this from the injected clock on put/get).
+// recency stamp — the file mtime, which an FS store sets from the injected clock on
+// every put/get, so it doubles as the LRU last-access signal.
 type entry struct {
 	hash  Hash
 	size  int64
-	atime time.Time
+	mtime time.Time
 }
 
 // selectEvictions is the pure eviction-victim math: given the current pool of
@@ -73,7 +74,7 @@ type entry struct {
 // no filesystem (ARCH-PURE). maxBytes ≤ 0 means unbounded (evict nothing). The
 // just-written entry (keep) is never a victim, so a Put always leaves its own blob
 // retrievable even if that blob alone exceeds the budget (best-effort budget).
-// Victims are chosen oldest-atime-first; hash breaks ties for determinism.
+// Victims are chosen oldest-mtime-first; hash breaks ties for determinism.
 func selectEvictions(entries []entry, maxBytes int64, keep Hash) []Hash {
 	if maxBytes <= 0 {
 		return nil
@@ -92,10 +93,10 @@ func selectEvictions(entries []entry, maxBytes int64, keep Hash) []Hash {
 		}
 	}
 	sort.Slice(candidates, func(i, j int) bool {
-		if candidates[i].atime.Equal(candidates[j].atime) {
+		if candidates[i].mtime.Equal(candidates[j].mtime) {
 			return candidates[i].hash < candidates[j].hash
 		}
-		return candidates[i].atime.Before(candidates[j].atime)
+		return candidates[i].mtime.Before(candidates[j].mtime)
 	})
 	var victims []Hash
 	for _, e := range candidates {
