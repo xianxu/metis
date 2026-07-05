@@ -150,3 +150,19 @@ time via the existing injected `Clock`.
   the full flow entry lands with M3's runner integration.
 - **M3 must feed `Kpre` from the freshly-parsed experiment** (review arch-note), never a round-tripped
   `record.json`, so the `With` Go value types stay stable across runs (K_pre determinism).
+
+### 2026-07-05 — M2 built (FIX-THEN-SHIP; sensor filters + writes)
+- **Sensor exclusion filters now unit-tested** (M2 review Important): `TestSensor_ExcludesRunDirAndStdlib`
+  drives `metis.trace._classify` to prove `METIS_RUN_DIR` reads (a step's own outputs + upstream
+  artifacts — which change every run) and stdlib/venv reads are excluded from D. Without this, M3 would
+  MISS every step forever. The filter is the cache's load-bearing correctness contract.
+- **Writes are now filtered** (M2 review Minor): `_audit` skips write-mode/O_WRONLY opens so D is truly
+  reads-only; the docstring is corrected (was "reads only" while `open` fires for writes too) and notes
+  the sensor's own module lands in every D (safe over-invalidation).
+- **`uvLockDigest` / `Code.Deps` deferred to M3** (M2 review Minor): the sensor reports
+  `used_site_packages`; computing the uv.lock git-blob digest into `CodeManifest.Deps` lands in M3 where
+  it's consumed (the plan's M2 bullet claiming it is superseded).
+- **OutputKey is redundant with the Entry** (M3 realization): `hash(K_pre, D)` can't be computed before a
+  run (D needs the run), so its only value is a cross-experiment output identity — which the cache index
+  `K_pre → {D, output-manifest-hash}` already provides within a sweep (the cheap-sweeps requirement). M3
+  drops the unused `OutputKey`/`OutputHash-of-D` path; the Entry stores the manifest's cas-hash directly.

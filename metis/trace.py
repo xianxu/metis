@@ -13,7 +13,14 @@ D is **first-party code + config under the project root only**:
   - collapse any site-packages read → a single `used_site_packages` flag (the Go
     side folds the uv.lock digest into Code.Deps, not D);
   - upstream artifacts + the dataset are NOT in D — they are class-1 keyed via the
-    upstream output-hashes in K_pre.
+    upstream output-hashes in K_pre. Crucially, everything under METIS_RUN_DIR (a
+    step's own outputs + the upstream artifacts it reads) is excluded — else those
+    change every run and every step would MISS forever.
+
+Only reads are recorded (write-mode opens are filtered). The sensor's own module
+(`metis.trace`, `metis.__init__`) appears in the sys.modules snapshot, so it lands in
+every step's D — editing the sensor cold-busts the whole pool (over-invalidation,
+safe direction).
 
 Honest limit (design): `sys.addaudithook` sees Python-level `open`/`import`; a
 C-extension `fopen` (pandas/pyarrow parquet reads) bypasses it — but those are the
@@ -59,8 +66,18 @@ def _classify(path: str) -> None:
 
 
 def _audit(event: str, args) -> None:
-    if event == "open" and args:
-        _classify(args[0])
+    if event != "open" or not args:
+        return
+    # Reads only: the "open" audit event fires for writes too, but a write is not an
+    # input. Skip write modes ('w'/'a'/'x'/'+') and O_WRONLY/O_RDWR opens. (Metis
+    # writes land under the excluded run dir anyway, but filter here for correctness.)
+    mode = args[1] if len(args) > 1 else None
+    if isinstance(mode, str) and any(c in mode for c in "wax+"):
+        return
+    flags = args[2] if len(args) > 2 else 0
+    if isinstance(flags, int) and (flags & (os.O_WRONLY | os.O_RDWR)):
+        return
+    _classify(args[0])
 
 
 def _snapshot_modules() -> None:

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -131,5 +132,39 @@ func TestSensor_RecordsFirstPartyCodeReads(t *testing.T) {
 		if filepath.Ext(r) != ".py" && filepath.Base(r) != "uv.lock" {
 			t.Errorf("unexpected non-code path in D: %q", r)
 		}
+	}
+}
+
+// The sensor's EXCLUSION filters are load-bearing: a read under METIS_RUN_DIR (a
+// step's own outputs + the upstream artifacts it reads — which change every run) or
+// a stdlib/site-packages read must NOT enter D, else at M3 every step MISSes forever.
+// This drives metis.trace._classify directly to pin the filter contract.
+func TestSensor_ExcludesRunDirAndStdlib(t *testing.T) {
+	if _, err := exec.LookPath("uv"); err != nil {
+		t.Skip("uv not on PATH")
+	}
+	root := repoRoot(t)
+	script := `
+import os, json, metis.trace as t
+r = t._PROJECT_ROOT
+os.environ["METIS_RUN_DIR"] = os.path.join(r, "runs")
+t._classify(os.path.join(r, "metis", "io.py"))            # first-party source  -> KEEP
+t._classify(os.path.join(r, "runs", "run1", "out.bin"))   # run-dir output      -> DROP
+t._classify(os.path.join(r, "runs", "run1", "folds.json"))# upstream artifact    -> DROP
+t._classify("/usr/lib/python3.12/json/__init__.py")       # stdlib              -> DROP
+t._classify(os.path.join(r, ".venv", "x", "pandas.py"))   # venv/site-packages  -> DROP (flag)
+print(json.dumps(sorted(t._reads)))
+`
+	cmd := exec.Command("uv", "run", "--project", root, "python", "-c", script)
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("driving metis.trace._classify failed: %v", err)
+	}
+	var kept []string
+	if err := json.Unmarshal([]byte(trimNL(string(out))), &kept); err != nil {
+		t.Fatalf("parse classify output %q: %v", out, err)
+	}
+	if len(kept) != 1 || kept[0] != "metis/io.py" {
+		t.Errorf("filters wrong: D = %v; want only [metis/io.py] (run-dir/stdlib/venv excluded)", kept)
 	}
 }
