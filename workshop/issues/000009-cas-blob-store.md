@@ -42,6 +42,18 @@ semantics (those live in #2 / #3):
 provenance records / the per-step record (→ #3); rooted / durable retention (post-v1
 archival, which hangs off #8's promotion hook — the "rooting" event).
 
+### Revision (2026-07-05): the CAS holds large *output* bytes only — code lives in git
+
+The #8 durability design narrows this primitive's scope:
+- **Code + config are NOT CAS bytes.** They're stored in **git** (blobs on a side ref) and
+  referenced from #3's records by a `(path, git-blob-hash, commit)` pointer-manifest — git's
+  blob-hash *is* the content-hash. So the CAS holds only **large *output* bytes** (and any pinned
+  external download), as a wipeable `content-hash → bytes` map.
+- This *strengthens* the wipeable-cache guarantee: `rm -rf cas/` loses only recomputable output
+  bytes; nothing irreplaceable (code manifest, metrics, git blobs) was ever in the CAS. The
+  Problem's "retained input bytes" is superseded — inputs are either git (code/config) or
+  refetchable (external data), never CAS-durable.
+
 ## Done when
 
 - `put` / `get` / `has` round-trip bytes by content hash, with integrity-verify on

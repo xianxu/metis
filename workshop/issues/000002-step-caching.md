@@ -165,6 +165,24 @@ heavy data through framework helpers so the read stays on the observable path.
   Carte"), gcc `-MMD` depfiles / ccache depend-mode, Nix derivations + GC roots, DVC
   (pointers-in-git + content store), Bazel/Nix sandboxes for the airtight leaf.
 
+### Revision (2026-07-05): git owns code; the CAS owns only wipeable output bytes
+
+The durability model above is refined by the #8 ledger design (git-native code capture):
+- **`D` is a manifest of pointers, not stored content.** Per step, metis persists
+  `(path, git-blob-hash, commit)` for each closure file. **git's blob-hash *is* the
+  content-hash** (drop the separate `content_hash(D)` hash function — use git's), and git's
+  `(commit, path)` is the content location. metis stores no code bytes.
+- **Capture:** on a **miss**, use the trace to find the closure files; if any are
+  dirty/untracked, **commit just those to a side ref** (`refs/metis/sweeps/*`) — so `main` stays
+  clean and the run has a real code SHA. On a **hit**, the code is unchanged → its commit-SHA is
+  read back from the cache entry (no new commit, no search).
+- **The CAS is a wipeable `content-hash → bytes` map for large *outputs* only.** Code+config are
+  **not** CAS bytes — they're git blobs + a pointer-manifest in the durable records. So
+  `rm -rf cas/` loses only recomputable output bytes; code + provenance are untouched.
+- The output key's code-identity term = a hash of the closure's `(path, git-blob-hash)` pairs
+  (git-derived), preserving per-step precision; the cache-hit check = re-hash (git `hash-object`)
+  vs the manifest, or `git diff` the closure vs the SHA.
+
 ## Done when
 
 - (design-stage) A design note settles: cache-key composition, where cached

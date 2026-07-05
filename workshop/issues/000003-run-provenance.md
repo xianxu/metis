@@ -119,6 +119,22 @@ on shared upstream steps (same config → same key-material). Storage: the recor
 metadata → **git** (durable-small, inheriting the brain's replication/encryption); large
 bytes stay in the CAS (wipeable) or refetchable externally.
 
+### Revision (2026-07-05): the `code` field is a git-pointer manifest
+
+Refined by the #8 ledger/durability discussion:
+- The record's **`code`** key-material is a **manifest of `(path, git-blob-hash, commit)`
+  pointers** (not `content-hash` bytes): **git's blob-hash is the content-hash**, git's
+  `(commit, path)` is the location. metis stores no code bytes — git does.
+- **Capture:** a sweep commits its traced code closure to a side ref (`refs/metis/sweeps/*`) on a
+  miss if dirty, so every run has a real code SHA. This makes the git-SHA point-address **always
+  valid** (every sweep is committed) — collapsing the clean-vs-dirty nuance: recovery of a past
+  (even "dirty") version = `git checkout <its sweep-SHA>`.
+- **Human run-address = (sweep short-SHA, free-param tuple)** — a git short-SHA (`a1b2c3d`) is the
+  eyeballable handle; metis invents no id.
+- **Durability by construction:** the pointer-manifest lives in the durable records, the blobs in
+  git (side-ref, GC-protected). The CAS holds only wipeable large-output bytes; wiping it loses no
+  code or provenance.
+
 ## Done when
 
 - (design-stage) A design note settles what gets snapshotted (config shape, git
