@@ -11,6 +11,14 @@ identical on a non-Kaggle platform?* — if yes, it lives here.
   `vocabulary validate-instance` structural validator, the enforcement merge-check (M1), the
   Go step-runner (M2), and the Python data plane — Dataset/Schema/Split + `cv-split`/`train`/
   `predict` step-types run hermetically via uv (M3).
+- **`pkg/record`** (the L0 provenance record) — the unified per-step record (metis#3), the
+  reproducibility atom the v1 cache/ledger chain keys off. Pure leaf over `pkg/cas`: `RunRecord`/
+  `StepRecord` (emitted as `runs/<id>/record.json`, CUE-drift-guarded), `PointAddress` (the L0
+  run-identity: config+repo-SHAs+seed content-address), `OutputHash` (multi-file output reduction).
+  `Runner.Run` returns per-step `[]StepRun` so `cmd/metis` can assemble the record (git provenance
+  via an injected `gitProbe`), write `record.json`, and render the knob→score `## Runs` line. Scope
+  line: #3 owns the record + point-address; the trace/cache-key are #2, side-ref code capture #7/#8.
+  See [experiment.md](experiment.md). [metis#3]
 - **`pkg/cas`** (content-addressed blob store) — the storage floor of the metis-v1 cache
   chain (**CAS ‹ #3 record ‹ #2 cache**). Mechanism only: `Store` (`Put(data)→Hash` /
   `Get` integrity-verified / `Has`), sha256 keys, self-deduplicating, sharded FS pool

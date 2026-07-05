@@ -37,6 +37,7 @@ func TestRunExperiment_EndToEnd(t *testing.T) {
 		runID:    "run-001",
 		stepPath: []string{filepath.Join(root, "testdata", "steps")},
 		now:      func() time.Time { return time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC) },
+		git:      fakeGitProbe{name: "metis", sha: "testsha", dirty: false},
 		out:      io.Discard,
 	})
 	if err != nil {
@@ -104,6 +105,7 @@ func TestRunExperiment_RelativePath(t *testing.T) {
 		runID:    "run-rel",
 		stepPath: []string{filepath.Join(root, "testdata", "steps")},
 		now:      func() time.Time { return time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC) },
+		git:      fakeGitProbe{name: "metis", sha: "testsha", dirty: false},
 		out:      io.Discard,
 	})
 	if err != nil {
@@ -141,6 +143,7 @@ func TestRunExperiment_FailedStepStillWritesLedger(t *testing.T) {
 		runID:    "run-001",
 		stepPath: []string{filepath.Join(root, "testdata", "steps")},
 		now:      func() time.Time { return time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC) },
+		git:      fakeGitProbe{name: "metis", sha: "testsha", dirty: false},
 		out:      io.Discard,
 	})
 	if err == nil {
@@ -195,6 +198,7 @@ func TestRunExperiment_RejectsInvalidAtRunTime(t *testing.T) {
 		runID:    "run-001",
 		stepPath: []string{filepath.Join(root, "testdata", "steps")},
 		now:      func() time.Time { return time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC) },
+		git:      fakeGitProbe{name: "metis", sha: "testsha", dirty: false},
 		out:      io.Discard,
 	})
 	if err == nil {

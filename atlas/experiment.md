@@ -35,11 +35,28 @@ a Run. Split across a pure core and a thin IO layer:
   - `Validate(Experiment) error` — the semantic checks CUE can't express (unique ids, `needs`
     resolution, `uses` = `^[a-z0-9-]+/[a-z0-9-]+$`, acyclicity); joins all violations.
   - `TopoSort(Experiment) ([]Step, error)` — Kahn's algorithm; the one acyclicity impl.
-  - `Runner.Run(exp, runID, runDir)` — orchestrates Validate → TopoSort → execute-each →
-    assemble the `Run`. Step execution is injected via the `StepExecutor` interface, so the
-    orchestration is fake-executor tested with **no subprocess** (the ARCH-PURE line).
+  - `Runner.Run(exp, runID, runDir) (Run, []StepRun, error)` — orchestrates Validate → TopoSort →
+    execute-each → assemble the `Run`, and returns the per-step `[]StepRun` (topo order) so the
+    provenance record (`pkg/record`) can reach the per-step data the flat `Run` merge discards.
+    Step execution is injected via the `StepExecutor` interface, so the orchestration is
+    fake-executor tested with **no subprocess** (the ARCH-PURE line).
+- **Provenance record — `pkg/record/`** (metis#3, pure; leaf over `pkg/cas`):
+  - `RunRecord` / `StepRecord` / `CodeManifest` / `FileHash` — the unified per-step provenance
+    record (the L0 reproducibility atom), emitted as `runs/<id>/record.json`. Mirrors the CUE
+    `#RunRecord`/`#StepRecord` (drift-guarded). Fields split by role: key-material (`With`,
+    `Upstream`, `Code`) vs. provenance-extras (`OutputHash`, `Metrics`).
+  - `PointAddress(resolvedWith, repoSHAs, seed) (Hash, error)` — mints the **L0 run-identity**
+    (repro key; the coarse config+repo+seed content-address, NOT the per-step trace) via canonical
+    `json.Marshal` → `cas.HashOf`; errors on non-finite config.
+  - `OutputHash([]FileHash) Hash` — reduces a step's multi-file output set to one address (sorted
+    `(path, content-hash)` manifest).
+  - **Scope line:** #3 owns the record + point-address; the read-set trace `D` + cache key are
+    **metis#2** (they populate `Code.D`/`Deps`/`Upstream`); side-ref code *capture* is **metis#7/#8**
+    (#3 records the current commit + dirty flag).
 - **Thin IO — `cmd/metis/`:** `execStep` (the real `os/exec` `StepExecutor`) + the run-ledger
-  writer. `runDir` is absolutized at this boundary so step paths resolve from any cwd.
+  writer + the record assembler (`assembleRecord`/`buildRecord`, git provenance via an injected
+  `gitProbe`, per-step output-hashing) that writes `record.json` and the knob→score `## Runs` line.
+  `runDir` is absolutized at this boundary so step paths resolve from any cwd.
 
 ### Step-executable contract (what M3 step-types must honor)
 
