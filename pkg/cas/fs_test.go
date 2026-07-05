@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -53,6 +54,57 @@ func TestFSStore_GetDetectsCorruption(t *testing.T) {
 	_, err := s.Get(h)
 	if !errors.Is(err, ErrCorrupt) {
 		t.Errorf("Get of corrupted blob = %v, want ErrCorrupt", err)
+	}
+}
+
+func TestFSStore_ReputHealsCorruption(t *testing.T) {
+	root := t.TempDir()
+	clk, _ := fakeClock(time.Unix(0, 0))
+	s := NewFSStore(root, 0, clk)
+	h := mustPut(t, s, []byte("heal me"))
+
+	// Corrupt the on-disk bytes behind the store's back.
+	p := filepath.Join(root, string(h)[:2], string(h))
+	if err := os.WriteFile(p, []byte("corrupted!!"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Get(h); !errors.Is(err, ErrCorrupt) {
+		t.Fatalf("Get corrupt = %v, want ErrCorrupt", err)
+	}
+
+	// Recompute-into-place: re-Put the correct bytes must HEAL the blob (the
+	// wipeable-cache contract), not dedup-skip past the corrupt file.
+	if h2 := mustPut(t, s, []byte("heal me")); h2 != h {
+		t.Fatalf("re-Put hash %q != %q", h2, h)
+	}
+	got, err := s.Get(h)
+	if err != nil {
+		t.Fatalf("Get after re-Put = %v, want healed bytes", err)
+	}
+	if string(got) != "heal me" {
+		t.Errorf("healed bytes = %q, want %q", got, "heal me")
+	}
+}
+
+func TestFSStore_RejectsMalformedKeys(t *testing.T) {
+	root := t.TempDir()
+	clk, _ := fakeClock(time.Unix(0, 0))
+	s := NewFSStore(root, 0, clk)
+
+	for _, bad := range []Hash{
+		"../../etc/hosts",
+		"..",
+		"abc",                          // too short
+		Hash(strings.Repeat("g", 64)),  // right length, non-hex
+		Hash(strings.Repeat("A", 64)),  // uppercase (HashOf emits lowercase)
+		"a/b/c",                        // path separators
+	} {
+		if ok, err := s.Has(bad); err != nil || ok {
+			t.Errorf("Has(%q) = (%v, %v), want (false, nil)", bad, ok, err)
+		}
+		if _, err := s.Get(bad); !errors.Is(err, ErrNotFound) {
+			t.Errorf("Get(%q) = %v, want ErrNotFound", bad, err)
+		}
 	}
 }
 

@@ -43,33 +43,56 @@ func NewFSStore(root string, maxBytes int64, now Clock) *FSStore {
 	return &FSStore{root: root, maxBytes: maxBytes, now: now}
 }
 
-// shardPath returns the on-disk path for h and whether h is well-formed enough to
-// have one (a hash shorter than the shard prefix cannot, so it reads as absent).
+// shardPath returns the on-disk path for h and whether h is a well-formed key. A
+// base primitive must not turn an arbitrary key string into a filesystem path:
+// anything that isn't the exact shape HashOf produces (64 lowercase hex chars) is
+// rejected as absent, so no path separator or `..` can escape root and Get/Has
+// answer ErrNotFound/false for a malformed key.
 func (s *FSStore) shardPath(h Hash) (string, bool) {
-	if len(h) < 2 {
+	if !isHash(h) {
 		return "", false
 	}
 	return filepath.Join(s.root, string(h)[:2], string(h)), true
 }
 
+// isHash reports whether h is exactly 64 lowercase hex characters — the shape
+// HashOf emits (hex-encoded sha256).
+func isHash(h Hash) bool {
+	if len(h) != 64 {
+		return false
+	}
+	for i := 0; i < len(h); i++ {
+		c := h[i]
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+			return false
+		}
+	}
+	return true
+}
+
 func (s *FSStore) Put(data []byte) (Hash, error) {
 	h := HashOf(data)
-	p, _ := s.shardPath(h) // HashOf always yields a 64-char hash
+	p, _ := s.shardPath(h) // HashOf always yields a well-formed 64-hex hash
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		return "", err
 	}
-	if _, err := os.Stat(p); err == nil {
-		// Already stored (dedup) — just refresh recency, then re-check the budget.
+	// Dedup, but never trust file existence alone: skip the write only if the
+	// existing blob still hashes to h. An absent OR corrupt blob falls through to
+	// the atomic overwrite below — which HEALS corruption on re-Put, the
+	// wipeable-cache "recompute-into-place" contract.
+	if existing, err := os.ReadFile(p); err == nil && HashOf(existing) == h {
 		s.touch(p)
-		return h, s.evict(h)
-	} else if !errors.Is(err, os.ErrNotExist) {
+		s.evict(h)
+		return h, nil
+	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return "", err
 	}
 	if err := s.writeAtomic(p, data); err != nil {
 		return "", err
 	}
 	s.touch(p)
-	return h, s.evict(h)
+	s.evict(h)
+	return h, nil
 }
 
 // writeAtomic writes data to a temp file in p's directory, then renames it into
@@ -141,25 +164,23 @@ func (s *FSStore) Has(h Hash) (bool, error) {
 }
 
 // evict lists the pool and deletes the LRU victims selectEvictions picks, keeping
-// the just-written blob (keep). A no-op when unbounded.
-func (s *FSStore) evict(keep Hash) error {
+// the just-written blob (keep). A no-op when unbounded. Best-effort, like touch:
+// eviction is cache maintenance, so a failed scan or delete never fails the
+// successful Put that triggered it — the pool just stays temporarily over budget,
+// which the next Put retries and the wipeable contract tolerates.
+func (s *FSStore) evict(keep Hash) {
 	if s.maxBytes <= 0 {
-		return nil
+		return
 	}
 	entries, err := s.list()
 	if err != nil {
-		return err
+		return // can't scan the pool → skip this eviction pass
 	}
 	for _, h := range selectEvictions(entries, s.maxBytes, keep) {
-		p, ok := s.shardPath(h)
-		if !ok {
-			continue
-		}
-		if err := os.Remove(p); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return err
+		if p, ok := s.shardPath(h); ok {
+			_ = os.Remove(p)
 		}
 	}
-	return nil
 }
 
 // list walks the sharded pool and returns one entry per stored blob (size + mtime

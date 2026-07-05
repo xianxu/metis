@@ -57,3 +57,101 @@ Strong overall. Gaps worth a follow-up test (none blocking):
 
 **7. Plan revision recommendations**
 None — the Plan and Log accurately describe the shipped code (the "14 tests" wording is approximate but not worth a `## Revisions` entry).
+
+---
+
+## Re-review — 2026-07-05T13:18:38-07:00 (FIX-THEN-SHIP)
+
+| field | value |
+|-------|-------|
+| issue | 9 — Content-addressed blob store (CAS): put/get by content-hash, size-bounded eviction |
+| repo | metis |
+| issue file | workshop/issues/000009-cas-blob-store.md |
+| boundary | whole-issue close |
+| milestone | — |
+| window | 1819d06998c0de9c299017b82043a063f441bd3c..HEAD |
+| command | sdlc close --issue 9 |
+| reviewer | claude |
+| timestamp | 2026-07-05T13:18:38-07:00 |
+| verdict | FIX-THEN-SHIP |
+
+## Review
+
+Ignoring 6 permissions.allow entries from .claude/settings.json: this workspace has not been trusted. Run Claude Code interactively here once and accept the trust dialog, or set projects["/Users/xianxu/workspace/metis"].hasTrustDialogAccepted: true in /Users/xianxu/.claude.json.
+Both issues are **empirically confirmed**. Now I have everything I need to write the review.
+
+```verdict
+verdict: FIX-THEN-SHIP
+confidence: high
+```
+
+A clean, well-structured, well-tested storage floor that delivers issue #9's mechanism-only scope: content-addressed put/get/has, sha256 keys, self-dedup, integrity-verify-on-read, sharded atomic-write FS pool, injected-clock LRU eviction, and a swappable `Store` interface with an in-memory fake. Build/vet/tests are green (50 RUN/PASS). The architecture split (pure `HashOf`/`selectEvictions` core + thin `FSStore` IO shell + injected `Store` seam + `MemStore` fake) is reference-quality, and the shared `runStoreContract` is exactly the right ARCH-DRY move. What blocks a clean SHIP is one confirmed correctness gap: the package's own documented recovery contract — *"a corrupt entry is treated like ErrNotFound and recomputed"* — silently fails, because `Get` leaves the corrupt file on disk and `Put` short-circuits on file-existence without re-verifying, so re-Put **cannot heal a corrupted blob** (verified empirically below). Cheap, localized fix; no current consumers and `rm -rf` remains a safe workaround, so FIX-THEN-SHIP rather than REWORK — but fix it in this pass before recording close.
+
+## 1. Strengths
+
+- **`runStoreContract` (cas_test.go:38)** runs one semantics suite against both `MemStore` and `FSStore` — a single source of truth for the interface contract. Textbook ARCH-DRY for a swappable seam.
+- **Pure `selectEvictions` (cas.go:78)** extracted from the FS shell and unit-tested with zero filesystem (cas_test.go:117+). `keep` protection + oldest-mtime-first + hash tie-break give deterministic, FS-free eviction. Textbook ARCH-PURE.
+- **Atomic temp+rename write** (fs.go:77) with `.tmp-` prefix skipped by the eviction scan (fs.go:185) — a concurrent reader never observes a partial blob.
+- **`touch` is correctly best-effort** now (fs.go:104-107) — a failed `os.Chtimes` no longer poisons an otherwise-valid Get/Put. This is the right resolution of the prior review's Important #1, and it's well-reasoned in the comment.
+- **`MemStore` defensively copies on both Put and Get** (mem.go:24-26, 38-39), pinned by a load-bearing test (mem_test.go), so callers can't mutate stored bytes through an alias.
+- **`FSStore` concurrency semantics are now documented** (fs.go:20-29) — the best-effort/not-strictly-isolating behavior under tight `maxBytes` is stated for #2 to rely on.
+- Both impls carry `var _ Store` compile-checks; `Clock` deliberately kept local to preserve dependency direction (floor takes no upward dep).
+
+## 2. Critical findings
+
+**C1 — Corruption recovery via re-Put silently fails; the documented wipeable-cache contract is broken** (fs.go:121-122 + fs.go:61-64). Confirmed empirically:
+
+```
+after re-Put: Get err="cas: blob failed integrity check" got=""
+CONFIRMED BUG: re-Put did NOT heal corrupt blob; Get still ErrCorrupt
+```
+
+The package doc (cas.go:43-46) and Spec both promise: *"A wipeable-cache consumer treats [ErrCorrupt] like ErrNotFound and recomputes."* But the recompute path is `Get→ErrCorrupt→recompute→Put`, and:
+- `Get` returns `ErrCorrupt` **without removing** the corrupt file (fs.go:121).
+- `Put` sees `os.Stat(p) == nil` (the corrupt file still exists) → takes the dedup branch (fs.go:61-64) → `touch` + `evict`, **never rewriting the bytes**.
+
+So a corrupt blob is poisoned permanently: every subsequent `Get` returns `ErrCorrupt`, and the documented recovery (re-Put) is a no-op. A consumer that follows the contract loops recomputing without progress (or hard-errors). Only a manual `rm` heals it. Note the safe path is preserved — `Get` never returns wrong bytes — so real-world impact is availability-of-one-blob, and the trigger (on-disk corruption of a file that survived an atomic write) is rare; that's why the verdict is FIX-THEN-SHIP, not REWORK. But it is the package's own stated contract, so fix before close.
+
+**Fix (one clean change resolves it):** on the integrity-mismatch branch of `Get`, best-effort remove the corrupt file before returning `ErrCorrupt`, so corruption degrades to `ErrNotFound` and re-Put restores it exactly like the evict-then-refetch path:
+```go
+if HashOf(data) != h {
+    _ = os.Remove(p) // best-effort self-heal: next Put re-writes; degrades to ErrNotFound
+    return nil, ErrCorrupt
+}
+```
+This also fixes the secondary `Has`/`Get` inconsistency (a corrupt blob currently reports `Has→true` but `Get→ErrCorrupt`). Add a regression test (see §5). *Alternative:* have `Put` re-verify integrity when the file exists and overwrite on mismatch — but the Get-removes approach is smaller and mirrors eviction.
+
+## 3. Important findings
+
+**I1 — Path traversal via a non-hash `Hash` key on `Get`/`Has`** (fs.go:48-53). `shardPath` joins the raw `Hash` string into a filesystem path with no format validation. Confirmed empirically:
+```
+shardPath(Hash("../../../../../../etc/hosts")) = "/etc/hosts" ok=true
+Has(Hash("../../../../../../etc/hosts")) = true   // existence oracle for arbitrary paths
+```
+`Get`'s integrity check (`HashOf(data) != h`) blocks *content* exfiltration (it returns `ErrCorrupt`, never the foreign bytes), but: (a) `Has` is an unguarded existence oracle for any path, and (b) `Get` will `os.ReadFile` an arbitrary attacker-named file into memory before rejecting it. Today all keys are internally-generated 64-char hex sha256, so there's no live exploit — but this is the ariadne **base layer**, downstream #2/#3 will pass hashes read from records/manifests, and a base primitive that turns an arbitrary key string into a filesystem path is a latent traversal. **Fix (cheap):** validate the key format in `shardPath` — treat anything that isn't a well-formed hash (length ≠ 64, or non-hex, or contains a path separator / `.`) as absent (`return "", false`). That makes `Get`/`Has` reject malformed keys as `ErrNotFound`/`false` and keeps every on-disk path inside `root`.
+
+**I2 — `evict` failure fails an otherwise-successful `Put`; inconsistent with the best-effort `touch`** (fs.go:64, 72, 145-163). After `writeAtomic` succeeds the blob **is stored**, but if `evict`'s `os.Remove` returns a non-`NotExist` error, `Put` returns `(h, err)` — a valid hash paired with a non-nil error. A consumer that reads the error as "not stored" is wrong (the blob is on disk). Eviction is best-effort cache maintenance, exactly like `touch` (which the same diff correctly swallows). Recommend making `evict` best-effort too — log/swallow its errors so a maintenance hiccup never fails a Put whose write succeeded. This is the "inconsistent error handling across the diff" class.
+
+## 4. Minor findings
+
+- Orphaned `.tmp-*` files (from a crashed/interrupted `Put`) are skipped by `list` (fs.go:185) so they're never counted toward the budget nor reclaimed by eviction — they accumulate until `rm -rf`. Acceptable under the wipeable contract; worth a cleanup-on-startup or age-based sweep later.
+- `evict` walks the entire pool (`ReadDir` every shard + `Info` every file) on *every* bounded `Put` — O(pool) per write. Fine now; won't scale to a large pool (future: index/heap).
+- `Get` mutates the filesystem (`Chtimes`) on every read — inherent to mtime-LRU; the best-effort `touch` already keeps it from failing reads, so this is just a note.
+- No `fsync` on the write/rename — a post-write power loss can lose a just-Put blob. Correct-by-design for a wipeable cache (recompute covers it); note only.
+
+## 5. Test coverage notes
+
+Coverage is strong for the happy paths, dedup, eviction ordering, LRU-recency, and evict-then-refetch. Gaps that map directly to the findings above:
+- **No re-Put-after-corruption test** — this is precisely why C1 shipped. `TestFSStore_GetDetectsCorruption` asserts `ErrCorrupt` but never tries to recover. Add: corrupt on disk → `Get`→`ErrCorrupt` → re-`Put`(correct bytes) → `Get` succeeds. (Fails today; passes after the C1 fix.)
+- **No malformed-key / path-traversal test** for `Get`/`Has` (I1). Add: `Has("../../etc/hosts")` → `false`, and a `..`-bearing key → `ErrNotFound`.
+- **No concurrent-access test** for `FSStore` — the concurrency contract is now documented (fs.go:20-29) but unexercised; a `t.Parallel` Put/Get stress test would pin the "safe per-op" half of the claim.
+
+## 6. Architectural notes for upcoming work
+
+- **ARCH-DRY — pass.** Shared `runStoreContract`, extracted `selectEvictions`, and the deliberately-local `Clock` (duplicating a one-line type to preserve dependency direction — floor must not depend upward on `pkg/experiment`) are the right calls. No copy-paste to consolidate.
+- **ARCH-PURE — pass.** Pure core (`HashOf`, `selectEvictions`) unit-tested with no IO; `FSStore` is the thin IO shell; `Store` is the injected seam; `MemStore` the injectable fake. Reference-quality split.
+- **ARCH-PURPOSE — pass, with one caveat.** Mechanism-only scope is fully delivered and the shadow-sweep doesn't apply (CAS is a standalone floor, not a single-source compiled to consumers; #2/#3/#8 are correctly deferred *separable* extensions, not the deferred point of this issue). The caveat is C1: the issue's stated purpose includes *"may evict/lose any entry with no correctness impact — it's recomputed"*, and the **corruption** sub-case doesn't recompute-into-place. Fixing C1 makes the purpose whole. For **#2**: `MemStore` never evicts and can't corrupt, so a consumer tested *only* against the fake won't exercise the `ErrNotFound`/`ErrCorrupt`-then-recompute path the wipeable-cache contract requires — #2 should cover that path against `FSStore` (or a bounded/corruptible fake).
+
+## 7. Plan revision recommendations
+
+None required **if C1 is fixed** — the Plan/Log accurately describe the intended shipped code, and the Log already supersedes the "14 tests" wording with "25 leaf-passes." Only if the team chooses *not* to fix C1: add a `## Revisions` entry (and amend the `ErrCorrupt` doc at cas.go:43-46 + the Spec's wipeable-cache clause) stating that a *corrupt* blob is not healed by re-Put and requires a manual `rm` — because as written the doc claims a recovery the code doesn't deliver.
