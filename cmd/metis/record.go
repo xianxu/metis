@@ -82,7 +82,9 @@ func assembleRecord(git gitProbe, out io.Writer, dir, runDir string, run experim
 // hashes (computed by the caller from artifact bytes), and the git provenance, and
 // mints the point-address from the resolved config + repo SHA + seed. Pure aside from
 // PointAddress (which errors on non-finite config). #3 fills the coarse code identity
-// (commit + dirty); Upstream / Code.D / Deps are left empty — metis#2 populates them.
+// (commit + dirty); Upstream is populated below (each step's needs → the upstream
+// output-hashes, sorted — the metis#2 K_pre wiring). Code.D / Deps stay empty in the
+// record — that provenance population is deferred to metis#8 (git-side-ref durability).
 func buildRecord(run experiment.Run, steps []experiment.StepRun, outputHashes map[string]record.Hash, repoName, sha string, dirty bool) (record.RunRecord, error) {
 	resolvedWith := make(map[string]map[string]any, len(steps))
 	stepRecs := make([]record.StepRecord, 0, len(steps))
