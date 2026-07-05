@@ -5,7 +5,7 @@ deps: []
 github_issue:
 created: 2026-07-03
 updated: 2026-07-05
-estimate_hours:
+estimate_hours: 2
 started: 2026-07-05T16:41:40-07:00
 ---
 
@@ -191,11 +191,13 @@ Point count = `features(4) × [ logreg:C(3) + rf:n_est(3)×depth(2)=6 ]` = **36*
 
 ## Plan
 
-- [x] Design settled 2026-07-04 — value-level `$`-vocab + algebra + `sweep:` block + expand/bundling (see `## Design`).
-- [ ] Space-descriptor vocab (`$any`/`$oneof`/`$linear-range`/`$log-range`) + `sweep:` block, recognized in the `with` bag; keep the CUE DAG-shape schema, add a light CUE constraint for `sweep:` if cheap.
-- [ ] `experiment-shape` datatype prototype (mirrors `experiment`) + `titanic-sweep` fixture; conformance that an all-singleton shape ≡ an `experiment`.
-- [ ] Pure `expand(shape) → [point]` (sum/product/leaf; `$oneof` bundles; ranges → grid-materialized; singleton→one-point), unit-tested.
-- [ ] Structural validator + atlas entry for the new type.
+Durable impl plan: `workshop/plans/000006-experiment-shape-plan.md` (the algebra recap, scope line
+vs. #7/#8, 2 review boundaries). TDD; the pure `Expand` core (M1) is reviewed before the datatype/CUE
+integration (M2).
+
+- [x] Design settled 2026-07-04 — value-level `$`-vocab + algebra + `sweep:` block + expand/bundling (see `## Design`); impl decomposed into the durable plan (2026-07-05).
+- [ ] **M1 — the pure lift** (`pkg/shape` + `Expand`). `Point{With, FreeParams}`; `Expand(steps, rangeSteps) → []Point` — the pure recursion (product→cartesian; `$any`→set; `$oneof`→bundled labeled sum that ADDs; `$*-range`→grid linspace/logspace). Free-param path per point (only space-descriptor leaves; ragged). Malformed-descriptor errors. Unit tests: the **36-point titanic example** ($oneof adds not multiplies), bundling, range materialization + `range_steps` default, **all-singleton→exactly one v0 point**, ragged free-param paths, malformed errors.
+- [ ] **M2 — datatype + CUE + parse integration.** CUE `#ExperimentShape` (`type`, `steps` DAG with untyped `with`, the `sweep:` block; `#Experiment` = singleton refinement) + drift guard. Go `Shape` parse (`type: experiment-shape` + `Sweep`). `experiment-shape` datatype prototype + a `titanic-baseline-shape` fixture that validates + expands. `metis run` on a shape: parse+validate+Expand; all-singleton → run the one point (cached runner); multi-point → clear "sweep driver is metis#7" pointer (the sweep loop is #7). e2e (singleton-shape runs like v0; multi-point expands to the right count). Atlas.
 
 ## Log
 
@@ -204,3 +206,25 @@ Point count = `features(4) × [ logreg:C(3) + rf:n_est(3)×depth(2)=6 ]` = **36*
 
 ### 2026-07-04
 - **Design settled** (syntax brainstorm). Lift is **value-level** on v0's untyped `with` bag (reserved `$`-keys), not CUE-typed leaves — reconciles the Spec's `Space[T] in CUE` framing with v0 reality (config is untyped; CUE types only the DAG shape). Algebra: `$any` (set, sugar) / `$oneof` (labeled conditional sum — branches ADD, fixing `logreg.C` vs `rf.n_estimators`) / plain map (product) / `$linear-range`·`$log-range: [lo,hi,steps?]` (domain+metric, **not** a distribution — dropped `Dist`/loguniform, the sampler owns traversal). `expand()` **bundles** `$oneof` to `{label:{…}}` (follows hierarchy, not flat siblings) and yields v0-shaped `with`. A `sweep:` block (sampler / objective{metric,direction} / range_steps) lives in the shape frontmatter — one artifact, no separate sweeper concept. **Cross-cutting decisions captured here pending their own passes:** #7 (the `propose(domains,history)→next|stop` seam + the objective feeding adaptive samplers), #8 (free-param-tuple ledger key, ragged→sparse columns, promotion driven by `objective`, and fixing v0's flat last-write-wins metric merge). Prior art: sklearn `ParameterGrid` list-of-dicts + Nevergrad `Choice`/`Dict` = this exact algebra.
+
+## Estimate
+
+*Produced via `brain/data/life/42shots/velocity/estimate-logic-v3.1.md` against `baseline-v3.1.md`. Method A only.*
+
+```estimate
+model: estimate-logic-v3.1
+familiarity: 1.0
+item: greenfield-go-module   design=0.5 impl=0.4
+item: smaller-go-module      design=0.2 impl=0.3
+item: milestone-review       design=0.0 impl=0.2
+item: milestone-review       design=0.0 impl=0.2
+item: atlas-docs             design=0.05 impl=0.05
+design-buffer: 0.15
+total: 1.96
+```
+
+Design pre-settled → design near the floor. M1 greenfield `pkg/shape` (the pure `Expand` algebra — the
+keystone, 36-point example); M2 a smaller-go-module *extend* (CUE `#ExperimentShape` + `Shape` parse +
+runner integration + fixture). Two `milestone-review` (2 boundaries). A small atlas note. Impl at
+40%-of-v2 (v3.1); +15% thorough-plan buffer.
+- **M1 built — the pure lift `pkg/shape`** (TDD, all green; build+vet+full-suite clean). `Point{With, FreeParams}` + `FreeParam{Path, Value}`; `Expand(steps, rangeSteps) → []Point` — the pure recursion: product (map) → cartesian; `$any` → verbatim set; `$oneof` → **bundled** labeled sum that **ADDs** (`{label: resolved-sub}`); `$linear-range`/`$log-range` → grid (linspace/logspace, `range_steps` default). Per-point **free-param path** (only descriptor leaves; ragged; range leaves record the *materialized* value). Malformed descriptors (mixed `$`+plain keys, unknown `$`-key, non-numeric bounds) error. Tests: **the 36-point titanic keystone** (`features(4) × [logreg:C(3) + rf:(3×2)] = 36`, proving `$oneof` adds not multiplies), product×set, all-singleton→1-point (byte-identical v0 with), ragged free-params, range→grid + `range_steps` default, malformed errors. Next: M2 (CUE `#ExperimentShape` + `Shape` parse + runner integration + fixture).
