@@ -113,11 +113,14 @@ func readMetrics(path string) (map[string]float64, error) {
 
 // collectArtifacts lists the artifact files a step wrote in its dir — recursively,
 // so a step that writes nested outputs (e.g. sub/*.parquet) has them all recorded —
-// as slash paths relative to runDir (i.e. under runs/<id>/). The two CONTRACT
-// channels are excluded, but only at the step-dir TOP level: with.json (the input
-// config) and metrics.json (already parsed into run.Metrics — the metrics channel,
-// not an artifact). A file a step happens to write at a nested path like
-// sub/metrics.json is a genuine artifact. Sorted for a deterministic ledger.
+// as slash paths relative to runDir (i.e. under runs/<id>/). The reserved CONTRACT/
+// bookkeeping channels are excluded, but only at the step-dir TOP level: with.json
+// (the input config), metrics.json (already parsed into run.Metrics), and reads.json
+// (the metis#2 read-sensor's sidecar — bookkeeping, NOT an output; folding it into the
+// output-hash would make an upstream code edit bust all downstream even when the real
+// output is byte-identical, and its absolute project_root would defeat cross-machine
+// cache reuse). A file a step happens to write at a nested path like sub/metrics.json
+// is a genuine artifact. Sorted for a deterministic ledger.
 func collectArtifacts(stepDir, runDir string) ([]string, error) {
 	var arts []string
 	err := filepath.WalkDir(stepDir, func(path string, d fs.DirEntry, err error) error {
@@ -128,8 +131,8 @@ func collectArtifacts(stepDir, runDir string) ([]string, error) {
 			return nil
 		}
 		if filepath.Dir(path) == stepDir {
-			if name := d.Name(); name == "with.json" || name == "metrics.json" {
-				return nil // reserved contract channels (top level only)
+			if name := d.Name(); name == "with.json" || name == "metrics.json" || name == "reads.json" {
+				return nil // reserved contract / bookkeeping channels (top level only)
 			}
 		}
 		rel, err := filepath.Rel(runDir, path)

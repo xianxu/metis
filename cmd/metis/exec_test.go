@@ -61,6 +61,7 @@ func TestCollectArtifacts_RecursiveExcludesReserved(t *testing.T) {
 	writes := map[string]string{
 		"with.json":        "{}", // reserved (top level) — excluded
 		"metrics.json":     "{}", // reserved (top level) — excluded
+		"reads.json":       "{}", // metis#2 sensor sidecar (top level) — excluded
 		"top.txt":          "x",  // artifact
 		"sub/nested.csv":   "y",  // artifact (recursion)
 		"sub/metrics.json": "{}", // artifact (nested — NOT reserved)

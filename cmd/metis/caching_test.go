@@ -8,7 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/xianxu/metis/pkg/cache"
 	"github.com/xianxu/metis/pkg/experiment"
+	"github.com/xianxu/metis/pkg/record"
 )
 
 // The cheap-sweeps payoff (metis#2): a second identical run HITs every step (no
@@ -164,5 +166,22 @@ func TestCache_ImmutableLeafMarker(t *testing.T) {
 	}
 	if isImmutableLeaf(experiment.Step{ID: "x"}) {
 		t.Error("a step with no with must not be an immutable leaf")
+	}
+}
+
+// The immutable-leaf HIT path bypasses D re-validation entirely (HIT on K_pre alone):
+// an entry whose D would MISS (a file that won't re-hash) still HITs for a leaf, but
+// MISSes for a normal step. Pins the runner-level bypass, not just the marker predicate.
+func TestCachingExecutor_ImmutableLeafBypassesDValidation(t *testing.T) {
+	c := &cachingExecutor{projectRoot: t.TempDir()} // no git repo / no D file here
+	badEntry := cache.Entry{Kpre: "k", D: []record.CodeRef{{Path: "nope.py", BlobHash: "stale"}}}
+
+	leaf := experiment.Step{ID: "get", With: map[string]any{"cache": map[string]any{"leaf": "immutable"}}}
+	if !c.isHit(leaf, badEntry) {
+		t.Error("an immutable leaf must HIT on K_pre alone, bypassing D re-validation")
+	}
+	plain := experiment.Step{ID: "train"}
+	if c.isHit(plain, badEntry) {
+		t.Error("a normal step must MISS when its D cannot re-hash clean")
 	}
 }

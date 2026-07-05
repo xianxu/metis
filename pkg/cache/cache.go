@@ -11,7 +11,7 @@
 // A run is a HIT iff a stored entry for its K_pre exists AND re-hashing every path in
 // its D still matches (an edited code file is a path in D whose hash moved → MISS).
 // Code-version invalidation thus falls out of the trace — no git-SHA / import-closure
-// term. The pure core lives here (Kpre / Validate / OutputKey / the Entry codec); the
+// term. The pure core lives here (Kpre / Validate / the Entry codec); the
 // read-sensor and the git blob-hasher (metis#2 M2) and the runner skip/materialize
 // integration (M3) are the thin IO shell in cmd/metis.
 package cache

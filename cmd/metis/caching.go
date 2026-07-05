@@ -192,10 +192,10 @@ func (c *cachingExecutor) recordMiss(kpre cache.Hash, res experiment.StepResult,
 	if err != nil {
 		return err
 	}
-	root := rs.ProjectRoot
-	if root == "" {
-		root = c.projectRoot
-	}
+	// Resolve D paths against c.projectRoot — the SAME root isHit re-hashes against
+	// (both = the metis code root the sensor records), so a store and a later HIT
+	// check can never disagree on where a D path lives.
+	root := c.projectRoot
 	// Fold uv.lock into D when the step touched site-packages, so a dependency
 	// upgrade (a new uv.lock) invalidates the cache — otherwise a pandas/sklearn bump
 	// would false-HIT and serve output computed against the old deps.

@@ -27,6 +27,23 @@ func cacheProjectRoot(stepPath []string, fallback string) string {
 	return fallback
 }
 
+// ensureCacheGitignore writes .metis-cache/.gitignore so the local, wipeable cache
+// (content-addressed output blobs) is never committed to the experiment's repo — the
+// cache is safe to `rm -rf` and rebuild. Idempotent. (Sharing the git-trackable index
+// across clones is a future enhancement; v1 ignores the whole cache dir.)
+func ensureCacheGitignore(cacheDir string) error {
+	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+		return err
+	}
+	gi := filepath.Join(cacheDir, ".gitignore")
+	if _, err := os.Stat(gi); err == nil {
+		return nil
+	}
+	body := "# metis#2 step cache — a local, wipeable content-addressed cache (rm -rf is safe).\n" +
+		"# Never commit its output blobs.\n*\n"
+	return os.WriteFile(gi, []byte(body), 0o644)
+}
+
 // runOpts are the inputs to one `metis run`. now/git/out are injected so the e2e
 // test gets a deterministic clock, a fake git probe, and can discard progress output.
 type runOpts struct {
@@ -85,6 +102,9 @@ func runExperiment(o runOpts) (experiment.Run, error) {
 	var exec experiment.StepExecutor = execStep{stepPath: o.stepPath, expDir: expDir, seed: exp.Seed, out: out}
 	if o.cache {
 		cacheDir := filepath.Join(expDir, ".metis-cache")
+		if err := ensureCacheGitignore(cacheDir); err != nil {
+			return experiment.Run{}, err
+		}
 		store := cas.NewFSStore(filepath.Join(cacheDir, "cas"), 0, cas.Clock(now))
 		exec = newCachingExecutor(exec, store, cacheDir, cacheProjectRoot(o.stepPath, expDir), exp.Seed, out)
 	}
