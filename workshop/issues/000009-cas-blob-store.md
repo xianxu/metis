@@ -1,11 +1,12 @@
 ---
 id: 000009
-status: open
+status: working
 deps: []
 github_issue:
 created: 2026-07-03
-updated: 2026-07-03
+updated: 2026-07-05
 estimate_hours:
+started: 2026-07-05T12:50:01-07:00
 ---
 
 # Content-addressed blob store (CAS): put/get by content-hash, size-bounded eviction
