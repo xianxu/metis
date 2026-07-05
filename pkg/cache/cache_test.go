@@ -124,6 +124,11 @@ func TestOutputKey_Composition(t *testing.T) {
 	if oa != ob {
 		t.Error("output key must be invariant to D listing order")
 	}
+
+	// Empty D (a step with no first-party code reads) still produces a defined key.
+	if empty, err := OutputKey(k1, nil); err != nil || empty == "" {
+		t.Errorf("OutputKey(nil D) = (%q, %v); want a defined key, nil error", empty, err)
+	}
 }
 
 func TestEntry_JSONRoundTrip(t *testing.T) {

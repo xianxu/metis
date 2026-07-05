@@ -136,3 +136,17 @@ Pure core (M1) → direct unit tests over injected hasher/index seams (no filesy
 hermetic uv-gated Python fixture + Go D-builder unit tests. Integration (M3) → the two-run HIT e2e +
 the sweep-reuse e2e (the "cheap sweeps" proof), fixtures copied into `t.TempDir()`. Controllable
 time via the existing injected `Clock`.
+
+## Revisions
+
+### 2026-07-05 — M1 built (FIX-THEN-SHIP; atlas + Validate signature)
+- **`Validate` returns `bool`, not `(bool, error)`** (M1 review Minor): folding a hasher failure
+  (vanished/unreadable D file) into MISS is *sounder* than surfacing it — a MISS only recomputes,
+  never serves stale — so the M1 bullet's `(hit bool, err error)` signature is superseded by
+  `Validate(storedD, hash) bool`. (M3 note: when the real git-blob hasher is wired, *log* a persistent
+  IO error so a disk/permission fault on a D file doesn't silently degrade every run to a cold MISS.)
+- **atlas `pkg/cache` stub added at M1** (review Important, §8): the *package/terminology* surface
+  exists now even though the validating-trace *flow* is M3, so `atlas/index.md` gets the stub now;
+  the full flow entry lands with M3's runner integration.
+- **M3 must feed `Kpre` from the freshly-parsed experiment** (review arch-note), never a round-tripped
+  `record.json`, so the `With` Go value types stay stable across runs (K_pre determinism).

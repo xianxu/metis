@@ -19,6 +19,13 @@ identical on a non-Kaggle platform?* — if yes, it lives here.
   via an injected `gitProbe`), write `record.json`, and render the knob→score `## Runs` line. Scope
   line: #3 owns the record + point-address; the trace/cache-key are #2, side-ref code capture #7/#8.
   See [experiment.md](experiment.md). [metis#3]
+- **`pkg/cache`** (the validating-trace policy layer) — metis#2, the step cache over `pkg/cas`
+  (bytes) + `pkg/record` (key-material). Pure core shipped M1: `Kpre(rec, seed)` (ex-ante key =
+  hash of step-id + uses + resolved-with + seed + sorted-upstream), `Validate(D, hasher)` (re-hash
+  the read-set → HIT/MISS), `OutputKey(kpre, D)`, the `Entry` index codec. The read-sensor (Python
+  audit hooks) + git blob-hasher (M2) and the runner skip/materialize integration + `## the cheap-
+  sweeps flow` (M3) are still to come; `record.CanonicalHash` is the shared hashing primitive.
+  [metis#2]
 - **`pkg/cas`** (content-addressed blob store) — the storage floor of the metis-v1 cache
   chain (**CAS ‹ #3 record ‹ #2 cache**). Mechanism only: `Store` (`Put(data)→Hash` /
   `Get` integrity-verified / `Has`), sha256 keys, self-deduplicating, sharded FS pool
