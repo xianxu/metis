@@ -2,4 +2,4 @@
 # metis/predict — step-type wrapper (see steps/metis/cv-split for the contract note).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-exec uv run --project "$ROOT" python -m metis.steps.predict
+exec uv run --project "$ROOT" python -m metis.trace metis.steps.predict

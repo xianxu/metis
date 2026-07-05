@@ -36,6 +36,7 @@ func run(args []string) error {
 func cmdRun(args []string) error {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	runID := fs.String("run", "", "run id (default: run-<UTC timestamp>)")
+	cache := fs.Bool("cache", true, "use the metis#2 validating-trace step cache (<expDir>/.metis-cache); --cache=false to disable")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -47,6 +48,7 @@ func cmdRun(args []string) error {
 		expPath:  rest[0],
 		runID:    *runID,
 		stepPath: stepPath(),
+		cache:    *cache,
 		out:      os.Stdout,
 	})
 	return err

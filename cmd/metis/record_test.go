@@ -59,6 +59,29 @@ func TestBuildRecord_MintsStablePointAddress(t *testing.T) {
 	}
 }
 
+// buildRecord populates StepRecord.Upstream (the #3 slot #2 fills): each step's
+// needs → the upstream steps' output-hashes, sorted (so K_pre is needs-order
+// invariant). This is the DAG-wiring cache.Kpre depends on.
+func TestBuildRecord_PopulatesUpstreamFromNeeds(t *testing.T) {
+	run := experiment.Run{ID: "r", Experiment: "e", Seed: 1, Started: "t0", Status: "ok"}
+	steps := []experiment.StepRun{
+		{Step: experiment.Step{ID: "prep", Uses: "metis/cv-split"}},
+		{Step: experiment.Step{ID: "train", Uses: "metis/train", Needs: []string{"prep"}}},
+	}
+	oh := map[string]record.Hash{"prep": "hp", "train": "ht"}
+	rec, err := buildRecord(run, steps, oh, "metis", "sha", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// prep has no needs → empty upstream; train needs prep → [prep's output hash].
+	if len(rec.Steps[0].Upstream) != 0 {
+		t.Errorf("prep upstream = %v; want empty", rec.Steps[0].Upstream)
+	}
+	if len(rec.Steps[1].Upstream) != 1 || rec.Steps[1].Upstream[0] != "hp" {
+		t.Errorf("train upstream = %v; want [hp] (prep's output hash)", rec.Steps[1].Upstream)
+	}
+}
+
 func TestBuildRecord_PropagatesConfigError(t *testing.T) {
 	run := experiment.Run{ID: "r", Seed: 0}
 	steps := []experiment.StepRun{{Step: experiment.Step{ID: "s", With: map[string]any{"lr": math.Inf(1)}}}}

@@ -29,13 +29,16 @@ type CodeRef struct {
 }
 
 // CodeManifest identifies the code a step ran. metis#3 fills the coarse identity
-// (Commit + Dirty, from the current repo state); the read-set D + Deps (uv.lock
-// digest) are defined slots the metis#2 validating trace populates.
+// (Commit + Dirty, from the current repo state). The read-set D + Deps (uv.lock
+// digest) are defined slots that stay empty in the RECORD for now: metis#2 built the
+// validating trace and populates the *cache's* functional read-set (cache.Entry.D),
+// but the record's code-manifest *provenance* population is deferred to metis#8 (the
+// git-side-ref durability that captures the code closure).
 type CodeManifest struct {
 	Commit string    `json:"commit"`
 	Dirty  bool      `json:"dirty"`
-	D      []CodeRef `json:"d,omitempty"`    // read-set; metis#2 populates
-	Deps   string    `json:"deps,omitempty"` // uv.lock digest; metis#2 populates
+	D      []CodeRef `json:"d,omitempty"`    // read-set — record provenance deferred to metis#8
+	Deps   string    `json:"deps,omitempty"` // uv.lock digest — deferred to metis#8
 }
 
 // StepRecord is one step's raw provenance record. Fields split by role:
