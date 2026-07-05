@@ -9,9 +9,23 @@ import (
 	"strings"
 	"time"
 
+	"github.com/xianxu/metis/internal/repo"
+	"github.com/xianxu/metis/pkg/cas"
 	"github.com/xianxu/metis/pkg/experiment"
 	"github.com/xianxu/metis/pkg/record"
 )
+
+// cacheProjectRoot resolves the metis code root (the module dir above steps/) that D
+// paths are relative to and `git hash-object` runs in — the same root metis.trace
+// records in reads.json. Falls back to the experiment dir if step paths don't resolve.
+func cacheProjectRoot(stepPath []string, fallback string) string {
+	for _, p := range stepPath {
+		if root, err := repo.Root(p); err == nil {
+			return root
+		}
+	}
+	return fallback
+}
 
 // runOpts are the inputs to one `metis run`. now/git/out are injected so the e2e
 // test gets a deterministic clock, a fake git probe, and can discard progress output.
@@ -21,6 +35,7 @@ type runOpts struct {
 	stepPath []string
 	now      func() time.Time
 	git      gitProbe
+	cache    bool // enable the metis#2 validating-trace cache (<expDir>/.metis-cache)
 	out      io.Writer
 }
 
@@ -67,10 +82,13 @@ func runExperiment(o runOpts) (experiment.Run, error) {
 		return experiment.Run{}, err
 	}
 
-	runner := experiment.Runner{
-		Exec: execStep{stepPath: o.stepPath, expDir: expDir, seed: exp.Seed, out: out},
-		Now:  now,
+	var exec experiment.StepExecutor = execStep{stepPath: o.stepPath, expDir: expDir, seed: exp.Seed, out: out}
+	if o.cache {
+		cacheDir := filepath.Join(expDir, ".metis-cache")
+		store := cas.NewFSStore(filepath.Join(cacheDir, "cas"), 0, cas.Clock(now))
+		exec = newCachingExecutor(exec, store, cacheDir, cacheProjectRoot(o.stepPath, expDir), exp.Seed, out)
 	}
+	runner := experiment.Runner{Exec: exec, Now: now}
 	fmt.Fprintf(out, "metis: run %s of experiment %q\n", runID, exp.ID)
 	run, steps, runErr := runner.Run(exp, runID, runDir)
 

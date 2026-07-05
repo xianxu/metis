@@ -166,3 +166,22 @@ time via the existing injected `Clock`.
   run (D needs the run), so its only value is a cross-experiment output identity — which the cache index
   `K_pre → {D, output-manifest-hash}` already provides within a sweep (the cheap-sweeps requirement). M3
   drops the unused `OutputKey`/`OutputHash-of-D` path; the Entry stores the manifest's cas-hash directly.
+
+### 2026-07-05 — M3 built (runner integration + cheap sweeps)
+- **The cache works end-to-end.** `cachingExecutor` (cmd/metis/caching.go) wraps the step executor:
+  per step compute `K_pre` (config + seed + accumulated upstream output-hashes), look up
+  `.metis-cache/index/<K_pre>.json`, HIT (stored D re-hashes clean) → materialize the output manifest
+  (metrics + artifacts) from a `pkg/cas` FSStore + skip the subprocess; MISS → run + store + index.
+  `metis run --cache` (default on). Two e2es prove the payoff: identical re-run HITs all steps;
+  one-knob change HITs the shared upstream + re-runs only downstream. Real-uv toy-pipeline e2e proves
+  it with real parquet artifacts (re-run reproduces the cv_score from cache).
+- **`uv.lock` folded into D** (soundness): when a step touches site-packages, `uv.lock` is added to D
+  so a dependency upgrade changes its git-blob-hash → MISS. Closes the "new pandas false-HITs" gap the
+  M2 review flagged (the M2 `used_site_packages` flag is now consumed).
+- **`OutputKey` dropped** (elegance): the K_pre-keyed `Entry{D, Output=manifest-cas-hash}` realizes the
+  design's "output at hash(K_pre, D)" mapping without a separately-computed key (which couldn't be
+  computed before a run anyway). M1's `OutputKey` func + test removed.
+- **Deferred to #8: the #3 record's `Code.D`/`Deps` *provenance* population.** It's entangled with the
+  HIT/MISS D-provenance (a HIT has no fresh reads.json) and belongs with #8's git-side-ref durability
+  (which captures the code closure). #2 fully populates the cache's *functional* `Entry.D` (the thing
+  that decides HIT/MISS); the record's code-manifest field stays empty until #8. Scope-line note added.

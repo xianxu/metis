@@ -99,43 +99,11 @@ func TestValidate_HitAndMiss(t *testing.T) {
 	}
 }
 
-// OutputKey composes hash(K_pre, hash(D)) — same K_pre + different D differ; same D +
-// different K_pre differ; and it's invariant to D order.
-func TestOutputKey_Composition(t *testing.T) {
-	d1 := []record.CodeRef{{Path: "a", BlobHash: "h1"}}
-	d2 := []record.CodeRef{{Path: "a", BlobHash: "h2"}} // code changed
-	k1, k2 := record.Hash("kpreA"), record.Hash("kpreB")
-
-	base, err := OutputKey(k1, d1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if same, _ := OutputKey(k1, d2); same == base {
-		t.Error("different D (code edit) must change the output key")
-	}
-	if same, _ := OutputKey(k2, d1); same == base {
-		t.Error("different K_pre must change the output key")
-	}
-	// invariant to D order
-	dA := []record.CodeRef{{Path: "a", BlobHash: "h1"}, {Path: "b", BlobHash: "h2"}}
-	dB := []record.CodeRef{{Path: "b", BlobHash: "h2"}, {Path: "a", BlobHash: "h1"}}
-	oa, _ := OutputKey(k1, dA)
-	ob, _ := OutputKey(k1, dB)
-	if oa != ob {
-		t.Error("output key must be invariant to D listing order")
-	}
-
-	// Empty D (a step with no first-party code reads) still produces a defined key.
-	if empty, err := OutputKey(k1, nil); err != nil || empty == "" {
-		t.Errorf("OutputKey(nil D) = (%q, %v); want a defined key, nil error", empty, err)
-	}
-}
-
 func TestEntry_JSONRoundTrip(t *testing.T) {
 	e := Entry{
-		Kpre:      "kpre1",
-		D:         []record.CodeRef{{Path: "metis/io.py", BlobHash: "b1"}},
-		OutputKey: "out1",
+		Kpre:   "kpre1",
+		D:      []record.CodeRef{{Path: "metis/io.py", BlobHash: "b1"}},
+		Output: "out1",
 	}
 	b, err := EncodeEntry(e)
 	if err != nil {
@@ -145,7 +113,7 @@ func TestEntry_JSONRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Kpre != e.Kpre || got.OutputKey != e.OutputKey || len(got.D) != 1 || got.D[0].Path != "metis/io.py" {
+	if got.Kpre != e.Kpre || got.Output != e.Output || len(got.D) != 1 || got.D[0].Path != "metis/io.py" {
 		t.Errorf("Entry round-trip mismatch: %+v", got)
 	}
 }

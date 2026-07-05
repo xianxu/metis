@@ -28,9 +28,17 @@ identical on a non-Kaggle platform?* — if yes, it lives here.
   `runs/<id>/<step>/reads.json`; the step wrappers launch through it), and Go `loadReadSet` /
   `gitBlobHashes` (batched `git hash-object`) / `buildD` turning reads → `D = [(path, git-blob-hash)]`.
   Honest limit: the audit hook is a *lower-bound* (a C-extension `fopen` bypasses it), but those are
-  class-1 data reads (keyed via upstream output-hashes), not first-party code. The runner
-  skip/materialize integration + the cheap-sweeps flow (M3) are still to come; `record.CanonicalHash`
-  is the shared hashing primitive. [metis#2]
+  class-1 data reads (keyed via upstream output-hashes), not first-party code. **M3 shipped** the
+  runner integration: `cachingExecutor` (cmd/metis) decorates the step executor — per step it computes
+  `K_pre` (from config + seed + upstream output-hashes accumulated in topo order), looks up
+  `.metis-cache/index/<K_pre>.json`, and on a HIT (stored `D` re-hashes clean via `git hash-object`;
+  `uv.lock` folded into `D` so a dep upgrade invalidates) **materializes** the output manifest
+  (metrics + artifacts) from the CAS and **skips the subprocess**; a MISS runs, stores the output +
+  writes the index entry. `metis run --cache` (default on). The **leaf policy**
+  (`with: {cache: {leaf: immutable}}`) HITs on the K_pre match alone (pinned external fetch). Proven
+  by two e2es: identical re-run HITs every step; a one-knob change HITs the shared upstream + re-runs
+  only downstream ("cheap sweeps"). (The #3 record's `Code.D` provenance population is deferred to #8
+  with the git-side-ref durability.) `record.CanonicalHash` is the shared hashing primitive. [metis#2]
 - **`pkg/cas`** (content-addressed blob store) — the storage floor of the metis-v1 cache
   chain (**CAS ‹ #3 record ‹ #2 cache**). Mechanism only: `Store` (`Put(data)→Hash` /
   `Get` integrity-verified / `Has`), sha256 keys, self-deduplicating, sharded FS pool

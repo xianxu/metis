@@ -88,10 +88,21 @@ func buildRecord(run experiment.Run, steps []experiment.StepRun, outputHashes ma
 	stepRecs := make([]record.StepRecord, 0, len(steps))
 	for _, sr := range steps {
 		resolvedWith[sr.Step.ID] = sr.Step.With
+		// Populate Upstream (the metis#3 slot #2 fills): this step's needs → the
+		// upstream steps' output-hashes, sorted so the derived cache key (cache.Kpre)
+		// is invariant to the author's `needs` declaration order.
+		upstream := make([]record.Hash, 0, len(sr.Step.Needs))
+		for _, need := range sr.Step.Needs {
+			if h, ok := outputHashes[need]; ok {
+				upstream = append(upstream, h)
+			}
+		}
+		sort.Slice(upstream, func(i, j int) bool { return upstream[i] < upstream[j] })
 		stepRecs = append(stepRecs, record.StepRecord{
 			StepID:     sr.Step.ID,
 			Uses:       sr.Step.Uses,
 			With:       sr.Step.With,
+			Upstream:   upstream,
 			Code:       record.CodeManifest{Commit: sha, Dirty: dirty},
 			OutputHash: outputHashes[sr.Step.ID],
 			Metrics:    sr.Result.Metrics,

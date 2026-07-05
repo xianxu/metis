@@ -1,0 +1,168 @@
+package main
+
+import (
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/xianxu/metis/pkg/experiment"
+)
+
+// The cheap-sweeps payoff (metis#2): a second identical run HITs every step (no
+// subprocess), and changing one downstream knob HITs the shared upstream while
+// re-running only the changed step. Uses the no-uv test/echo steps.
+func TestCache_CheapSweeps(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH (cache re-hash uses git hash-object)")
+	}
+	root := repoRoot(t)
+	ws := t.TempDir()
+	expPath := filepath.Join(ws, "exp.md")
+	write := func(trainModel string) {
+		md := `---
+type: experiment
+id: sweep
+seed: 5
+status: active
+steps:
+  - id: prep
+    uses: test/echo
+    with: {k: 5}
+  - id: train
+    uses: test/echo
+    needs: [prep]
+    with: {model: ` + trainModel + `}
+---
+`
+		if err := os.WriteFile(expPath, []byte(md), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	run := func(runID string) string {
+		var out strings.Builder
+		_, err := runExperiment(runOpts{
+			expPath:  expPath,
+			runID:    runID,
+			stepPath: []string{filepath.Join(root, "testdata", "steps")},
+			now:      func() time.Time { return time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC) },
+			git:      fakeGitProbe{name: "metis", sha: "sha", dirty: false},
+			cache:    true,
+			out:      &out,
+		})
+		if err != nil {
+			t.Fatalf("run %s: %v", runID, err)
+		}
+		return out.String()
+	}
+
+	// Run 1 (cold): both steps MISS (no cache hit markers).
+	write("logreg")
+	out1 := run("r1")
+	if strings.Contains(out1, "cache hit") {
+		t.Errorf("cold run should have no cache hits; got:\n%s", out1)
+	}
+
+	// Run 2 (identical): both steps HIT — no subprocess.
+	out2 := run("r2")
+	if !hitFor(out2, "prep") || !hitFor(out2, "train") {
+		t.Errorf("identical re-run should HIT every step; got:\n%s", out2)
+	}
+
+	// Run 3 (change the downstream train knob): prep (unchanged config + upstream)
+	// still HITs; train MISSes (its resolved-with changed → different K_pre).
+	write("rf")
+	out3 := run("r3")
+	if !hitFor(out3, "prep") {
+		t.Errorf("prep (unchanged) should still HIT after a downstream knob change; got:\n%s", out3)
+	}
+	if hitFor(out3, "train") {
+		t.Errorf("train (knob changed) must MISS and re-run; got:\n%s", out3)
+	}
+}
+
+func hitFor(out, step string) bool {
+	return strings.Contains(out, "step "+step+" (cache hit)")
+}
+
+// TestCache_ToyPipelineHitsOnRerun drives the REAL uv/Python toy pipeline twice with
+// caching (uv-gated): the second run must HIT every step (the sensor's real reads.json
+// → D re-hashes clean), materialize the parquet outputs from the CAS, and reproduce the
+// same cv_score — proving the cache end-to-end with real artifacts, not just test/echo.
+func TestCache_ToyPipelineHitsOnRerun(t *testing.T) {
+	if _, err := exec.LookPath("uv"); err != nil {
+		t.Skip("uv not on PATH; skipping the real-pipeline cache e2e")
+	}
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	root := repoRoot(t)
+	ws := t.TempDir()
+	expDir := filepath.Join(ws, "experiment")
+	if err := os.MkdirAll(expDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	copyFile(t, filepath.Join(root, "testdata", "experiment", "toy-pipeline.md"),
+		filepath.Join(expDir, "toy-pipeline.md"))
+	copyDir(t, filepath.Join(root, "testdata", "dataset", "toy"), filepath.Join(ws, "dataset", "toy"))
+
+	run := func(runID string) (string, float64) {
+		var out strings.Builder
+		r, err := runExperiment(runOpts{
+			expPath:  filepath.Join(expDir, "toy-pipeline.md"),
+			runID:    runID,
+			stepPath: []string{filepath.Join(root, "steps")},
+			now:      func() time.Time { return time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC) },
+			git:      fakeGitProbe{name: "metis", sha: "sha", dirty: false},
+			cache:    true,
+			out:      &out,
+		})
+		if err != nil {
+			t.Fatalf("run %s: %v", runID, err)
+		}
+		return out.String(), r.Metrics["cv_score"]
+	}
+
+	out1, cv1 := run("c1")
+	if strings.Contains(out1, "cache hit") {
+		t.Errorf("cold run should not HIT; got:\n%s", out1)
+	}
+	if cv1 <= 0.5 {
+		t.Fatalf("cold run cv_score = %v; want a real score", cv1)
+	}
+
+	out2, cv2 := run("c2")
+	for _, step := range []string{"split", "train", "predict"} {
+		if !hitFor(out2, step) {
+			t.Errorf("re-run should HIT step %s; got:\n%s", step, out2)
+		}
+	}
+	if cv2 != cv1 {
+		t.Errorf("cached re-run cv_score = %v; want %v (reproduced from cache)", cv2, cv1)
+	}
+	// The materialized submission output exists (downstream consumers can read it).
+	if _, err := os.Stat(filepath.Join(expDir, "runs", "c2", "predict", "predictions.csv")); err != nil {
+		t.Errorf("cached run should materialize predictions.csv: %v", err)
+	}
+}
+
+// An immutable-leaf step (a pinned external fetch) HITs on the K_pre match alone —
+// the v1 leaf policy. isImmutableLeaf recognizes the `with: {cache: {leaf: immutable}}`
+// marker.
+func TestCache_ImmutableLeafMarker(t *testing.T) {
+	leaf := experiment.Step{ID: "get", Uses: "kaggle/get-data",
+		With: map[string]any{"cache": map[string]any{"leaf": "immutable"}}}
+	if !isImmutableLeaf(leaf) {
+		t.Error("a step marked cache.leaf=immutable should be an immutable leaf")
+	}
+	plain := experiment.Step{ID: "train", Uses: "metis/train", With: map[string]any{"model": "rf"}}
+	if isImmutableLeaf(plain) {
+		t.Error("an unmarked step must not be an immutable leaf")
+	}
+	if isImmutableLeaf(experiment.Step{ID: "x"}) {
+		t.Error("a step with no with must not be an immutable leaf")
+	}
+}

@@ -64,32 +64,18 @@ func Validate(storedD []record.CodeRef, hash func(path string) (record.Hash, err
 	return true
 }
 
-// OutputKey is the CAS address of a step's output for a given (values × code) pair:
-// hash(K_pre, hash(D)). K_pre carries the values (params/seed/upstream); the D-hash
-// carries the code+config bytes. Same code + different `with` → shared D-hash,
-// different K_pre; a code edit → shared K_pre, different D-hash. Invariant to D order.
-func OutputKey(kpre Hash, storedD []record.CodeRef) (Hash, error) {
-	dHash, err := record.CanonicalHash(sortedRefs(storedD))
-	if err != nil {
-		return "", fmt.Errorf("cache: output-key D-hash: %w", err)
-	}
-	h, err := record.CanonicalHash(struct {
-		Kpre  Hash `json:"kpre"`
-		DHash Hash `json:"d_hash"`
-	}{kpre, dHash})
-	if err != nil {
-		return "", fmt.Errorf("cache: output-key: %w", err)
-	}
-	return h, nil
-}
-
-// Entry is a cache index record: for a K_pre, the read-set D recorded on the last
-// miss plus the output key its bytes live under in the CAS. Persisted as small
+// Entry is a cache index record, stored at index/<K_pre>.json: for a K_pre, the
+// read-set D recorded on the last miss plus Output — the CAS content-hash of the
+// stored output manifest (metrics + artifact hashes). One index keyed by K_pre
+// realizes the design's "output at hash(K_pre, D)" mapping: a lookup finds D (to
+// re-hash) and, on a HIT, the output to materialize. (A separate derived OutputKey =
+// hash(K_pre, D) was dropped — it can't be computed before a run, and cross-run dedup
+// within a sweep is already provided by the K_pre-keyed index.) Persisted as small
 // git-trackable JSON so the index survives across runs, sessions, and branches.
 type Entry struct {
-	Kpre      Hash             `json:"kpre"`
-	D         []record.CodeRef `json:"d"`
-	OutputKey Hash             `json:"output_key"`
+	Kpre   Hash             `json:"kpre"`
+	D      []record.CodeRef `json:"d"`
+	Output Hash             `json:"output"`
 }
 
 // EncodeEntry / DecodeEntry are the index codec (pure) — the thin IO layer (M3) reads
@@ -105,11 +91,5 @@ func DecodeEntry(b []byte) (Entry, error) {
 func sortedHashes(in []record.Hash) []record.Hash {
 	out := append([]record.Hash(nil), in...)
 	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
-	return out
-}
-
-func sortedRefs(in []record.CodeRef) []record.CodeRef {
-	out := append([]record.CodeRef(nil), in...)
-	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
 	return out
 }
