@@ -9,9 +9,9 @@
 //   - product   — a plain map {a:…, b:…}: cartesian of its fields (counts MULTIPLY).
 //   - $any:[…]  — a set; each value verbatim (counts = len). Sugar for the flat sum.
 //   - $oneof:{L:sub,…} — a labeled sum; counts ADD; resolves by BUNDLING (the chosen
-//                 branch collapses to {label: resolved-sub}, not flat siblings).
+//     branch collapses to {label: resolved-sub}, not flat siblings).
 //   - $linear-range/$log-range: [lo,hi,steps?] — a domain+metric; the grid sampler
-//                 materializes it (linspace/logspace); steps defaults to range_steps.
+//     materializes it (linspace/logspace); steps defaults to range_steps.
 //
 // Every resolved point is v0-shaped `with` (nesting confined to the shape + Expand),
 // and carries its free-param path — the swept coordinates that identify it (→ #8/#3).
@@ -72,8 +72,11 @@ func Expand(steps []experiment.Step, rangeSteps int) ([]Point, error) {
 				if !ok {
 					return nil, fmt.Errorf("step %q: with did not resolve to a map", s.ID)
 				}
+				// Deep-clone the resolved with so sibling points never alias the same
+				// inner map — otherwise #7 overlaying a resolved path in place would
+				// silently mutate every sibling sharing this expansion.
 				np := Point{With: cloneWith(base.With), FreeParams: concat(base.FreeParams, r.free)}
-				np.With[s.ID] = w
+				np.With[s.ID] = deepCloneMap(w)
 				next = append(next, np)
 			}
 		}
@@ -132,6 +135,9 @@ func expandDescriptor(path, key string, arg any, rangeSteps int) ([]resolved, er
 		if !ok {
 			return nil, fmt.Errorf("%s: $any takes a list of alternatives", path)
 		}
+		if len(alts) == 0 {
+			return nil, fmt.Errorf("%s: $any is empty — an empty set would collapse the whole sweep to zero points", path)
+		}
 		out := make([]resolved, 0, len(alts))
 		for _, a := range alts {
 			out = append(out, resolved{value: a, free: []FreeParam{{Path: path, Value: a}}})
@@ -142,6 +148,9 @@ func expandDescriptor(path, key string, arg any, rangeSteps int) ([]resolved, er
 		branches, ok := arg.(map[string]any)
 		if !ok {
 			return nil, fmt.Errorf("%s: $oneof takes a map of labeled branches", path)
+		}
+		if len(branches) == 0 {
+			return nil, fmt.Errorf("%s: $oneof has no branches — would collapse the whole sweep to zero points", path)
 		}
 		var out []resolved
 		for _, label := range sortedKeys(branches) {
@@ -258,6 +267,31 @@ func cloneMap(in map[string]any) map[string]any {
 		out[k] = v
 	}
 	return out
+}
+
+// deepCloneMap recursively copies a resolved `with` so no two points alias a shared
+// inner map or slice — the value a consumer (#7) may overlay in place.
+func deepCloneMap(in map[string]any) map[string]any {
+	out := make(map[string]any, len(in))
+	for k, v := range in {
+		out[k] = deepCloneValue(v)
+	}
+	return out
+}
+
+func deepCloneValue(v any) any {
+	switch x := v.(type) {
+	case map[string]any:
+		return deepCloneMap(x)
+	case []any:
+		cp := make([]any, len(x))
+		for i, e := range x {
+			cp[i] = deepCloneValue(e)
+		}
+		return cp
+	default:
+		return x // scalars are immutable
+	}
 }
 
 func toFloat(v any) (float64, bool) {

@@ -201,6 +201,8 @@ integration (M2).
 
 ## Log
 
+
+- 2026-07-05: closed M1 — M1 pure lift: go build+vet+test ./... green. pkg/shape Expand — 7 tests incl the 36-point titanic keystone (proves $oneof ADDs: features(4)×[logreg:C(3)+rf:(3×2)]=36), $oneof bundling ({label:sub}), $any set, product×set, all-singleton→exactly-one-v0-point (byte-identical with), ragged free-param paths, $*-range→grid (linspace/logspace)+range_steps default (materialized value in free-param), malformed-descriptor errors (mixed $/plain, unknown $-key, non-numeric bounds). All pure, no IO. BYPASS --no-atlas + --no-project: M1 is the pure core; atlas (shape datatype + flow) + project tracker land at M2/final-close per the plan; milestone progress in the issue Plan/Log.; review verdict: FIX-THEN-SHIP
 ### 2026-07-03
 - Filed from the metis-v1 design brainstorm. The datatype is the L2 substrate; #7 (sweeper) and #8 (ledger) build on it. No hard dep, but conceptually first in the v1 chain.
 

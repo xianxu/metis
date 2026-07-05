@@ -1,6 +1,7 @@
 package shape
 
 import (
+	"math"
 	"sort"
 	"testing"
 
@@ -165,6 +166,94 @@ func TestExpand_RangeMaterializesToGrid(t *testing.T) {
 		if got[i] != want[i] {
 			t.Errorf("linear grid = %v; want %v", got, want)
 		}
+	}
+}
+
+// $log-range materializes on a geometric grid: [1, 1000, 4] → 1, 10, 100, 1000.
+func TestExpand_LogRangeGeometricGrid(t *testing.T) {
+	steps := []experiment.Step{step("s", map[string]any{
+		"lr": map[string]any{"$log-range": []any{1.0, 1000.0, 4}},
+	})}
+	points, err := Expand(steps, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := make([]float64, 0, len(points))
+	for _, p := range points {
+		got = append(got, p.With["s"]["lr"].(float64))
+	}
+	sort.Float64s(got)
+	want := []float64{1, 10, 100, 1000}
+	if len(got) != 4 {
+		t.Fatalf("log-range [1,1000,4] → 4 points, got %d", len(points))
+	}
+	for i := range want {
+		if math.Abs(got[i]-want[i]) > 1e-9 {
+			t.Errorf("log grid[%d] = %g; want %g (full %v)", i, got[i], want[i], got)
+		}
+	}
+}
+
+// $log-range with a non-positive bound is an error (log of ≤0 is undefined).
+func TestExpand_LogRangeRejectsNonPositive(t *testing.T) {
+	steps := []experiment.Step{step("s", map[string]any{
+		"lr": map[string]any{"$log-range": []any{0.0, 100.0, 3}},
+	})}
+	if _, err := Expand(steps, 0); err == nil {
+		t.Error("$log-range with lo=0 must error (log undefined)")
+	}
+}
+
+// steps==1 yields the low bound; steps<1 (and no range_steps) errors.
+func TestExpand_RangeSingleAndZeroSteps(t *testing.T) {
+	one, err := Expand([]experiment.Step{step("s", map[string]any{
+		"x": map[string]any{"$linear-range": []any{7.0, 9.0, 1}},
+	})}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(one) != 1 || one[0].With["s"]["x"] != 7.0 {
+		t.Errorf("steps=1 → single point at lo=7; got %+v", one)
+	}
+	if _, err := Expand([]experiment.Step{step("s", map[string]any{
+		"x": map[string]any{"$linear-range": []any{0.0, 1.0}}, // no steps, range_steps=0
+	})}, 0); err == nil {
+		t.Error("a range with no steps and range_steps=0 must error, not silently emit nothing")
+	}
+}
+
+// An empty $any/$oneof must error, not silently collapse the whole sweep to zero.
+func TestExpand_EmptyDescriptorErrors(t *testing.T) {
+	if _, err := Expand([]experiment.Step{step("s", map[string]any{
+		"x": map[string]any{"$any": []any{}},
+	})}, 6); err == nil {
+		t.Error("empty $any must error")
+	}
+	if _, err := Expand([]experiment.Step{step("s", map[string]any{
+		"x": map[string]any{"$oneof": map[string]any{}},
+	})}, 6); err == nil {
+		t.Error("empty $oneof must error")
+	}
+}
+
+// Sibling points must NOT alias each other's inner `with` maps — mutating one point's
+// resolved value (as #7's overlay will) must not bleed into a sibling.
+func TestExpand_PointsDoNotAliasInnerMaps(t *testing.T) {
+	steps := []experiment.Step{step("train", map[string]any{
+		"model": map[string]any{"$any": []any{"logreg", "rf"}},
+		"opts":  map[string]any{"verbose": true}, // a shared nested map in the shape
+	})}
+	points, err := Expand(steps, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(points) != 2 {
+		t.Fatalf("want 2 points, got %d", len(points))
+	}
+	// Mutate point 0's nested opts map in place (what #7's overlay would do).
+	points[0].With["train"]["opts"].(map[string]any)["verbose"] = false
+	if points[1].With["train"]["opts"].(map[string]any)["verbose"] != true {
+		t.Error("sibling point aliased the same inner map — mutation bled across points")
 	}
 }
 
