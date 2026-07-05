@@ -1,10 +1,13 @@
 package cas
 
 import (
+	"bytes"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -177,6 +180,54 @@ func TestFSStore_GetRefreshesRecency(t *testing.T) {
 	}
 	if mustHas(t, s, b) {
 		t.Errorf("b was least-recently-used and should be evicted")
+	}
+}
+
+// TestFSStore_ConcurrentAccess exercises the documented concurrency contract
+// (run with -race): individual Put/Get/Has are safe from multiple goroutines, and
+// under a tight maxBytes a blob a goroutine just Put may be evicted by a peer — so
+// a follow-up Get may return ErrNotFound (tolerable), but never ErrCorrupt, never a
+// panic, and re-Put recovers. Overlapping content across goroutines also stresses
+// the concurrent dedup / same-path atomic-rename path.
+func TestFSStore_ConcurrentAccess(t *testing.T) {
+	root := t.TempDir()
+	clk, _ := fakeClock(time.Unix(1_700_000_000, 0))
+	s := NewFSStore(root, 500, clk) // tight: forces concurrent eviction
+
+	const goroutines = 8
+	const iters = 60
+	errCh := make(chan error, goroutines)
+	var wg sync.WaitGroup
+	for g := 0; g < goroutines; g++ {
+		wg.Add(1)
+		go func(g int) {
+			defer wg.Done()
+			for i := 0; i < iters; i++ {
+				data := mkblob(byte('a' + (i % 12))) // 12 distinct 100-byte blobs, shared across goroutines
+				h, err := s.Put(data)
+				if err != nil {
+					errCh <- fmt.Errorf("g%d put: %w", g, err)
+					return
+				}
+				got, err := s.Get(h)
+				if errors.Is(err, ErrNotFound) {
+					continue // evicted by a peer under the tight budget — allowed
+				}
+				if err != nil {
+					errCh <- fmt.Errorf("g%d get (must not be corrupt/IO): %w", g, err)
+					return
+				}
+				if !bytes.Equal(got, data) {
+					errCh <- fmt.Errorf("g%d get returned wrong bytes", g)
+					return
+				}
+			}
+		}(g)
+	}
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		t.Error(err)
 	}
 }
 
