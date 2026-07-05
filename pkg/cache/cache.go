@@ -71,7 +71,8 @@ func Validate(storedD []record.CodeRef, hash func(path string) (record.Hash, err
 // re-hash) and, on a HIT, the output to materialize. (A separate derived OutputKey =
 // hash(K_pre, D) was dropped — it can't be computed before a run, and cross-run dedup
 // within a sweep is already provided by the K_pre-keyed index.) Persisted as small
-// git-trackable JSON so the index survives across runs, sessions, and branches.
+// on-disk JSON so the index survives across runs, sessions, and branches. (v1 gitignores
+// the whole cache dir; git-sharing the index across clones is a future enhancement.)
 type Entry struct {
 	Kpre   Hash             `json:"kpre"`
 	D      []record.CodeRef `json:"d"`

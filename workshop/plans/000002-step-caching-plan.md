@@ -185,3 +185,18 @@ time via the existing injected `Clock`.
   HIT/MISS D-provenance (a HIT has no fresh reads.json) and belongs with #8's git-side-ref durability
   (which captures the code closure). #2 fully populates the cache's *functional* `Entry.D` (the thing
   that decides HIT/MISS); the record's code-manifest field stays empty until #8. Scope-line note added.
+
+### 2026-07-05 — close-review round 2 (soundness coverage locked)
+- **The two soundness-critical paths now have automated coverage** (close-review Important — the
+  reviewer verified both by hand and flagged the test gap): (1) `TestCachingExecutor_RealDMissesOnSourceEdit`
+  — a stored non-empty D HITs while clean and MISSes when a file in D is byte-edited (through the real
+  `gitBlobHashes` path); this locks the core "recompute only what changed" claim the e2es were blind to
+  (CheapSweeps' test/echo steps yield an empty D → vacuous HIT). (2) `TestCache_LeafPolicyFromParsedYAML`
+  — `isImmutableLeaf` sees `cache:{leaf:immutable}` through the real `experiment.Parse` (yaml.v3 →
+  map[string]any), so a YAML-lib/`With`-type change can't silently kill the leaf policy.
+- Minor doc fixes: `Entry` doc no longer overclaims git-sharing (v1 gitignores the cache); atlas
+  `metis run` signature now shows `--cache`.
+- **Design reduction noted:** the design's `hash(K_pre, D)` output-store collapsed to `K_pre → {one D,
+  output}` (the index stores one D per K_pre; a re-run overwrites). Safe (never stale) and fully serves
+  the param-sweep purpose; branch-toggle reuse of two code-versions sharing a K_pre would MISS. Flagged
+  for #8 if it ever matters.

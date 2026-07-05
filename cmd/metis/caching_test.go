@@ -169,6 +169,85 @@ func TestCache_ImmutableLeafMarker(t *testing.T) {
 	}
 }
 
+// The cache's CORE soundness claim, locked through the real git-hash path: a stored
+// non-empty D HITs while its files are unchanged and MISSes the moment a file in D is
+// edited (byte-changed). The e2es can't cover this — CheapSweeps' test/echo steps
+// write no reads.json (empty D → vacuous HIT) and the toy-pipeline test only re-runs
+// identically — so a regression silently emptying D would false-HIT with green CI.
+func TestCachingExecutor_RealDMissesOnSourceEdit(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH (D re-hash uses git hash-object)")
+	}
+	root := t.TempDir()
+	mustRun(t, root, "git", "init", "-q")
+	src := filepath.Join(root, "src.py")
+	if err := os.WriteFile(src, []byte("x = 1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	hashes, err := gitBlobHashes(root, []string{"src.py"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := &cachingExecutor{projectRoot: root}
+	entry := cache.Entry{Kpre: "k", D: []record.CodeRef{{Path: "src.py", BlobHash: hashes["src.py"]}}}
+	step := experiment.Step{ID: "s"} // NOT a leaf → D revalidation applies
+
+	if !c.isHit(step, entry) {
+		t.Fatal("unchanged D must HIT")
+	}
+	// Edit the source file in D → its blob-hash moves → the step must MISS.
+	if err := os.WriteFile(src, []byte("x = 2  # edited\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if c.isHit(step, entry) {
+		t.Error("a byte-changed file in D must MISS (D revalidation is the cache's core soundness)")
+	}
+}
+
+func mustRun(t *testing.T, dir, name string, args ...string) {
+	t.Helper()
+	cmd := exec.Command(name, args...)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("%s %v: %v\n%s", name, args, err, out)
+	}
+}
+
+// The leaf policy end-to-end from a YAML-parsed marker: isImmutableLeaf must see
+// `with: {cache: {leaf: immutable}}` through the real experiment.Parse path (yaml.v3
+// → map[string]any), not just a hand-built Step. A YAML-lib swap or a With type change
+// would silently kill the leaf policy (a Done-when item) otherwise.
+func TestCache_LeafPolicyFromParsedYAML(t *testing.T) {
+	md := `---
+type: experiment
+id: leafy
+seed: 1
+status: active
+steps:
+  - id: get
+    uses: kaggle/get-data
+    with: {cache: {leaf: immutable}}
+  - id: train
+    uses: metis/train
+    with: {model: rf}
+---
+`
+	exp, err := experiment.Parse(md)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byID := map[string]experiment.Step{}
+	for _, s := range exp.Steps {
+		byID[s.ID] = s
+	}
+	if !isImmutableLeaf(byID["get"]) {
+		t.Errorf("parsed cache.leaf=immutable step should be an immutable leaf; with=%v", byID["get"].With)
+	}
+	if isImmutableLeaf(byID["train"]) {
+		t.Error("an unmarked parsed step must not be an immutable leaf")
+	}
+}
+
 // The immutable-leaf HIT path bypasses D re-validation entirely (HIT on K_pre alone):
 // an entry whose D would MISS (a file that won't re-hash) still HITs for a leaf, but
 // MISSes for a normal step. Pins the runner-level bypass, not just the marker predicate.

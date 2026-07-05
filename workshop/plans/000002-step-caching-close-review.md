@@ -130,3 +130,70 @@ Coverage pins real logic, not mocks: `TestGitBlobHashes_MatchesGit` compares aga
 ### 7. Plan revision recommendations
 - The plan (`workshop/plans/000002-step-caching-plan.md`) already records the M3 realities (OutputKey drop, `reads.json` exclusion, `Code.D` deferral to #8) in its `## Revisions` — it matches the code. No new plan revision required for the code itself.
 - Add one `## Revisions` line noting the finding-#1 doc cleanup as owed: "record-package comments still attribute `Code.D`/`Deps` population to #2; corrected to reflect the #8 deferral + `buildRecord`'s `Upstream` population at close." So the stale-comment fix is a recorded decision, not a silent edit.
+
+---
+
+## Re-review — 2026-07-05T16:16:31-07:00 (FIX-THEN-SHIP)
+
+| field | value |
+|-------|-------|
+| issue | 2 — Uniform DAG step caching: content-address step inputs, skip unchanged, recompute only what changed |
+| repo | metis |
+| issue file | workshop/issues/000002-step-caching.md |
+| boundary | whole-issue close |
+| milestone | — |
+| window | 0630b426ff15f84f11cb3121289f7a6f83936279..HEAD |
+| command | sdlc close --issue 2 |
+| reviewer | claude |
+| timestamp | 2026-07-05T16:16:31-07:00 |
+| verdict | FIX-THEN-SHIP |
+
+## Review
+
+Ignoring 6 permissions.allow entries from .claude/settings.json: this workspace has not been trusted. Run Claude Code interactively here once and accept the trust dialog, or set projects["/Users/xianxu/workspace/metis"].hasTrustDialogAccepted: true in /Users/xianxu/.claude.json.
+I have everything I need. Build/vet/full suite are green with real `uv`+`git`, and I independently verified the load-bearing soundness claim that no automated test covers: the stored `Entry.D` is a real first-party code closure (not empty), and editing one source file (`metis/steps/predict.py`) produces a correct *selective* MISS (predict re-runs; split + train still HIT) — the cache is sound, invalidation propagates downstream and not sideways. I confirmed the two prior close-review Important findings (`reads.json` exclusion, `.metis-cache` gitignore, record doc comments) are fixed in the code. Here is my fresh review.
+
+```verdict
+verdict: FIX-THEN-SHIP
+confidence: high
+```
+
+The whole-issue close delivers the issue's stated purpose: a working, **sound** validating-trace step cache. `metis run --cache` computes `K_pre`, stores a real read-set `D`, validates by re-hashing via `git hash-object`, and on a HIT materializes the output from the CAS and skips the subprocess. I proved soundness end-to-end myself (not from the docs): D is the genuine code closure per step, an identical re-run HITs all three steps, and a code edit to a file in one step's D re-runs exactly that step while leaving its unaffected siblings HITting. `pkg/cache` is textbook-pure over injected seams; `CanonicalHash` is a clean single-source hashing primitive. Nothing is unsound — every gap I found is safe-direction (a spurious MISS, never a stale/false HIT). What keeps this from a clean SHIP is that the two most soundness-critical paths — the D-revalidation-drives-a-MISS behavior I just verified by hand, and the leaf policy end-to-end from YAML — have **zero automated coverage**, so a future regression in either would ship silently. Both are cheap, non-blocking test adds plus a couple of doc/DRY nits.
+
+### 1. Strengths
+- **The cache is genuinely sound, and I verified it independently.** Stored `Entry.D` for the train step = `[metis/io.py, metis/model.py, metis/steps/train.py, metis/trace.py, uv.lock, …]` (real closure, not vacuous). Editing `metis/steps/predict.py` → `split` HIT, `train` HIT, `predict` MISS. That is the issue's headline ("a change propagates downstream but not sideways; recompute only what changed") demonstrated on the real pipeline.
+- **ARCH-PURE is clean.** `pkg/cache` (`Kpre`/`Validate`/`Entry` codec) injects its only IO — `Validate(storedD, hash func(path))` (cache.go:57) and `buildD(reads, blobHash)` (trace.go:69) unit-test with map fakes and zero filesystem. The IO shell (`caching.go`, `trace.go`, `trace.py`) is the thin boundary, wired as a `StepExecutor` decorator (run.go:102-109).
+- **ARCH-DRY single-source holds.** `record.CanonicalHash` (address.go:21) is the one canonical-hash primitive; `PointAddress`/`OutputHash`/`Kpre` all derive from it, with no leftover inline `json.Marshal→HashOf`. `OutputKey` was cleanly removed. `repo.Root` is the shared module-root walk.
+- **Safe-direction error handling throughout.** `isHit` (caching.go) returns MISS on any hasher failure; `Validate` treats a vanished/changed file as MISS; `loadReadSet` treats an absent `reads.json` as an empty read-set. Error-swallowing here can never yield an unsound HIT — I checked each path.
+- **`uv.lock` fold into D is correctly wired** (caching.go `recordMiss`) and non-aliasing (`append(append([]string(nil), rs.Reads...), depsLockFile)` copies before appending, so `rs.Reads` isn't mutated). It consumes M2's `used_site_packages` flag, closing the dep-upgrade false-HIT.
+- **`K_pre` false-HIT vectors are pinned** — `TestKpre_FiveTermSensitivity` exercises each of the five determinants (`uses` included), and `METIS_STEP_DIR` (exec.go:60) is exactly the `stepDir` the cachingExecutor reads, so the sensor↔runner handoff has no path mismatch.
+
+### 2. Critical findings
+None. Full suite + real-`uv`/`git` e2es green; I additionally verified soundness (real D, selective code-edit invalidation) by hand.
+
+### 3. Important findings
+
+- **No test exercises real-D revalidation through the runner — the cache's core soundness claim is uncovered** (`cmd/metis/caching_test.go`). Both e2es are blind to it: `TestCache_CheapSweeps` uses `test/echo` steps that write no `reads.json` → **empty D → vacuous HIT**, and `TestCache_ToyPipelineHitsOnRerun` only checks an *identical* re-run, which HITs whether D is real or empty. So if a regression made D silently empty (a path-root break, a sensor-launch break), every step would false-HIT on a code edit and **no test would fail**. I confirmed the real behavior is correct manually; the fix is to lock it: add a run to `TestCache_ToyPipelineHitsOnRerun` that mutates a source file in one step's D (copy the repo's `metis/` into a temp project, edit a `.py`) and asserts that step MISSes while an unaffected step HITs. This is the single highest-value missing test.
+- **The v1 leaf policy has no end-to-end coverage from YAML** (`isImmutableLeaf`, caching.go:~270). Both leaf tests construct `experiment.Step` values directly; nothing drives `with: {cache: {leaf: immutable}}` from a parsed experiment through the runner to a K_pre-only HIT. The predicate's `step.With["cache"].(map[string]any)` assertion silently depends on yaml.v3 decoding nested maps as `map[string]any` — I verified it does today, but a YAML-lib swap or a `With` type change would kill the leaf policy (a stated Done-when item) with a green suite. Add a runner-level test that parses a leaf-marked step and asserts it HITs on K_pre alone.
+
+### 4. Minor findings
+- **`Entry` doc overstates git-tracking** (cache.go:74 "git-trackable JSON so the index survives … across branches"), but `ensureCacheGitignore` writes `*` (run.go), ignoring the whole `.metis-cache` including `index/`. The index persists on disk but is *not* git-shared. Consciously deferred (run.go comment), but the `Entry` doc should say "on-disk-persistent (git-sharing the index is a future enhancement)."
+- **Atlas `metis run` signature is stale** (`atlas/experiment.md:27` still shows `metis run [--run <id>] <experiment.md>` with no `--cache`). `atlas/index.md:37` does document `--cache`, so this is a consistency nit, not a missing-surface gap. No README.md exists, so the README gate doesn't apply.
+- **Duplicated "upstream-from-needs" loop** — `cachingExecutor.kpre` (caching.go:~96) and `buildRecord` (record.go) both iterate `step.Needs` looking up an output-hash map and (for Kpre) rely on sorting. A shared `upstreamHashes(needs, outputs)` helper would consolidate (ARCH-DRY).
+- **Output-hash computed twice per cached run** — `recordOutput` (caching.go:260, mid-run to feed downstream K_pre) and `assembleRecord` (record.go). Same function; justified by timing but must stay in lockstep.
+- **Cross-language root coupling is implicit.** The Go `c.projectRoot` (nearest `go.mod`) must equal the Python sensor's `_PROJECT_ROOT` (parent of the `metis/` package) for D relpaths to resolve under `git hash-object`; `reads.json` even carries `project_root` but `recordMiss` never checks it against `c.projectRoot`. They coincide for the metis repo (verified), but a relocation would silently degrade to MISS. Worth an assertion or a comment.
+- On a HIT, `with.json`/`reads.json` aren't restored into the step dir — a cached step's run dir is incomplete for legibility (harmless; the record carries `With`).
+- `gitBlobHashes` batches all D paths into one argv (trace.go:50) — an `ARG_MAX` risk only at large-D scale; fine for v1.
+
+### 5. Test coverage notes
+Coverage pins real logic, not mock reassertion: `TestGitBlobHashes_MatchesGit` vs real `git hash-object`; `TestSensor_RecordsFirstPartyCodeReads`/`TestSensor_ExcludesRunDirAndStdlib` drive the real sensor + `_classify` filter contract; both e2es run real skip/materialize. The `pkg/cache` unit tests remain strong. The two gaps (finding #3) are exactly the soundness-critical paths: (a) real-D revalidation → selective MISS on a code edit, and (b) leaf HIT from YAML. A secondary nicety: neither e2e counts *subprocess executions*, so a "HIT that silently re-ran" would still pass on the `⚡` marker + cv reproduction — close but indirect.
+
+### 6. Architectural notes for upcoming work
+- **ARCH-PURPOSE — purpose delivered.** Shadow-sweep of Done-when: pure `pkg/cache` ✓, Python sensor + Go blob-hasher ✓, runner skip/materialize + leaf policy ✓, cheap-sweeps e2e ✓, atlas ✓. Deferring the **#3 record's** `Code.D`/`Deps` *provenance* to #8 is legitimate — the cache's *functional* `Entry.D` (what decides HIT/MISS) is fully populated (I verified it holds the real closure); only the record's code-manifest field stays empty, entangled with #8's git-side-ref durability. Pass.
+- **The design's `hash(K_pre, D)` output address was collapsed to `K_pre → {single D, output}`.** Toggling between two code versions that share a K_pre always MISSes (the index stores one D per K_pre; a re-run overwrites it). Safe (never stale) and it fully serves the param-sweep purpose the issue is about, but it's a real reduction from the design's two-key output store — worth an explicit note if branch-toggle reuse ever matters.
+- **#8 wiring `Code.D` into the record must source it from the cache `Entry`, not a fresh `reads.json`** — a HIT produces no new `reads.json`, so the record's D provenance on a cached run has to come from the index entry. The current empty-on-HIT behavior is the seam #8 fills.
+- The "everything in the step dir except reserved channels" artifact model (exec.go:133) keeps accreting reserved-channel special cases (`reads.json` was the second). Prefer moving sensor sidecars outside the artifact tree (run-dir metadata) when #8 touches this.
+
+### 7. Plan revision recommendations
+- The plan's `## Revisions` already records the M3 realities (OutputKey drop, `reads.json` exclusion, `Code.D` deferral to #8) and matches the code — no plan-vs-code contradiction remains.
+- Add one `## Revisions` line noting the coverage debt as owed, so it's a recorded decision rather than a silent gap: *"Close-review: two soundness-critical paths ship without automated coverage — (1) real-D revalidation driving a selective MISS on a source edit (verified by hand at close; both e2es are blind to it because CheapSweeps' test/echo steps yield an empty D), and (2) the leaf policy end-to-end from a YAML-parsed `cache:{leaf:immutable}` marker. Add both tests as immediate follow-up."*

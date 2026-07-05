@@ -24,9 +24,10 @@ reconstruction, training, and experiment tracking under one entrypoint.
 
 ## Surface (M2) — the Go step-runner
 
-`metis run [--run <id>] <experiment.md>` reads + validates an experiment, executes its
-steps in dependency order as **subprocesses** (files + subprocess, never FFI), and records
-a Run. Split across a pure core and a thin IO layer:
+`metis run [--run <id>] [--cache] <experiment.md>` reads + validates an experiment, executes
+its steps in dependency order as **subprocesses** (files + subprocess, never FFI), and records
+a Run. `--cache` (default on) enables the metis#2 validating-trace cache (see `atlas/index.md`
+`pkg/cache`). Split across a pure core and a thin IO layer:
 
 - **Pure core — `pkg/experiment/`** (no IO; unit-tested directly):
   - `Experiment` / `Step` / `Run` — Go structs mirroring the CUE `#Experiment`/`#Step`/`#Run`
