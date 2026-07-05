@@ -7,7 +7,7 @@ created: 2026-07-03
 updated: 2026-07-05
 estimate_hours: 1
 started: 2026-07-05T12:50:01-07:00
-actual_hours: 0.76
+actual_hours: 1.00
 ---
 
 # Content-addressed blob store (CAS): put/get by content-hash, size-bounded eviction
@@ -105,6 +105,7 @@ both floor and discount; reconciled to floor-only.)
 - Filed as the storage floor of the metis-v1 cache chain (**CAS ‹ #3 record ‹ #2 cache**), split out of #2 during the caching design so the blob-store *mechanism* stays separate from cache *policy*. Sole MVP consumer is #2 (+ pointer materialization); #3's record only *references* CAS addresses (hashing ≠ storing), so #3 does not depend on it. v1 scope: pure wipeable cache with size-bounded eviction; rooted/durable archival deferred to the #8 promotion hook. Full design: metis-v1 project file + pensive §Caching + metis#2/#3 `## Design`.
 
 ### 2026-07-05
+- 2026-07-05: closed — Round-3 Important (untested concurrency contract) resolved: added TestFSStore_ConcurrentAccess (8 goroutines x 60 iters, tight maxBytes) — passes under -race (no data race, no ErrCorrupt, correctness holds; peer-evicted ErrNotFound tolerated). Delta is test-only + lessons.md (no production code change). All prior Critical/Important resolved (corrupt-heal C1, traversal I1, best-effort evict I2, best-effort touch, concurrency doc). go build+vet+test ./... green incl. -race.; review verdict: SHIP
 - 2026-07-05: closed — Round-2 review fixes re-reviewed: C1 corrupt-heal (Put verifies existing blob hashes to h before dedup-skip; absent-or-corrupt overwritten — recompute-into-place restored), I1 path-traversal (isHash 64-lowercase-hex gate in shardPath; Has("..") now false), I2 evict fully best-effort. TDD failing-first for C1+I1. go build+vet+test ./... green; pkg/cas 27 leaf-passes incl. corrupt->heal + malformed-key rejection.; review verdict: FIX-THEN-SHIP
 - 2026-07-05: closed — FIX-THEN-SHIP fixes applied + re-reviewed: touch now best-effort (failed Chtimes no longer fails a valid Get/Put — was a non-sentinel error breaking recompute-keyed consumers on read-only-metadata mounts); FSStore concurrency contract documented (best-effort under tight maxBytes, recompute covers evicted-by-peer); entry.atime→mtime rename; added empty-blob + MemStore copy-isolation tests. go build+vet+test ./... green; pkg/cas 25 leaf-passes.; review verdict: FIX-THEN-SHIP
 - 2026-07-05: closed — go build ./... + go vet ./... clean; go test ./... all green — pkg/cas 14 tests: Store contract (round-trip/dedup/Has/ErrNotFound) for both MemStore+FSStore, HashOf content-addressing, integrity→ErrCorrupt on tampered blob, deterministic LRU eviction (fake clock), evict-then-refetch restore, touch-on-Get recency (true LRU), pure selectEvictions math. Design pre-amortized (settled 2026-07-03, prior session); actual reflects impl-only.; review verdict: FIX-THEN-SHIP
