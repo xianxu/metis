@@ -1,11 +1,12 @@
 ---
 id: 000002
-status: open
+status: working
 deps: [metis#9, metis#3]
 github_issue:
 created: 2026-07-02
-updated: 2026-07-03
+updated: 2026-07-05
 estimate_hours:
+started: 2026-07-05T14:32:51-07:00
 ---
 
 # Uniform DAG step caching: content-address step inputs, skip unchanged, recompute only what changed
