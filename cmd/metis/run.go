@@ -6,20 +6,21 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
 	"github.com/xianxu/metis/pkg/experiment"
+	"github.com/xianxu/metis/pkg/record"
 )
 
-// runOpts are the inputs to one `metis run`. now/out are injected so the e2e test
-// gets a deterministic clock and can discard progress output.
+// runOpts are the inputs to one `metis run`. now/git/out are injected so the e2e
+// test gets a deterministic clock, a fake git probe, and can discard progress output.
 type runOpts struct {
 	expPath  string
 	runID    string
 	stepPath []string
 	now      func() time.Time
+	git      gitProbe
 	out      io.Writer
 }
 
@@ -71,7 +72,7 @@ func runExperiment(o runOpts) (experiment.Run, error) {
 		Now:  now,
 	}
 	fmt.Fprintf(out, "metis: run %s of experiment %q\n", runID, exp.ID)
-	run, runErr := runner.Run(exp, runID, runDir)
+	run, steps, runErr := runner.Run(exp, runID, runDir)
 
 	// Execution-time enforcement: Runner.Run validates the experiment BEFORE any
 	// step executes, so a semantically-invalid experiment (dangling needs, bad
@@ -87,7 +88,17 @@ func runExperiment(o runOpts) (experiment.Run, error) {
 	if err := writeRunJSON(runDir, run); err != nil {
 		return run, err
 	}
-	if err := appendRunLog(o.expPath, run); err != nil {
+	// Assemble + persist the provenance record (metis#3): repo provenance, per-step
+	// output hashes, and the minted point-address. A config that can't be
+	// canonicalized (e.g. a non-finite value) surfaces here as a run error.
+	rec, err := assembleRecord(o.git, out, expDir, runDir, run, steps)
+	if err != nil {
+		return run, err
+	}
+	if err := writeRecordJSON(runDir, rec); err != nil {
+		return run, err
+	}
+	if err := appendRunLog(o.expPath, rec); err != nil {
 		return run, err
 	}
 	if runErr != nil {
@@ -108,10 +119,10 @@ func writeRunJSON(runDir string, run experiment.Run) error {
 	return os.WriteFile(filepath.Join(runDir, "run.json"), append(b, '\n'), 0o644)
 }
 
-// appendRunLog appends a one-line summary to the experiment's `## Runs` section
-// (creating the heading if absent). Move-1: a human-readable bullet; the machine
-// record is runs/<id>/run.json.
-func appendRunLog(expPath string, run experiment.Run) error {
+// appendRunLog appends a one-line knob→score summary (from the provenance record) to
+// the experiment's `## Runs` section (creating the heading if absent). The
+// human-readable bullet; the machine records are runs/<id>/{run,record}.json.
+func appendRunLog(expPath string, rec record.RunRecord) error {
 	raw, err := os.ReadFile(expPath)
 	if err != nil {
 		return err
@@ -123,22 +134,5 @@ func appendRunLog(expPath string, run experiment.Run) error {
 	if !strings.Contains(body, "## Runs") {
 		body += "\n## Runs\n"
 	}
-	return os.WriteFile(expPath, []byte(body+"- "+runSummary(run)+"\n"), 0o644)
-}
-
-func runSummary(run experiment.Run) string {
-	s := fmt.Sprintf("%s — %s — %s", run.ID, run.Status, run.Finished)
-	if len(run.Metrics) == 0 {
-		return s
-	}
-	keys := make([]string, 0, len(run.Metrics))
-	for k := range run.Metrics {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	parts := make([]string, len(keys))
-	for i, k := range keys {
-		parts[i] = fmt.Sprintf("%s=%g", k, run.Metrics[k])
-	}
-	return s + " — metrics: " + strings.Join(parts, " ")
+	return os.WriteFile(expPath, []byte(body+"- "+recordSummary(rec)+"\n"), 0o644)
 }

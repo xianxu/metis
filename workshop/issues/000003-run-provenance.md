@@ -1,12 +1,13 @@
 ---
 id: 000003
-status: working
+status: codecomplete
 deps: []
 github_issue:
 created: 2026-07-02
 updated: 2026-07-05
-estimate_hours:
+estimate_hours: 1.9
 started: 2026-07-05T13:37:57-07:00
+actual_hours: 0.94
 ---
 
 # Run provenance: snapshot the resolved pipeline config (+ experiment git sha) so ## Runs is knob→score legible
@@ -38,7 +39,7 @@ experiment file as ~immutable; fork a new file per variation** so each file owns
 own `## Runs` history. Provenance-snapshot is what would later make in-place editing
 safe.
 
-## Spec (intent, not yet a plan)
+## Spec
 
 On each run, capture enough to answer "what config produced this score," durably:
 
@@ -138,14 +139,53 @@ Refined by the #8 ledger/durability discussion:
 
 ## Done when
 
-- (design-stage) A design note settles what gets snapshotted (config shape, git
-  binding), where it lives, how `## Runs` surfaces knob→score, and the
-  relationship to the fork-per-experiment convention + caching keys.
+- (design-stage — **met**) A design note settles what gets snapshotted (config shape, git
+  binding), where it lives, how `## Runs` surfaces knob→score, and the relationship to the
+  fork-per-experiment convention + caching keys. (settled 2026-07-03, see `## Design`.)
+- (implementation) A pure `pkg/record` defines the unified `StepRecord`/`RunRecord` (all
+  key-material + provenance-extra fields) with a `#RunRecord` CUE type + drift guard, and mints
+  the **point-address** (`hash(resolved-with across the DAG, repo-SHAs, seed)`) — deterministic
+  and map-order-independent, unit-tested for stability + sensitivity.
+- (implementation) A run assembles + writes `runs/<id>/record.json` (git-trackable) with repo-SHAs,
+  per-step resolved-with, output-hashes (`cas.HashOf`), metrics, and the minted point-address; two
+  identical runs mint the **same** point-address (e2e).
+- (implementation) `## Runs` renders a **knob→score** line from the record (config beside metric),
+  superseding the freeform summary.
+- Scope line honored: the traced read-set `D` + cache key + skip/recompute are **#2**; side-ref code
+  *capture* is **#7/#8** — #3 records the current commit + dirty flag honestly. Atlas updated.
 
 ## Plan
 
-- [x] Design note: provenance record shape + git binding + ## Runs legibility + relation to #2 and fork-per-experiment. **(settled 2026-07-03 — see `## Design`)**
-- [ ] (post-design) split implementation milestones from the `## Design` note.
+Durable impl plan: `workshop/plans/000003-run-provenance-plan.md` (scope line #3-vs-#2-vs-#7/#8;
+2 review boundaries). TDD; the pure core (M1) is reviewed before IO builds on it (M2).
+
+- [x] Design note: provenance record shape + git binding + ## Runs legibility + relation to #2 and fork-per-experiment. **(settled 2026-07-03 — see `## Design`)**; impl decomposed into the durable plan (2026-07-05).
+- [x] **M1 — pure record core** (+ pure-core runner change, reviewed at this boundary). `pkg/experiment`: add `StepRun{Step, Result}`; `Runner.Run` → `(Run, []StepRun, error)` so per-step metrics/artifacts are retained (today they're flat-merged + discarded — the record can't reach them otherwise). `pkg/record`: `StepRecord`/`RunRecord`/`CodeManifest`/`FileHash` (all key-material + provenance slots; `D`/`Deps` are #2-populated slots), pure `PointAddress(resolvedWith, repoSHAs, seed)` (canonical `json.Marshal` → `cas.HashOf`), pure `OutputHash([]FileHash)` (**multi-file reduction**: hash of the sorted `(relpath, content-hash)` manifest). `#StepRecord`/`#RunRecord` CUE + drift guard. Unit tests: point-address determinism/sensitivity, `OutputHash` order-independence/sensitivity/empty, per-step retention, JSON round-trip. (No `CacheKeyMaterial` — deferred to #2 where it's testable.)
+- [x] **M2 — populate + persist + legibility.** `cmd/metis/record.go`: `assembleRecord`/`buildRecord` assemble the record during `runExperiment` from `exp.Steps` + `[]StepRun` (repo-SHAs+dirty via an injected `gitProbe` seam — real `gitCLI` + fake; per-step metrics + `OutputHash` from `cas.HashOf`-ing each artifact file), mint the point-address, write `runs/<id>/record.json` (git-trackable). `## Runs` → knob→score line via `recordSummary`, reusing an extracted `formatMetrics` (ARCH-DRY). **Graceful degradation:** a run outside a git repo warns + records no repo-SHAs (design's "v1: warn"), doesn't fail. e2e (`record.json` conforms to `#RunRecord`; point-address stable across two identical runs; `## Runs` knob→score line; no-git degraded path) — no `uv` needed (test/echo). Atlas: `pkg/record` + record datatype + `Runner.Run` `[]StepRun` + the #3/#2 scope line. **Verified in the real CLI** (real git SHA + dirty; knob→score line).
+
+## Estimate
+
+*Produced via `brain/data/life/42shots/velocity/estimate-logic-v3.1.md` against `baseline-v3.1.md`. Method A only.*
+
+```estimate
+model: estimate-logic-v3.1
+familiarity: 1.0
+item: greenfield-go-module   design=0.5 impl=0.4
+item: smaller-go-module      design=0.2 impl=0.2
+item: milestone-review       design=0.0 impl=0.2
+item: milestone-review       design=0.0 impl=0.2
+item: atlas-docs             design=0.05 impl=0.05
+design-buffer: 0.15
+total: 1.91
+```
+
+Design pre-settled → greenfield `pkg/record` (M1: point-address + `OutputHash` multi-file reducer +
+the pure-core `Runner.Run` per-step-retention change + CUE + drift guard) at the design floor, impl
+bumped to 0.4 for the extra pure-core work the plan-judge surfaced; the runner integration (M2) is a
+smaller-go-module *extend* of `cmd/metis`; **two** `milestone-review` items — one per review boundary
+(M1 milestone-close + M2 final close, each auto-dispatches a fresh-eyes review; #9 showed reviews are
+real work, and the estimate-quality judge flagged the second boundary as un-costed). A small atlas note.
+Impl at 40%-of-v2 (v3.1). +15% thorough-plan buffer.
 
 ## Log
 
@@ -154,3 +194,11 @@ Refined by the #8 ledger/durability discussion:
 
 ### 2026-07-03
 - **Design settled** (unified with #2's caching design, multi-round brainstorm). Key move: provenance and the cache key are the *same determinant set*, different operation (reconstruct vs. compare) → **one unified per-step record**, key-material (hashed = cache key) vs. provenance-only extras (repo-SHAs, fetched, metrics). Three derived views: cache key (#2) / point-address (this issue, #8 derives) / output key. Durability contract: CAS is a pure wipeable cache; records must be **recipe-complete against durable homes** (git + refetch) so the DAG reconstructs from an empty cache; clean-vs-dirty demoted to a *legibility* choice (promotable runs → clean). Dropped the stale "point-address is the cache key" self-label. Split the CAS storage primitive out as **metis#9**. Full spec in `## Design`.
+
+### 2026-07-05
+- 2026-07-05: closed — metis#3 L0 record complete (M1 pure core SHIP + M2 integration). go build+vet+test ./... green incl -race. Verified in the real CLI: record.json with real HEAD sha + dirty + per-step output-hashes; ## Runs rendered knob->score. Hermetic e2e (no uv): #RunRecord conformance, point-address stable across 2 identical runs, no-git degraded path. --no-verdict: M2 is the FINAL milestone; its boundary review IS this issue-close integration review (redundant second pass avoided, #69). --no-plan-check: both M1+M2 are [x] and shipped. --no-project: brain metis-v1.md ticked by hand.; review verdict: SHIP
+- 2026-07-05: closed M2 — M2 runner integration: go build+vet+test ./... green incl -race. Hermetic e2e (test/echo, no uv): record.json conforms to #RunRecord, point-address stable across 2 identical runs, ## Runs knob->score line, no-git degraded path. Verified in the REAL CLI: record.json carried the real HEAD sha + dirty flag + per-step output-hashes; ## Runs rendered knobs+metrics. Root-caused M1-review Minor (PointAddress returns error on non-finite config); graceful git degradation (no-repo run warns, not fails). --no-project: brain/data/project/metis-v1.md uses issue-link convention, not the close <a id> anchors; ticked metis#3 + est/actual by hand (committed in brain).
+- 2026-07-05: closed M1 — M1 pure core: go build+vet+test ./... green. pkg/experiment Runner.Run -> (Run, []StepRun, error) with per-step-retention test; pkg/record 6 unit tests (PointAddress determinism-across-25-calls + sensitivity; OutputHash order-independence/sensitivity/nil==empty; JSON round-trip) + TestRunRecordConformsToCUE drift guard (cue present, passes). BYPASS --no-atlas + --no-project: M1 is the pure core — the atlas + project-tracker updates are deliberately M2/final-close work (record datatype + #3/#2 scope line land with the runner integration); milestone progress is tracked in the issue Plan/Log.; review verdict: SHIP
+- **Impl decomposed** into `workshop/plans/000003-run-provenance-plan.md` (2 review boundaries, scope line #3-vs-#2-vs-#7/#8). `change-code` plan-quality: **CLEAN** (after revising the plan for the 2 gaps below); estimate-quality: INFO (added the 2nd milestone-review item).
+- **M1 built — the pure record core** (TDD, all green; build+vet+full-suite clean). `pkg/experiment`: `StepRun{Step, Result}` + `Runner.Run` → `(Run, []StepRun, error)` for **per-step retention** (plan-judge Finding 1: the flat `Run` merge discarded per-step data the record needs; callers/tests updated). `pkg/record` (new pure pkg): `StepRecord`/`RunRecord`/`CodeManifest`/`FileHash`/`CodeRef` (`Hash` re-exports `cas.Hash`), pure `PointAddress` (canonical `json.Marshal`→`cas.HashOf`; deterministic-across-calls + sensitivity tests), pure `OutputHash([]FileHash)` (**multi-file reducer** — plan-judge Finding 2 — sorted `(path,hash)` manifest; order-independence + sensitivity + nil==empty tests). CUE `#StepRecord`/`#RunRecord` in `experiment.cue` + `TestRunRecordConformsToCUE` drift guard (passes). **M1 boundary review: SHIP.**
+- **M2 built — runner integration + `## Runs` legibility** (TDD, all green incl. `-race`; verified in the real CLI). `cmd/metis/record.go`: `gitProbe` seam (real `gitCLI` shelling `git -C`; fake for tests), `assembleRecord` (probe git → hash each step's artifacts via `cas.HashOf` → `record.OutputHash`) + pure `buildRecord` (mints point-address, fills coarse code identity, leaves Upstream/D/Deps for #2), `writeRecordJSON` (`runs/<id>/record.json`), `recordSummary`/`formatKnobs`/`formatMetrics` (knob→score `## Runs`, reuses one metric-formatter — ARCH-DRY). Wired into `runExperiment` (returns `[]StepRun` now). **Root-caused the M1-review Minor:** `PointAddress` returns an error (not panic) on non-finite config; **graceful git degradation** (run outside a repo warns + omits repo-SHAs, doesn't fail — design's "v1: warn"). Hermetic e2e (no `uv`): record conforms to `#RunRecord`, point-address stable across identical runs, knob→score line, no-git path. Atlas updated (`pkg/record` + `Runner.Run` + #3/#2 scope line). Real-CLI check: record.json carries a real git SHA + dirty flag + per-step output-hashes; `## Runs` = `knobs: prep.k=5 … — metrics: echoed=1`. **Noticed a pre-existing latent bug** (relative step-path fallback breaks exec in a `go.mod`-less repo) — out of scope for #3, to be filed.

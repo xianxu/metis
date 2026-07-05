@@ -43,6 +43,7 @@ func TestToyPipeline_EndToEnd(t *testing.T) {
 		runID:    "run-e2e",
 		stepPath: []string{filepath.Join(root, "steps")}, // the real metis/* step-types
 		now:      func() time.Time { return time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC) },
+		git:      fakeGitProbe{name: "metis", sha: "toysha", dirty: false}, // workspace is a bare TempDir, not a git repo
 		out:      io.Discard,
 	})
 	if err != nil {

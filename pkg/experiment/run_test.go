@@ -41,7 +41,7 @@ func TestRunner_Run_OrderAndAssembly(t *testing.T) {
 	clock := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
 	r := Runner{Exec: fake, Now: fixedClock(clock)}
 
-	run, err := r.Run(exp, "run-001", "/runs/run-001")
+	run, _, err := r.Run(exp, "run-001", "/runs/run-001")
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -65,6 +65,42 @@ func TestRunner_Run_OrderAndAssembly(t *testing.T) {
 	}
 }
 
+// TestRunner_Run_ReturnsPerStepResults: the runner retains per-step results in
+// execution (topo) order — the breakdown a provenance record needs, which the flat
+// Run merge discards. Each StepRun pairs the executed Step with its Result.
+func TestRunner_Run_ReturnsPerStepResults(t *testing.T) {
+	exp := Experiment{ID: "exp1", Seed: 7, Steps: []Step{
+		{ID: "train", Uses: "metis/train", Needs: []string{"prep"}},
+		{ID: "prep", Uses: "metis/cv-split", With: map[string]any{"k": 5}},
+	}}
+	fake := &fakeExecutor{results: map[string]StepResult{
+		"prep":  {Artifacts: []string{"folds.json"}},
+		"train": {Metrics: map[string]float64{"acc": 0.9}, Artifacts: []string{"model.pkl"}},
+	}}
+	r := Runner{Exec: fake, Now: fixedClock(time.Unix(0, 0).UTC())}
+
+	_, steps, err := r.Run(exp, "run-001", "/runs/run-001")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(steps) != 2 {
+		t.Fatalf("want 2 StepRuns, got %d", len(steps))
+	}
+	// Topo order: prep before train.
+	if steps[0].Step.ID != "prep" || steps[1].Step.ID != "train" {
+		t.Fatalf("StepRun order = [%s %s]; want [prep train]", steps[0].Step.ID, steps[1].Step.ID)
+	}
+	if steps[0].Step.With["k"] != 5 {
+		t.Errorf("prep resolved With not retained: %v", steps[0].Step.With)
+	}
+	if steps[1].Result.Metrics["acc"] != 0.9 {
+		t.Errorf("train per-step metric not retained: %v", steps[1].Result.Metrics)
+	}
+	if !reflect.DeepEqual(steps[0].Result.Artifacts, []string{"folds.json"}) {
+		t.Errorf("prep artifacts = %v; want [folds.json]", steps[0].Result.Artifacts)
+	}
+}
+
 // TestRunner_Run_StepFailure: a failing step stops the pipeline and records a
 // "failed" Run; later steps never execute.
 func TestRunner_Run_StepFailure(t *testing.T) {
@@ -75,7 +111,7 @@ func TestRunner_Run_StepFailure(t *testing.T) {
 	fake := &fakeExecutor{failOn: "a", results: map[string]StepResult{}}
 	r := Runner{Exec: fake, Now: fixedClock(time.Unix(0, 0).UTC())}
 
-	run, err := r.Run(exp, "run-x", "d")
+	run, _, err := r.Run(exp, "run-x", "d")
 	if err == nil {
 		t.Fatal("Run: want error from failing step, got nil")
 	}

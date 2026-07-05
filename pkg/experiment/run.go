@@ -12,6 +12,15 @@ type StepResult struct {
 	Artifacts []string
 }
 
+// StepRun pairs one executed step with the result it produced, retained by
+// Runner.Run in execution (topo) order. The flat Run stays the ledger/back-compat
+// summary; []StepRun is the per-step breakdown a provenance record (metis#3) needs —
+// Run's flat metric-merge + artifact-append discards which step produced what.
+type StepRun struct {
+	Step   Step
+	Result StepResult
+}
+
 // StepExecutor is the injected seam between the pure orchestration (Runner.Run)
 // and the actual step execution. The production impl lives in cmd/metis and shells
 // out to a subprocess (files + subprocess, never FFI); tests inject a fake, so
@@ -38,9 +47,12 @@ type Runner struct {
 // Run validates exp (execution-time enforcement of the semantic checks M1
 // deferred), orders its steps, executes each through the StepExecutor, and
 // assembles the Run record — merging each step's metrics and collecting its
-// artifacts in execution order. runDir is where step artifacts land (runs/<id>/).
-// It stops at the first step error, returning a "failed" Run and the error.
-func (r Runner) Run(exp Experiment, runID, runDir string) (Run, error) {
+// artifacts in execution order. It also returns the per-step []StepRun (in topo
+// order) so a provenance record (metis#3) can reach the per-step data the flat Run
+// merge discards. runDir is where step artifacts land (runs/<id>/). It stops at the
+// first step error, returning a "failed" Run, the StepRuns completed so far, and
+// the error.
+func (r Runner) Run(exp Experiment, runID, runDir string) (Run, []StepRun, error) {
 	now := r.Now
 	if now == nil {
 		now = time.Now
@@ -48,13 +60,13 @@ func (r Runner) Run(exp Experiment, runID, runDir string) (Run, error) {
 	stamp := func() string { return now().UTC().Format(time.RFC3339) }
 
 	if err := Validate(exp); err != nil {
-		return Run{}, fmt.Errorf("invalid experiment %q: %w", exp.ID, err)
+		return Run{}, nil, fmt.Errorf("invalid experiment %q: %w", exp.ID, err)
 	}
 	order, err := TopoSort(exp)
 	if err != nil {
 		// Unreachable once Validate passes (it delegates acyclicity to TopoSort),
 		// but keep the guard honest rather than dropping the error.
-		return Run{}, err
+		return Run{}, nil, err
 	}
 
 	run := Run{
@@ -65,13 +77,15 @@ func (r Runner) Run(exp Experiment, runID, runDir string) (Run, error) {
 		Status:     "ok",
 		Metrics:    map[string]float64{},
 	}
+	var steps []StepRun
 	for _, step := range order {
 		res, err := r.Exec.Execute(step, runDir)
 		if err != nil {
 			run.Status = "failed"
 			run.Finished = stamp()
-			return run, fmt.Errorf("step %q: %w", step.ID, err)
+			return run, steps, fmt.Errorf("step %q: %w", step.ID, err)
 		}
+		steps = append(steps, StepRun{Step: step, Result: res})
 		for k, v := range res.Metrics {
 			run.Metrics[k] = v // flat merge; move-1 sequential runner, last-write-wins
 		}
@@ -81,5 +95,5 @@ func (r Runner) Run(exp Experiment, runID, runDir string) (Run, error) {
 	if len(run.Metrics) == 0 {
 		run.Metrics = nil // keep the ledger JSON clean when no step emitted metrics
 	}
-	return run, nil
+	return run, steps, nil
 }

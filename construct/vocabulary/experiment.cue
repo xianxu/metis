@@ -38,3 +38,52 @@ package experiment
 	status:       #Status
 	steps: [...#Step]      // the pipeline (may be a single step)
 }
+
+// The provenance record (metis#3) — the L0 reproducibility atom, emitted as
+// runs/<id>/record.json. Field names are snake_case to match the Go json tags
+// (pkg/record). Like #Run there is no `type` discriminator, so the drift guard
+// `cue vet`s a marshaled RunRecord against #RunRecord (closed schema → a renamed /
+// removed / extra field fails). Fields metis#2/#8 populate (read-set d, deps) are
+// OPTIONAL here — metis#3 fills only the coarse code identity (commit + dirty).
+
+#FileHash: {
+	path: string
+	hash: string   // content hash of the file's bytes
+}
+
+#CodeRef: {       // one file of the read-set D, pinned by its git blob-hash
+	path:      string
+	blob_hash: string
+}
+
+#CodeManifest: {
+	commit: string          // the commit the code closure was captured at
+	dirty:  bool            // was the repo dirty at run time
+	d?: [...#CodeRef]       // read-set; metis#2's validating trace populates
+	deps?: string           // uv.lock digest; metis#2 populates
+}
+
+#StepRecord: {
+	// key-material (metis#2 hashes into the cache key):
+	step_id: string
+	uses:    string
+	with?: {[string]: _}    // resolved config
+	upstream?: [...string]  // upstream output hashes
+	code: #CodeManifest
+	// provenance-only extras:
+	output_hash?: string
+	metrics?: {[string]: number}
+}
+
+#RunRecord: {
+	run_id:        string
+	experiment:    string
+	seed:          int
+	point_address: string          // the minted L0 run-identity
+	repo_shas?: {[string]: string} // repo-name → SHA at run time
+	dirty: bool
+	steps: [...#StepRecord]
+	started:   string
+	finished?: string
+	status:    string
+}
