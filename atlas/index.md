@@ -22,10 +22,15 @@ identical on a non-Kaggle platform?* — if yes, it lives here.
 - **`pkg/cache`** (the validating-trace policy layer) — metis#2, the step cache over `pkg/cas`
   (bytes) + `pkg/record` (key-material). Pure core shipped M1: `Kpre(rec, seed)` (ex-ante key =
   hash of step-id + uses + resolved-with + seed + sorted-upstream), `Validate(D, hasher)` (re-hash
-  the read-set → HIT/MISS), `OutputKey(kpre, D)`, the `Entry` index codec. The read-sensor (Python
-  audit hooks) + git blob-hasher (M2) and the runner skip/materialize integration + `## the cheap-
-  sweeps flow` (M3) are still to come; `record.CanonicalHash` is the shared hashing primitive.
-  [metis#2]
+  the read-set → HIT/MISS), `OutputKey(kpre, D)`, the `Entry` index codec. **M2 shipped** the
+  read-sensor + blob-hasher: `metis/trace.py` (a `python -m metis.trace <step>` launcher installing a
+  `sys.addaudithook` + `sys.modules` snapshot → writes the first-party code closure to
+  `runs/<id>/<step>/reads.json`; the step wrappers launch through it), and Go `loadReadSet` /
+  `gitBlobHashes` (batched `git hash-object`) / `buildD` turning reads → `D = [(path, git-blob-hash)]`.
+  Honest limit: the audit hook is a *lower-bound* (a C-extension `fopen` bypasses it), but those are
+  class-1 data reads (keyed via upstream output-hashes), not first-party code. The runner
+  skip/materialize integration + the cheap-sweeps flow (M3) are still to come; `record.CanonicalHash`
+  is the shared hashing primitive. [metis#2]
 - **`pkg/cas`** (content-addressed blob store) — the storage floor of the metis-v1 cache
   chain (**CAS ‹ #3 record ‹ #2 cache**). Mechanism only: `Store` (`Put(data)→Hash` /
   `Get` integrity-verified / `Has`), sha256 keys, self-deduplicating, sharded FS pool

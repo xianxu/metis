@@ -4,4 +4,4 @@
 # exec the entrypoint in the hermetic uv env. See atlas/experiment.md (M3 surface).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-exec uv run --project "$ROOT" python -m metis.steps.cv_split
+exec uv run --project "$ROOT" python -m metis.trace metis.steps.cv_split
