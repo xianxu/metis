@@ -1,11 +1,12 @@
 ---
 id: 000003
-status: open
+status: working
 deps: []
 github_issue:
 created: 2026-07-02
-updated: 2026-07-03
+updated: 2026-07-05
 estimate_hours:
+started: 2026-07-05T13:37:57-07:00
 ---
 
 # Run provenance: snapshot the resolved pipeline config (+ experiment git sha) so ## Runs is knob→score legible
