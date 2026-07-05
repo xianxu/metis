@@ -197,3 +197,73 @@ Coverage pins real logic, not mock reassertion: `TestGitBlobHashes_MatchesGit` v
 ### 7. Plan revision recommendations
 - The plan's `## Revisions` already records the M3 realities (OutputKey drop, `reads.json` exclusion, `Code.D` deferral to #8) and matches the code — no plan-vs-code contradiction remains.
 - Add one `## Revisions` line noting the coverage debt as owed, so it's a recorded decision rather than a silent gap: *"Close-review: two soundness-critical paths ship without automated coverage — (1) real-D revalidation driving a selective MISS on a source edit (verified by hand at close; both e2es are blind to it because CheapSweeps' test/echo steps yield an empty D), and (2) the leaf policy end-to-end from a YAML-parsed `cache:{leaf:immutable}` marker. Add both tests as immediate follow-up."*
+
+---
+
+## Re-review — 2026-07-05T16:29:45-07:00 (FIX-THEN-SHIP)
+
+| field | value |
+|-------|-------|
+| issue | 2 — Uniform DAG step caching: content-address step inputs, skip unchanged, recompute only what changed |
+| repo | metis |
+| issue file | workshop/issues/000002-step-caching.md |
+| boundary | whole-issue close |
+| milestone | — |
+| window | 0630b426ff15f84f11cb3121289f7a6f83936279..HEAD |
+| command | sdlc close --issue 2 |
+| reviewer | claude |
+| timestamp | 2026-07-05T16:29:45-07:00 |
+| verdict | FIX-THEN-SHIP |
+
+## Review
+
+Ignoring 6 permissions.allow entries from .claude/settings.json: this workspace has not been trusted. Run Claude Code interactively here once and accept the trust dialog, or set projects["/Users/xianxu/workspace/metis"].hasTrustDialogAccepted: true in /Users/xianxu/.claude.json.
+I have everything I need. Build, vet, and the full suite are green with real `uv`+`git` present (the gated toy-pipeline e2e ran 3.37s, the sensor test 1.10s, `TestGitBlobHashes_MatchesGit` against real git — all execute, none skip), I reproduced the cache working end-to-end (cold MISS → re-run `⚡ cache hit`), and I reproduced one contract violation the three prior close-reviews all missed. Here is my fresh review.
+
+```verdict
+verdict: FIX-THEN-SHIP
+confidence: high
+```
+
+The whole-issue close delivers the issue's stated purpose: a working, sound validating-trace step cache. `metis run --cache` computes `K_pre`, stores a real read-set `D`, validates by re-hashing via `git hash-object`, and on a HIT materializes the output from the CAS and skips the subprocess. I verified soundness independently — `TestCachingExecutor_RealDMissesOnSourceEdit` and `TestCache_LeafPolicyFromParsedYAML` (the two paths the prior reviews flagged as uncovered) are now present, execute, and pass, and I ran the cache by hand (identical re-run HITs every step). `pkg/cache` is textbook-pure over injected seams; `CanonicalHash` is a clean single-source primitive. What keeps this from a clean SHIP is one fresh Important finding: the cachingExecutor **violates the CAS package's own documented consumer contract** — `materialize` hard-fails the entire run when a cached output blob is missing/corrupt/evicted, instead of recomputing. It's safe-direction (fails loudly, never serves stale), so non-blocking at the gate, but it contradicts three stated contracts and is cheap to fix.
+
+### 1. Strengths
+- **The cache is genuinely sound and works end-to-end — I reproduced both.** Cold run MISSes all steps; identical re-run emits `⚡ step … (cache hit)` for every step. `TestCache_ToyPipelineHitsOnRerun` drives the real uv/Python pipeline twice (3.37s, actually executes), HITs all three steps, reproduces `cv_score` from cache, and materializes `predictions.csv`.
+- **The prior close-reviews' flagged coverage gaps are genuinely closed.** `TestCachingExecutor_RealDMissesOnSourceEdit` (caching_test.go) builds a real git repo, stores a non-empty D, asserts HIT-while-clean and MISS-on-byte-edit — the core "recompute only what changed" claim, locked at the unit level. `TestCache_LeafPolicyFromParsedYAML` drives the leaf marker through the real `experiment.Parse` (yaml.v3 → `map[string]any`). Both pass.
+- **ARCH-PURE is clean.** `pkg/cache` injects its only IO — `Validate(storedD, hash func(path))` (cache.go:57) and `buildD(reads, blobHash)` (trace.go:69) unit-test with map fakes and zero filesystem. The IO shell (`caching.go`, `trace.go`, `trace.py`) is the thin boundary, wired as a `StepExecutor` decorator (run.go:102-109).
+- **ARCH-DRY single-source holds.** `record.CanonicalHash` (address.go:21) is the one canonical-hash primitive; `PointAddress`/`OutputHash`/`Kpre` all derive from it — grep confirms no leftover inline `json.Marshal→HashOf`. `OutputKey` cleanly removed.
+- **Safe-direction error handling on the D path.** `isHit` (caching.go:141-144) returns MISS on any git-hasher failure; `loadReadSet` treats absent `reads.json` as empty. Error-swallowing there can never produce an unsound HIT.
+- **`uv.lock` fold into D is correct and non-aliasing** (`append(append([]string(nil), rs.Reads...), depsLockFile)`, caching.go:205 — copies before appending, so `rs.Reads` isn't mutated), closing the dep-upgrade false-HIT.
+
+### 2. Critical findings
+None. The cache is sound (every gap is a spurious MISS or a loud failure, never a stale serve); full suite + real-uv/git e2es green; I additionally verified soundness by hand.
+
+### 3. Important findings
+
+- **`cachingExecutor` violates the CAS package's documented "wipeable cache" consumer contract — a missing/corrupt/evicted output blob hard-fails the run instead of recomputing** (`cmd/metis/caching.go:161` and `:171`). `pkg/cas` states the contract explicitly (cas.go:44-46): *"A wipeable-cache consumer treats [ErrNotFound/ErrCorrupt] like ErrNotFound and recomputes."* The `cachingExecutor` is that consumer, but `materialize` propagates both `store.Get` errors verbatim (`return experiment.StepResult{}, fmt.Errorf("cache: get output manifest: %w", err)`), and `Runner.Run` turns any `Execute` error into a failed run (run.go:83-86). I **reproduced it**: run a 2-step `test/echo` experiment cached, then `rm -rf .metis-cache/cas` (keeping `index/`), re-run →
+  ```
+  metis: step "prep": cache: get output manifest: cas: blob not found
+  ```
+  **exit code 1** — a hard failure. This contradicts three stated contracts: (a) the CAS consumer contract above; (b) the issue's durability design (lines 158-165, 183: *"rm -rf cas/ loses only recomputable output bytes … wiped → recompute via the record's recipe"*); (c) the code's own comments (run.go:33 *"the cache is safe to `rm -rf` and rebuild"*; the `Entry` doc). It is safe-direction (fails loudly, never serves stale) so not Critical, but it's a genuine contract gap. Two realistic triggers even today: a partial `rm -rf cas/` (the design explicitly calls this safe) and on-disk **corruption** (`ErrCorrupt` — the exact event the CAS integrity-check defends against and instructs the consumer to recover from). It is also a **latent happy-path bug**: the FSStore is LRU-eviction-capable (constructed `maxBytes=0` → eviction off today, but eviction is the store's designed purpose per cas.go:78); enabling it makes a HIT-then-evicted step fail during normal operation. Fix: in `Execute`, treat a `materialize` failure where `errors.Is(err, cas.ErrNotFound) || errors.Is(err, cas.ErrCorrupt)` as a MISS (fall through to recompute), propagating only other errors; add a test that stores an entry, wipes the CAS blob, and asserts the step recomputes rather than erroring. This is exactly the recompute-on-eviction seam #8's durability layer will build on — honoring the CAS contract now is #2's job.
+
+### 4. Minor findings
+- **ARCH-DRY: duplicated "upstream-from-needs" loop** — `cachingExecutor.kpre` (caching.go:100-105) and `buildRecord` (record.go:96-102) both iterate `step.Needs` against an output-hash map. A shared `upstreamHashes(needs, outputs)` helper would consolidate.
+- **Output-hash computed twice per cached run** — `recordOutput` (caching.go:265, mid-run to feed downstream K_pre) and `assembleRecord` (record.go:76, post-run). Same function; must stay in lockstep.
+- **`Entry` doc overstates git-tracking** (cache.go:74 "survives … across branches") while `ensureCacheGitignore` writes `*`, ignoring the whole `.metis-cache` including `index/`. The index is on-disk-persistent but not git-shared (consciously deferred).
+- **Immutable-leaf HIT bypasses D (code) revalidation entirely** (caching.go:134) — editing a leaf's fetch code won't bust its cache. Documented conscious v1 bet; flagged for the operator (matters only if a leaf ever carries first-party transform code vs a pure fetch).
+- On a HIT, `with.json`/`reads.json` aren't restored into the step dir — a cached step's run dir is incomplete for legibility (harmless; the record carries `With`).
+- `gitBlobHashes` batches all D paths into one argv (trace.go:50) — an `ARG_MAX` risk only at large-D scale; fine for v1.
+- The `cache` policy knob lives inside `with` (caching.go:274) — a runner concern hashed into K_pre, written to `with.json`, and rendered in the `## Runs` knobs line. Cosmetic namespace conflation.
+
+### 5. Test coverage notes
+Coverage pins real logic, not mock reassertion: `TestGitBlobHashes_MatchesGit` vs real `git hash-object`; `TestSensor_RecordsFirstPartyCodeReads`/`_ExcludesRunDirAndStdlib` drive the real sensor + `_classify` filter contract; `TestCachingExecutor_RealDMissesOnSourceEdit` locks the core selective-invalidation soundness the e2es were blind to; both e2es run real skip/materialize. The prior reviews' two flagged gaps are now covered — good. New gaps, priority order: (1) the wipeable-cache recompute-on-missing-blob behavior (finding #1 — the test to add with the fix); (2) neither e2e counts *subprocess executions*, so a "HIT that silently re-ran" would still pass on the `⚡` marker + cv reproduction (close but indirect).
+
+### 6. Architectural notes for upcoming work
+- **ARCH-PURPOSE — purpose delivered.** Shadow-sweep of Done-when: pure `pkg/cache` ✓, Python sensor + Go blob-hasher ✓, runner skip/materialize + leaf policy ✓, cheap-sweeps + real-pipeline e2es ✓, atlas ✓ (index.md + experiment.md's `--cache` both updated; no README exists so that gate doesn't apply). Deferring the **#3 record's** `Code.D`/`Deps` *provenance* to #8 is legitimate — the cache's *functional* `Entry.D` (what decides HIT/MISS) is fully populated (I verified it holds the real closure); only the record's code-manifest field stays empty, entangled with #8's git-side-ref durability. Pass.
+- **#8 wiring `Code.D` must source it from the cache `Entry`, not a fresh `reads.json`** — a HIT produces no new `reads.json`, so the record's D provenance on a cached run has to come from the index entry. The current empty-on-HIT behavior is the seam #8 fills — and finding #1's recompute-on-eviction fix is the same durability seam.
+- **The design's `hash(K_pre, D)` output address collapsed to `K_pre → {one D, output}`** — toggling between two code versions that share a K_pre always MISSes (the index stores one D per K_pre; a re-run overwrites). Safe (never stale) and fully serves the param-sweep purpose; worth an explicit note only if branch-toggle reuse ever matters.
+- The "everything in the step dir except reserved channels" artifact model (exec.go:133) keeps accreting reserved-channel special cases (`reads.json` was the second). Prefer moving sensor sidecars outside the artifact tree (run-dir metadata) when #8 touches this.
+
+### 7. Plan revision recommendations
+- The plan's `## Revisions` already records the M3 realities (OutputKey drop, `reads.json` exclusion, `Code.D` deferral to #8, the `hash(K_pre,D)` collapse, the soundness-coverage debt) and matches the code — no plan-vs-code contradiction remains.
+- Add one `## Revisions` line to `workshop/plans/000002-step-caching-plan.md` recording finding #1 as owed, so it's a recorded decision rather than a silent gap: *"Close-review: `cachingExecutor.materialize` does not honor the CAS wipeable-cache consumer contract (cas.go: treat ErrNotFound/ErrCorrupt as recompute) — a missing/corrupt/evicted output blob hard-fails the run (reproduced: `rm -rf .metis-cache/cas` → `cas: blob not found`, exit 1) instead of falling through to a MISS. Contradicts the durability design's 'rm -rf cas/ is safe → recompute' and becomes a happy-path bug once FSStore eviction (maxBytes>0) is enabled. Fix: treat a materialize ErrNotFound/ErrCorrupt as a MISS; add a wipe-then-recompute test."*

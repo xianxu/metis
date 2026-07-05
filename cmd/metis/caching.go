@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -13,6 +14,21 @@ import (
 	"github.com/xianxu/metis/pkg/experiment"
 	"github.com/xianxu/metis/pkg/record"
 )
+
+// upstreamHashes maps a step's needs → the upstream steps' output-hashes (sorted, so a
+// derived cache key is invariant to needs-declaration order). Shared by the record
+// assembler (buildRecord) and the cachingExecutor's K_pre — one source for the DAG
+// wiring (ARCH-DRY).
+func upstreamHashes(needs []string, outputs map[string]record.Hash) []record.Hash {
+	up := make([]record.Hash, 0, len(needs))
+	for _, need := range needs {
+		if h, ok := outputs[need]; ok {
+			up = append(up, h)
+		}
+	}
+	sort.Slice(up, func(i, j int) bool { return up[i] < up[j] })
+	return up
+}
 
 // depsLockFile is the dependency lockfile folded into D when a step uses site-packages
 // — a dep upgrade changes its git-blob-hash and invalidates the cache.
@@ -70,17 +86,25 @@ func (c *cachingExecutor) Execute(step experiment.Step, runDir string) (experime
 	}
 	if ok && c.isHit(step, entry) {
 		res, err := c.materialize(entry, stepDir, runDir)
-		if err != nil {
-			return experiment.StepResult{}, err
+		switch {
+		case err == nil:
+			fmt.Fprintf(c.out, "⚡ step %s (cache hit)\n", step.ID)
+			if err := c.recordOutput(step.ID, res.Artifacts, runDir); err != nil {
+				return experiment.StepResult{}, err
+			}
+			return res, nil
+		case errors.Is(err, cas.ErrNotFound) || errors.Is(err, cas.ErrCorrupt):
+			// The wipeable-cache contract (pkg/cas): a missing/corrupt/evicted output
+			// blob is NOT a failure — the index hit but the bytes are gone (a partial
+			// `rm -rf cas/`, corruption, or LRU eviction). Fall through to recompute.
+			fmt.Fprintf(c.out, "… step %s (index hit but output wiped — recomputing)\n", step.ID)
+		default:
+			return experiment.StepResult{}, err // a real IO error — propagate
 		}
-		fmt.Fprintf(c.out, "⚡ step %s (cache hit)\n", step.ID)
-		if err := c.recordOutput(step.ID, res.Artifacts, runDir); err != nil {
-			return experiment.StepResult{}, err
-		}
-		return res, nil
 	}
 
-	// MISS — run, then record D + store the output + write the index entry.
+	// MISS (or a recoverable materialize failure) — run, then record D + store the
+	// output + write the index entry.
 	res, err := c.inner.Execute(step, runDir)
 	if err != nil {
 		return res, err
@@ -97,17 +121,11 @@ func (c *cachingExecutor) Execute(step experiment.Step, runDir string) (experime
 // kpre builds the ex-ante cache key from the step's config, the run seed, and the
 // upstream steps' output-hashes accumulated so far (Kpre sorts them internally).
 func (c *cachingExecutor) kpre(step experiment.Step) (cache.Hash, error) {
-	upstream := make([]record.Hash, 0, len(step.Needs))
-	for _, need := range step.Needs {
-		if h, ok := c.outputs[need]; ok {
-			upstream = append(upstream, h)
-		}
-	}
 	return cache.Kpre(record.StepRecord{
 		StepID:   step.ID,
 		Uses:     step.Uses,
 		With:     step.With,
-		Upstream: upstream,
+		Upstream: upstreamHashes(step.Needs, c.outputs),
 	}, c.seed)
 }
 

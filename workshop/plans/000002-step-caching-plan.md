@@ -200,3 +200,13 @@ time via the existing injected `Clock`.
   output}` (the index stores one D per K_pre; a re-run overwrites). Safe (never stale) and fully serves
   the param-sweep purpose; branch-toggle reuse of two code-versions sharing a K_pre would MISS. Flagged
   for #8 if it ever matters.
+
+### 2026-07-05 — close-review round 3 (CAS wipeable-cache contract)
+- **`cachingExecutor` now honors the CAS wipeable-cache consumer contract** (close-review Important,
+  reviewer-reproduced with exit 1): a missing/corrupt/evicted output blob (`cas.ErrNotFound`/`ErrCorrupt`)
+  on a HIT now **falls through to recompute** instead of hard-failing the run — honoring `pkg/cas`'s
+  documented consumer contract + the design's "`rm -rf cas/` is safe." `TestCache_WipedCASRecomputesNotFails`
+  pins it end-to-end (cold run → wipe `cas/` keeping `index/` → re-run recomputes). This is the exact
+  recompute-on-eviction seam #8's durability builds on.
+- **ARCH-DRY: `upstreamHashes(needs, outputs)` helper** consolidates the needs→output-hash loop shared
+  by `buildRecord` and `cachingExecutor.kpre` (flagged across rounds).

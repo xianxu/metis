@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -166,6 +167,57 @@ func TestCache_ImmutableLeafMarker(t *testing.T) {
 	}
 	if isImmutableLeaf(experiment.Step{ID: "x"}) {
 		t.Error("a step with no with must not be an immutable leaf")
+	}
+}
+
+// The wipeable-cache contract (pkg/cas): wiping the CAS output blobs while keeping the
+// index must NOT fail a run — a step whose index-hit output was wiped/evicted/corrupted
+// recomputes. The design promises `rm -rf cas/` is safe; this pins it end-to-end.
+func TestCache_WipedCASRecomputesNotFails(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	root := repoRoot(t)
+	ws := t.TempDir()
+	expPath := filepath.Join(ws, "exp.md")
+	md := `---
+type: experiment
+id: wipe
+seed: 5
+status: active
+steps:
+  - id: prep
+    uses: test/echo
+    with: {k: 5}
+---
+`
+	if err := os.WriteFile(expPath, []byte(md), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	opts := runOpts{
+		expPath:  expPath,
+		stepPath: []string{filepath.Join(root, "testdata", "steps")},
+		now:      func() time.Time { return time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC) },
+		git:      fakeGitProbe{name: "metis", sha: "sha", dirty: false},
+		cache:    true,
+	}
+	opts.runID, opts.out = "w1", io.Discard
+	if _, err := runExperiment(opts); err != nil {
+		t.Fatalf("cold run: %v", err)
+	}
+	// Wipe ONLY the CAS blobs, keeping the index (the exact "rm -rf cas/ is safe" case).
+	if err := os.RemoveAll(filepath.Join(ws, ".metis-cache", "cas")); err != nil {
+		t.Fatal(err)
+	}
+	// Re-run: the index still hits, but the output bytes are gone → must recompute,
+	// not hard-fail.
+	var out strings.Builder
+	opts.runID, opts.out = "w2", &out
+	if _, err := runExperiment(opts); err != nil {
+		t.Fatalf("run after CAS wipe must recompute, not fail: %v\n%s", err, out.String())
+	}
+	if !strings.Contains(out.String(), "recomputing") {
+		t.Errorf("expected a recompute notice after CAS wipe; got:\n%s", out.String())
 	}
 }
 
