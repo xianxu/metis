@@ -1,0 +1,198 @@
+package cas
+
+import (
+	"errors"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+)
+
+// tmpPrefix marks in-flight atomic writes so the eviction scan skips them.
+const tmpPrefix = ".tmp-"
+
+// FSStore is a filesystem-backed Store: blobs live at root/<h[:2]>/<h> (sharded so
+// no single directory holds the whole pool). Writes are atomic (temp file +
+// rename), reads re-hash to verify integrity, and every put/get stamps the blob's
+// mtime from the injected clock so eviction recency is deterministic. Size-bounded
+// LRU eviction (maxBytes; ≤ 0 = unbounded) keeps the pool under budget — because
+// the store is a pure wipeable cache, any evicted blob is simply recomputed.
+type FSStore struct {
+	root     string
+	maxBytes int64
+	now      Clock
+}
+
+// NewFSStore returns a filesystem store rooted at root. maxBytes ≤ 0 is unbounded.
+// now defaults to time.Now when nil. No IO happens here — directories are created
+// lazily on Put — so a store over a not-yet-existing root reads as empty.
+func NewFSStore(root string, maxBytes int64, now Clock) *FSStore {
+	if now == nil {
+		now = time.Now
+	}
+	return &FSStore{root: root, maxBytes: maxBytes, now: now}
+}
+
+// shardPath returns the on-disk path for h and whether h is well-formed enough to
+// have one (a hash shorter than the shard prefix cannot, so it reads as absent).
+func (s *FSStore) shardPath(h Hash) (string, bool) {
+	if len(h) < 2 {
+		return "", false
+	}
+	return filepath.Join(s.root, string(h)[:2], string(h)), true
+}
+
+func (s *FSStore) Put(data []byte) (Hash, error) {
+	h := HashOf(data)
+	p, _ := s.shardPath(h) // HashOf always yields a 64-char hash
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		return "", err
+	}
+	if _, err := os.Stat(p); err == nil {
+		// Already stored (dedup) — just refresh recency, then re-check the budget.
+		if err := s.touch(p); err != nil {
+			return "", err
+		}
+		return h, s.evict(h)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return "", err
+	}
+	if err := s.writeAtomic(p, data); err != nil {
+		return "", err
+	}
+	if err := s.touch(p); err != nil {
+		return "", err
+	}
+	return h, s.evict(h)
+}
+
+// writeAtomic writes data to a temp file in p's directory, then renames it into
+// place so a concurrent reader never observes a partial blob.
+func (s *FSStore) writeAtomic(p string, data []byte) error {
+	tmp, err := os.CreateTemp(filepath.Dir(p), tmpPrefix+"*")
+	if err != nil {
+		return err
+	}
+	name := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		os.Remove(name)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(name)
+		return err
+	}
+	if err := os.Rename(name, p); err != nil {
+		os.Remove(name)
+		return err
+	}
+	return nil
+}
+
+// touch stamps p's mtime from the injected clock — the LRU recency signal, so
+// eviction order is deterministic and independent of wall-clock.
+func (s *FSStore) touch(p string) error {
+	t := s.now()
+	return os.Chtimes(p, t, t)
+}
+
+func (s *FSStore) Get(h Hash) ([]byte, error) {
+	p, ok := s.shardPath(h)
+	if !ok {
+		return nil, ErrNotFound
+	}
+	data, err := os.ReadFile(p)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	if HashOf(data) != h {
+		return nil, ErrCorrupt
+	}
+	if err := s.touch(p); err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
+func (s *FSStore) Has(h Hash) (bool, error) {
+	p, ok := s.shardPath(h)
+	if !ok {
+		return false, nil
+	}
+	switch _, err := os.Stat(p); {
+	case err == nil:
+		return true, nil
+	case errors.Is(err, os.ErrNotExist):
+		return false, nil
+	default:
+		return false, err
+	}
+}
+
+// evict lists the pool and deletes the LRU victims selectEvictions picks, keeping
+// the just-written blob (keep). A no-op when unbounded.
+func (s *FSStore) evict(keep Hash) error {
+	if s.maxBytes <= 0 {
+		return nil
+	}
+	entries, err := s.list()
+	if err != nil {
+		return err
+	}
+	for _, h := range selectEvictions(entries, s.maxBytes, keep) {
+		p, ok := s.shardPath(h)
+		if !ok {
+			continue
+		}
+		if err := os.Remove(p); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+	return nil
+}
+
+// list walks the sharded pool and returns one entry per stored blob (size + mtime
+// recency), skipping in-flight temp files.
+func (s *FSStore) list() ([]entry, error) {
+	shards, err := os.ReadDir(s.root)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var entries []entry
+	for _, shard := range shards {
+		if !shard.IsDir() {
+			continue
+		}
+		files, err := os.ReadDir(filepath.Join(s.root, shard.Name()))
+		if err != nil {
+			return nil, err
+		}
+		for _, f := range files {
+			if f.IsDir() || strings.HasPrefix(f.Name(), tmpPrefix) {
+				continue
+			}
+			info, err := f.Info()
+			if err != nil {
+				if errors.Is(err, os.ErrNotExist) {
+					continue // raced with a concurrent eviction; skip
+				}
+				return nil, err
+			}
+			entries = append(entries, entry{
+				hash:  Hash(f.Name()),
+				size:  info.Size(),
+				atime: info.ModTime(),
+			})
+		}
+	}
+	return entries, nil
+}
+
+var _ Store = (*FSStore)(nil)
