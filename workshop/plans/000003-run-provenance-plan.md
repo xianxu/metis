@@ -105,3 +105,18 @@ Pure core (M1) → direct unit tests (point-address determinism/sensitivity, JSO
 guard). IO (M2) → a `gitProbe` fake for repo-SHAs (no real git in unit tests) + a hermetic e2e that runs
 a toy experiment and asserts `record.json` conforms + point-address stability + `## Runs` line. Controllable
 time via the existing injected `Clock`.
+
+## Revisions
+
+### 2026-07-05 — M1 built (SHIP)
+- **`pkg/record` is a clean leaf over `pkg/cas` only** — it does NOT import `pkg/experiment` (the
+  M1 bullet + Open-decision 1 said it would). The `StepRun`→`StepRecord` mapping moved to the
+  `cmd/metis` M2 assembly site, so the record package carries zero orchestration/IO coupling (the
+  M1 reviewer called this better than the plan). M2's `pkg/record` types take plain values, not
+  `experiment.StepRun`.
+- **M2 must handle NaN/Inf config** (M1 review Minor): `PointAddress`/`OutputHash` canonicalize via
+  `json.Marshal`, which *rejects* `float64(NaN/Inf)` — and `.nan`/`.inf` are valid YAML that reach
+  `resolvedWith`. Root-cause fix in M2: the derivations **return an error** (not panic) on an
+  un-marshalable value, and `runExperiment` surfaces it as a run error. (Panicking on user-reachable
+  input isn't senior-dev — the M1 panic was a placeholder for "programming error," which this isn't.)
+- **M2 atlas pass** also updates `atlas/experiment.md` for the new `Runner.Run` `[]StepRun` return.
