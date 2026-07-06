@@ -29,16 +29,18 @@ type CodeRef struct {
 }
 
 // CodeManifest identifies the code a step ran. metis#3 fills the coarse identity
-// (Commit + Dirty, from the current repo state). The read-set D + Deps (uv.lock
-// digest) are defined slots that stay empty in the RECORD for now: metis#2 built the
-// validating trace and populates the *cache's* functional read-set (cache.Entry.D),
-// but the record's code-manifest *provenance* population is deferred to metis#8 (the
-// git-side-ref durability that captures the code closure).
+// (Commit + Dirty, from the current repo state). metis#8's side-ref capture BACKFILLS
+// the read-set D (the (path, git-blob-hash) closure) and overrides Commit with the
+// captured code SHA — so even a dirty run has a real, recoverable committed SHA
+// (`git checkout <commit>` / `git cat-file blob <hash>`). Deps (the uv.lock digest) is
+// still empty in the record — Python-env provenance separable from the git code capture
+// (the #2 cache already folds uv.lock into its functional D for invalidation); recording
+// the digest here is a small post-v1 provenance follow-up.
 type CodeManifest struct {
 	Commit string    `json:"commit"`
 	Dirty  bool      `json:"dirty"`
-	D      []CodeRef `json:"d,omitempty"`    // read-set — record provenance deferred to metis#8
-	Deps   string    `json:"deps,omitempty"` // uv.lock digest — deferred to metis#8
+	D      []CodeRef `json:"d,omitempty"`    // read-set closure — populated by metis#8's capture
+	Deps   string    `json:"deps,omitempty"` // uv.lock digest — post-v1 provenance follow-up
 }
 
 // StepRecord is one step's raw provenance record. Fields split by role:

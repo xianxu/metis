@@ -31,8 +31,15 @@ identical on a non-Kaggle platform?* — if yes, it lives here.
   experiment (pure `promotedExperiment` — re-expands the shape + matches by free-params, reusing
   `shapePointToExperiment`; id = the name) with a `promoted_from` back-link, committed at its code SHA
   (warns if dirty). Round-trip: the promoted experiment re-runs + reproduces the row. Immutability is by
-  per-row snapshot (each row is self-contained, so a shape-space edit can't invalidate old rows). The
-  side-ref durability capture is metis#8 M3. [metis#8]
+  per-row snapshot (each row is self-contained, so a shape-space edit can't invalidate old rows).
+  **M3 — the side-ref dirty-code capture** (`cmd/metis/capture.go`): after a sweep, `captureSweepCode`
+  collects the code closure (union of the points' `reads.json`), `git hash-object -w`s each file, and
+  if any is dirty/untracked commits the closure to `refs/metis/sweeps/<shape-run-id>` (parented on HEAD,
+  GC-protected) — a real code SHA even for a dirty run — then backfills each point-record's
+  `CodeManifest.D` (the `(path, blob-hash)` pointer-manifest) + `Commit` (the captured SHA). Recovery =
+  `git checkout <commit>` / `git cat-file blob <hash>`. So metis stores no code bytes (git owns code);
+  the CAS holds only wipeable output bytes. (`CodeManifest.Deps`/uv.lock-digest is a post-v1 provenance
+  follow-up.) This closes the #3/#2 "`Code.D`/`Commit` deferred to #8" note. [metis#8]
 - **`pkg/sweep`** (the sweep sampler) — metis#7, the pure ask/tell seam: `Sampler` (`Ask()`/`Tell()`),
   `Grid` (enumerates `shape.Expand`'s points in order; adaptive samplers slot in with no loop change),
   and `StopPredicate`s (`MaxPoints`, `TargetReached`, `AnyStop`). The **driver** is `cmd/metis`:

@@ -115,6 +115,13 @@ func runSweep(o runOpts, sh experiment.Shape, points []shape.Point, now func() t
 	if err := writeManifest(o.expPath, man); err != nil {
 		return err
 	}
+	// Capture the sweep's code closure to a git side ref (metis#8 durability) and
+	// backfill each point-record's CodeManifest — so even a dirty-iteration run has a
+	// real committed SHA and is recoverable. Best-effort where git is absent (a no-git
+	// sweep already ran; capture just doesn't apply).
+	if err := captureSweepCode(o, man); err != nil {
+		return err
+	}
 	// Aggregate the sweep into the shape's append-only ledger (metis#8) — idempotent
 	// (dedups by point-address) + regenerates the body top-N summary.
 	if err := writeSweepLedger(o.expPath, man, sh.Sweep.Objective); err != nil {
