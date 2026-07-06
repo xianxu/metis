@@ -1,11 +1,11 @@
 ---
 id: 000007
 status: working
-deps: [metis#6, metis#3]
+deps: [metis#6, metis#3, metis#2]
 github_issue:
 created: 2026-07-03
 updated: 2026-07-05
-estimate_hours:
+estimate_hours: 1.9
 started: 2026-07-05T17:31:17-07:00
 ---
 
@@ -120,21 +120,50 @@ by #8 (pick-best) and by adaptive samplers here (what to optimize) — one decla
 
 ## Done when
 
-- A `Sampler` interface (`propose_next`/`should_stop`) + a seeded grid impl, pure-core
-  unit-tested (the enumeration + stop predicates, no IO).
-- A sweep entrypoint (`metis sweep <shape>` or `krun`-level) that drives the loop over
-  the existing run path; a small shape fixture sweeps end-to-end to N runs under the fake.
-- `should_stop` honored: a budget/target cap stops a grid sweep before exhaustion (tested).
-- Cache reuse verified: a sweep over a leaf that doesn't affect `get-data`/`adapt`
-  reuses those cached outputs (needs metis#2).
+*(Updated 2026-07-05 to the settled Design — the original bullets described the
+`propose_next`/`should_stop` + `metis sweep` interface the Design superseded with ask/tell + the
+`metis run` flip.)*
+
+- An ask/tell `Sampler` interface (`Ask()`/`Tell()`) + a seeded grid impl, pure-core unit-tested
+  (enumeration + the `MaxPoints`/`TargetReached` stop predicates, no IO).
+- `metis run` on a multi-point shape **sweeps** (flips #6's refusal) — driving the loop over the
+  existing cached run path; a small shape fixture sweeps end-to-end to N runs under the fake. Run-id
+  = the point's `record.PointAddress` (re-runs dedup + resume-from-cache is free); a **shape-run
+  manifest** groups the N point-runs (the #8 handoff).
+- A stop predicate honored: `--max-points` caps a grid sweep before exhaustion (tested).
+- Cache reuse verified: a sweep over a downstream leaf reuses the shared upstream cached outputs
+  (metis#2). Per-point failure is recorded + the sweep continues; detect-and-abort halts on mid-sweep
+  code drift.
 
 ## Plan
 
-- [x] Design settled 2026-07-05 — single driver, ask/tell sampler, content run-id, shape-run identity, detect-and-abort freeze, failed-row (see `## Design`).
-- [ ] Stateful `Sampler` (ask/tell) + seeded grid impl (enumeration + budget/target stop); unit test.
-- [ ] Single-driver sweep loop over v0's per-point path via `metis run` (experiment = 1-point degenerate); content-address run-id; shape-run identity stamped on ledger rows.
-- [ ] Detect-and-abort code-freeze (hash closure at start, re-check per point); failed point → recorded `failed` ledger row + continue.
-- [ ] e2e sweep of a fixture shape under the fake → N runs; budget/target early-stop tested; cache-reuse verified (with #2).
+Durable impl plan: `workshop/plans/000007-sweep-runner-plan.md` (mechanism recap, scope line vs.
+#8/#10, 2 review boundaries). TDD; the pure ask/tell sampler (M1) is reviewed before the driver (M2).
+
+- [x] Design settled 2026-07-05 — single driver, ask/tell sampler, content run-id, shape-run identity, detect-and-abort freeze, failed-row (see `## Design`); impl decomposed into the durable plan (2026-07-05).
+- [ ] **M1 — the pure sampler** (`pkg/sweep`). `Sampler` ask/tell interface (`Ask() (Point, bool)` + `Tell(Point, Result)`); `NewGrid(points, stop)` (enumerate in order, Tell no-op, done on exhaustion/stop); `StopPredicate` — `MaxPoints(n)` + `TargetReached(metric, direction, threshold)` + `AnyStop(...)`, pure over tell-history; seeded slot (grid ignores). Unit tests: grid enumerates all N then done, MaxPoints stops at k, TargetReached stops on threshold-cross (both directions), empty-shape edge, Tell-no-op.
+- [ ] **M2 — the sweep driver.** Flip `metis run` on a multi-point shape from erroring → **sweeping**: build the grid sampler over `Expand`, loop Ask → run each point via the cached runner (runID = **`record.PointAddress(point.With, repoSHAs, seed)`** — REUSE #3's minter, repoSHAs from the same `gitProbe` read detect-and-abort does; NOT a code-insensitive re-derivation, else re-runs collide + overwrite) → Tell; **per-point failure recorded + sweep continues**; write the **shape-run manifest** (`sweeps/<id>/manifest.json`: shape-run identity + per-point run-id/free-params/status/metrics — the #8 handoff). **Detect-and-abort code-freeze** (git identity via `gitProbe` at start, re-check per point, abort on drift). Stop predicate wired via `--max-points`. e2e: multi-point shape sweeps to N runs; **cache reuse verified** (upstream HIT across points); failure-continues; `--max-points` early-stop; manifest shape; `--dry-run` preview. Atlas.
+
+## Estimate
+
+*Produced via `brain/data/life/42shots/velocity/estimate-logic-v3.1.md` against `baseline-v3.1.md`. Method A only.*
+
+```estimate
+model: estimate-logic-v3.1
+familiarity: 1.0
+item: greenfield-go-module   design=0.4 impl=0.35
+item: smaller-go-module      design=0.2 impl=0.4
+item: milestone-review       design=0.0 impl=0.2
+item: milestone-review       design=0.0 impl=0.2
+item: atlas-docs             design=0.05 impl=0.05
+design-buffer: 0.15
+total: 1.9
+```
+
+Design pre-settled → design near floor. M1 greenfield `pkg/sweep` (ask/tell + grid + stop predicates —
+pure); M2 a smaller-go-module *extend* of `cmd/metis` (flip multi-point run → sweep loop + manifest +
+detect-and-abort + 2 e2es — the integration breadth is where the hours land). Two `milestone-review`
+(2 boundaries). A small atlas note. Impl at 40%-of-v2 (v3.1); +15% thorough-plan buffer.
 
 ## Log
 
@@ -143,3 +172,4 @@ by #8 (pick-best) and by adaptive samplers here (what to optimize) — one decla
 
 ### 2026-07-05
 - **Design settled** (driver/sampler discussion). One driver: `metis run` handles experiment (1 point) and shape (N) uniformly — experiment is the degenerate all-singleton case; `run_one_point` = v0's per-point runner + cache(#2) + record(#3). Sampler refined to a **stateful ask/tell** object (seeded-deterministic), superseding the Spec's pure `propose_next(state)` — matches the Optuna/Nevergrad ecosystem seam (grid: ask=next, tell=noop). Run id = the point's **content-address** (auto, dedup'd), not a timestamp. New: the **experiment-shape-run** has a content identity `hash(shape, code-content, sampler-config, seed)` grouping + stamping its N point-runs (ledger filterable by invocation/code-version). Mid-sweep code mutation → **(C) detect-and-abort** for v1; hermetic+perf upgrade arc (B snapshot-via-CAS → A resident worker) filed as **metis#10**. Per-point failure → recorded `failed` ledger row, sweep continues; resume free via cache; sequential in v1. #8 owns pick-best/promote. Full spec in `## Design`.
+- **M1 built — the pure sampler `pkg/sweep`** (TDD, all green; build+vet+full-suite clean). `Sampler` ask/tell interface (`Ask() (Point, bool)` + `Tell(Point, Result)`); `Grid` (enumerates `shape.Expand`'s pre-expanded points in order, Tell no-op, done on exhaustion or stop-predicate); `Result{Metrics, Status}`, `TellRecord`. `StopPredicate` (pure over tell-history): `MaxPoints(n)` (budget), `TargetReached(metric, direction, threshold)` (both directions; a missing-metric/failed point never trips it), `AnyStop(...)` (compose). Seeded slot documented (grid ignores). Tests: grid enumerates-N-then-done, empty→immediately-done, MaxPoints stops at k, TargetReached maximize+minimize, missing-metric-ignored, AnyStop. Next: M2 (extract `runResolvedExperiment`; flip multi-point `metis run` → sweep loop + manifest + detect-and-abort).
