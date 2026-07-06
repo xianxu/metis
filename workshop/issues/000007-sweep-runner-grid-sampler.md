@@ -1,11 +1,12 @@
 ---
 id: 000007
-status: open
+status: working
 deps: [metis#6, metis#3]
 github_issue:
 created: 2026-07-03
 updated: 2026-07-05
 estimate_hours:
+started: 2026-07-05T17:31:17-07:00
 ---
 
 # Sweep runner + grid sampler (propose_next / should_stop abstraction)
