@@ -48,12 +48,9 @@ func showLedger(shapePath, sweep, sortMetric, direction string, top int, out io.
 	led = ledger.Filter(led, sweep)
 	rows := led.Rows
 	if sortMetric != "" {
-		n := top
-		if n == 0 {
-			n = len(rows)
-		}
-		rows = ledger.TopN(led, sortMetric, direction, n)
-	} else if top > 0 && top < len(rows) {
+		rows = ledger.SortAll(led, sortMetric, direction) // sorts by objective, KEEPS failed/missing rows
+	}
+	if top > 0 && top < len(rows) {
 		rows = rows[:top]
 	}
 	renderLedger(out, rows)

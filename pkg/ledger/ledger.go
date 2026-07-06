@@ -185,6 +185,26 @@ func TopN(l Ledger, metric, direction string, n int) []Row {
 	return qualified
 }
 
+// SortAll returns ALL rows for a `show` view: those with the metric sorted by the
+// objective first, then the rest (failed / metric-missing) in append order — so sorting
+// never DROPS a row (unlike TopN, which is a ranked leaderboard for the body summary).
+func SortAll(l Ledger, metric, direction string) []Row {
+	var qualified, rest []Row
+	for _, r := range l.Rows {
+		if r.Status != "failed" {
+			if _, ok := r.Metrics[metric]; ok {
+				qualified = append(qualified, r)
+				continue
+			}
+		}
+		rest = append(rest, r)
+	}
+	sort.SliceStable(qualified, func(i, j int) bool {
+		return betterThan(qualified[i].Metrics[metric], qualified[j].Metrics[metric], direction)
+	})
+	return append(qualified, rest...)
+}
+
 // Filter returns the sub-ledger of rows at a given sweep-SHA (an invocation / code-
 // version view). Empty sweepSHA returns the whole ledger.
 func Filter(l Ledger, sweepSHA string) Ledger {

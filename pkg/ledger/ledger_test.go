@@ -157,6 +157,27 @@ func TestTopN_Ordering(t *testing.T) {
 	}
 }
 
+// SortAll ranks the qualified rows by the objective but KEEPS failed / metric-missing
+// rows (appended) — a `show` view must not drop rows the way TopN (a leaderboard) does.
+func TestSortAll_KeepsFailedRows(t *testing.T) {
+	var l Ledger
+	l.Append(
+		row("s", "a", nil, map[string]float64{"m": 0.7}, "ok"),
+		row("s", "bad", nil, nil, "failed"), // failed → kept, appended
+		row("s", "b", nil, map[string]float64{"m": 0.9}, "ok"),
+	)
+	got := SortAll(l, "m", "maximize")
+	if len(got) != 3 {
+		t.Fatalf("SortAll must keep all 3 rows (incl. failed), got %d", len(got))
+	}
+	if got[0].PointAddr != "b" || got[1].PointAddr != "a" {
+		t.Errorf("qualified rows should sort first (b, a); got %s, %s", got[0].PointAddr, got[1].PointAddr)
+	}
+	if got[2].PointAddr != "bad" {
+		t.Errorf("the failed row must be kept (appended last); got %s", got[2].PointAddr)
+	}
+}
+
 // Filter selects rows by sweep-SHA (an invocation view).
 func TestFilter_BySweepSHA(t *testing.T) {
 	var l Ledger

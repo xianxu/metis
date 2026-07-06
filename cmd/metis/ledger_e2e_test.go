@@ -237,6 +237,16 @@ func TestLedgerShow_RendersSortedTable(t *testing.T) {
 	if !strings.Contains(min[1], "model=logreg") {
 		t.Errorf("minimize should put logreg (0.70) first:\n%s", buf.String())
 	}
+
+	// A `--sort`ed show must NOT drop a failed row (it's not a leaderboard).
+	l.Append(ledger.Row{SweepSHA: "sha1", PointAddr: "d", FreeParams: map[string]any{"model": "svm"}, Status: "failed"})
+	csv2, _ := ledger.Encode(l)
+	_ = os.WriteFile(ledgerPath(shapePath), csv2, 0o644)
+	buf.Reset()
+	_ = showLedger(shapePath, "", "train.cv", "maximize", 0, &buf)
+	if !strings.Contains(buf.String(), "model=svm") {
+		t.Errorf("--sort must keep the failed row (svm), not drop it:\n%s", buf.String())
+	}
 }
 
 // promote must ACTUALLY commit the winner (a real gitCommitter), not just report it —
