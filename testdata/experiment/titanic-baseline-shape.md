@@ -6,7 +6,7 @@ seed: 42
 status: active
 sweep:
   sampler: grid
-  objective: {metric: cv_score, direction: maximize}
+  objective: {metric: train.cv_score, direction: maximize}
   range_steps: 6
 steps:
   - id: adapt

@@ -43,7 +43,10 @@ resolution, `uses` format, sweep block) are enforced by `ValidateShape` at read 
 - `sampler` — which sampler drives the space. `grid` ships (v1); the `propose/should-stop` seam
   (metis#7) lets adaptive samplers (Optuna, LHS) slot in with no loop change.
 - `objective` — `{metric, direction}` (`direction: maximize | minimize`). Declared once; consumed
-  by adaptive samplers (what to optimize) and metis#8's promotion (pick-best).
+  by adaptive samplers (what to optimize) and metis#8's promotion (pick-best). **The metric MUST be
+  namespaced `<step>.<metric>`** (e.g. `train.cv_score`, not `cv_score`) — the ledger records per-step
+  metrics namespaced (v0's flat last-write-wins collision fix), so a bare metric name matches no row
+  (`metis ledger show`'s top-N is empty + `promote --best` errors "no qualifying row").
 - `range_steps` — optional; default grid resolution for a `$*-range` that omits its own `steps`.
 
 ### The `$`-descriptor algebra (in `with` leaves)
