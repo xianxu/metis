@@ -124,8 +124,9 @@ func runSweep(o runOpts, sh experiment.Shape, points []shape.Point, now func() t
 	if err := captureSweepCode(o, man); err != nil {
 		fmt.Fprintf(out, "metis: warning: code capture failed (%v) — the sweep's records are valid but not committed to a side ref\n", err)
 	}
-	// Aggregate the sweep into the shape's append-only ledger (metis#8) — idempotent
-	// (dedups by point-address) + regenerates the body top-N summary.
+	// Aggregate the sweep into the shape's append-only ledger sidecar (metis#8) —
+	// idempotent (dedups by point-address). The experiment .md is not touched (#13);
+	// the top-N view is on-demand `metis ledger show`.
 	if err := writeSweepLedger(o.expPath, man, sh.Sweep.Objective); err != nil {
 		return err
 	}

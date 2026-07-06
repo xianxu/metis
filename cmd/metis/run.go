@@ -6,13 +6,11 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/xianxu/metis/internal/repo"
 	"github.com/xianxu/metis/pkg/cas"
 	"github.com/xianxu/metis/pkg/experiment"
-	"github.com/xianxu/metis/pkg/record"
 	"github.com/xianxu/metis/pkg/shape"
 )
 
@@ -75,9 +73,9 @@ func shapePointToExperiment(sh experiment.Shape, p shape.Point) experiment.Exper
 }
 
 // runExperiment reads the experiment at o.expPath, runs it through the pure
-// pkg/experiment.Runner wired to the real subprocess StepExecutor, writes
-// runs/<id>/run.json, and appends a summary to the experiment's `## Runs` log. All
-// side effects (read, subprocess, write) live here; the ordering/validation logic
+// pkg/experiment.Runner wired to the real subprocess StepExecutor, and writes
+// runs/<id>/{run,record}.json. The experiment `.md` is immutable input (#13) — never
+// written back. All side effects (read, subprocess, write) live here; the ordering/validation logic
 // stays in pkg/experiment. Returns the assembled Run and the run error (if any),
 // after the ledger is written — so a failed run is still recorded.
 func runExperiment(o runOpts) (experiment.Run, error) {
@@ -126,9 +124,10 @@ func defaultRunID(runID string, now func() time.Time) string {
 }
 
 // runResolvedExperiment runs one already-resolved experiment (a single point) under
-// runID, through the cached runner, and writes its run.json + provenance record +
-// ## Runs line. The shared per-point runner both the 1-point path and the sweep loop
-// (metis#7) call — so the run/cache/record wiring lives in ONE place (ARCH-DRY).
+// runID, through the cached runner, and writes its run.json + provenance record (the
+// experiment `.md` is immutable input — not written back, #13). The shared per-point runner
+// both the 1-point path and the sweep loop (metis#7) call — so the run/cache/record wiring
+// lives in ONE place (ARCH-DRY).
 func runResolvedExperiment(exp experiment.Experiment, o runOpts, runID string, now func() time.Time, out io.Writer) (experiment.Run, error) {
 	baseDir := filepath.Dir(o.expPath)
 	// Absolutize at the runner boundary: execStep injects runDir/stepDir/expDir into
@@ -161,7 +160,7 @@ func runResolvedExperiment(exp experiment.Experiment, o runOpts, runID string, n
 	// step executes, so a semantically-invalid experiment (dangling needs, bad
 	// uses, a cycle) is rejected here — closing the SHAPE-only gap M1 left. Such a
 	// rejection never started a run (run.Started is empty), so surface the error
-	// without writing a bogus ledger or touching the ## Runs log.
+	// without writing a bogus record.
 	if run.Started == "" {
 		return run, runErr
 	}
@@ -181,9 +180,10 @@ func runResolvedExperiment(exp experiment.Experiment, o runOpts, runID string, n
 	if err := writeRecordJSON(runDir, rec); err != nil {
 		return run, err
 	}
-	if err := appendRunLog(o.expPath, rec); err != nil {
-		return run, err
-	}
+	// The experiment .md is IMMUTABLE input (#13): a run writes its output to
+	// runs/<id>/{run,record}.json (+ the .ledger.csv sidecar for sweeps), NEVER to the
+	// config file — so a committed config is a stable content-hash. The human "recent
+	// runs / top-N" view is on-demand via `metis ledger show` over the sidecar.
 	if runErr != nil {
 		return run, runErr
 	}
@@ -200,22 +200,4 @@ func writeRunJSON(runDir string, run experiment.Run) error {
 		return err
 	}
 	return os.WriteFile(filepath.Join(runDir, "run.json"), append(b, '\n'), 0o644)
-}
-
-// appendRunLog appends a one-line knob→score summary (from the provenance record) to
-// the experiment's `## Runs` section (creating the heading if absent). The
-// human-readable bullet; the machine records are runs/<id>/{run,record}.json.
-func appendRunLog(expPath string, rec record.RunRecord) error {
-	raw, err := os.ReadFile(expPath)
-	if err != nil {
-		return err
-	}
-	body := string(raw)
-	if !strings.HasSuffix(body, "\n") {
-		body += "\n"
-	}
-	if !strings.Contains(body, "## Runs") {
-		body += "\n## Runs\n"
-	}
-	return os.WriteFile(expPath, []byte(body+"- "+recordSummary(rec)+"\n"), 0o644)
 }

@@ -2,7 +2,6 @@ package main
 
 import (
 	"math"
-	"strings"
 	"testing"
 
 	"github.com/xianxu/metis/pkg/experiment"
@@ -100,18 +99,3 @@ func TestBuildRecord_PropagatesConfigError(t *testing.T) {
 	}
 }
 
-func TestRecordSummary_RendersKnobToScore(t *testing.T) {
-	rec := record.RunRecord{
-		RunID: "r1", Status: "ok", Finished: "t1",
-		Steps: []record.StepRecord{
-			{StepID: "prep", With: map[string]any{"k": 5}},
-			{StepID: "train", With: map[string]any{"model": "logreg"}, Metrics: map[string]float64{"cv_score": 0.81}},
-		},
-	}
-	s := recordSummary(rec)
-	for _, want := range []string{"r1", "ok", "prep.k=5", "train.model=logreg", "cv_score=0.81"} {
-		if !strings.Contains(s, want) {
-			t.Errorf("recordSummary = %q; missing %q", s, want)
-		}
-	}
-}

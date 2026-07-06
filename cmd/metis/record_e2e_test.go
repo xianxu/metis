@@ -30,7 +30,7 @@ func (f fakeGitProbe) Probe(string) (string, string, bool, error) {
 // TestRunExperiment_WritesProvenanceRecord is the metis#3 M2 e2e: a `metis run`
 // through the no-uv test/echo fake steps writes runs/<id>/record.json that conforms
 // to #RunRecord, carries the minted point-address + repo provenance + per-step
-// output hashes, and appends a knob→score line to ## Runs. It also confirms two
+// output hashes, and keeps the experiment .md immutable (#13 — provenance is in record.json). It also confirms two
 // identical runs mint the SAME point-address (the repro-identity guarantee). No uv,
 // so it runs in a bare checkout.
 func TestRunExperiment_WritesProvenanceRecord(t *testing.T) {
@@ -109,15 +109,14 @@ steps:
 		}
 	}
 
-	// ## Runs got a knob→score line (config beside the metric).
+	// #13: the config .md is immutable input — the run's knob→score provenance lives in
+	// record.json (validated above via #RunRecord conformance), NOT appended to the config body.
 	body, err := os.ReadFile(expPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"prep.k=5", "train.model=logreg", "echoed=1"} {
-		if !strings.Contains(string(body), want) {
-			t.Errorf("## Runs missing %q; got:\n%s", want, string(body))
-		}
+	if strings.Contains(string(body), "## Runs") {
+		t.Errorf("run mutated the config .md (must be immutable input):\n%s", string(body))
 	}
 
 	// A second identical run mints the SAME point-address (config+repo+seed

@@ -95,8 +95,9 @@ func ledgerPath(shapePath string) string {
 }
 
 // writeSweepLedger appends a finished sweep's rows to the shape's ledger sidecar
-// (idempotent — dedups by point-address) and regenerates the body top-N summary. Called
-// by runSweep after the manifest is written.
+// (idempotent — dedups by point-address). Called by runSweep after the manifest is
+// written. It does NOT touch the experiment .md (#13 — the config is immutable input);
+// the human top-N view is on-demand via `metis ledger show` over the sidecar.
 func writeSweepLedger(shapePath string, man sweepManifest, objective experiment.Objective) error {
 	records, err := loadSweepRecords(shapePath, man)
 	if err != nil {
@@ -114,7 +115,8 @@ func writeSweepLedger(shapePath string, man sweepManifest, objective experiment.
 	if err := os.WriteFile(ledgerPath(shapePath), b, 0o644); err != nil {
 		return err
 	}
-	return regenLedgerSummary(shapePath, led, objective)
+	warnIfObjectiveMissing(led, objective)
+	return nil
 }
 
 // loadLedger reads the shape's ledger sidecar (absent → empty).
@@ -147,44 +149,18 @@ func loadSweepRecords(shapePath string, man sweepManifest) (map[string]record.Ru
 	return out, nil
 }
 
-// regenLedgerSummary rewrites the shape body's generated top-N block (between markers)
-// with the objective-ranked leaders + a pointer to the sidecar.
-func regenLedgerSummary(shapePath string, led ledger.Ledger, obj experiment.Objective) error {
-	raw, err := os.ReadFile(shapePath)
-	if err != nil {
-		return err
+// warnIfObjectiveMissing surfaces the one genuinely-useful check the old body-summary
+// carried: a sweep whose objective metric matches NO ledger row — almost always a
+// namespacing mistake (rows carry `<step>.<metric>`, e.g. train.cv_score). It's loud,
+// not a silently-empty result. (#13: the top-N summary is no longer written into the
+// experiment .md — the config is immutable input; the human view is `metis ledger show`.)
+func warnIfObjectiveMissing(led ledger.Ledger, obj experiment.Objective) {
+	if obj.Metric == "" || len(led.Rows) == 0 {
+		return
 	}
-	const begin, end = "<!-- metis:ledger:begin -->", "<!-- metis:ledger:end -->"
-	var b strings.Builder
-	b.WriteString(begin + "\n## Top runs\n")
-	if obj.Metric != "" {
-		top := ledger.TopN(led, obj.Metric, obj.Direction, 10)
-		if len(top) == 0 && len(led.Rows) > 0 {
-			// The objective metric matched no row — almost always a namespacing mistake
-			// (rows carry `<step>.<metric>`, e.g. train.cv_score). Make it loud, not a
-			// silently-empty summary.
-			fmt.Fprintf(os.Stderr, "metis: warning: objective metric %q is not present in any ledger row — metrics are namespaced `<step>.<metric>` (e.g. train.%s)\n", obj.Metric, obj.Metric)
-		}
-		fmt.Fprintf(&b, "By `%s` (%s) — see `%s` for all rows.\n\n", obj.Metric, obj.Direction, filepath.Base(ledgerPath(shapePath)))
-		for i, r := range top {
-			fmt.Fprintf(&b, "%d. %s = %g — %s\n", i+1, obj.Metric, r.Metrics[obj.Metric], freeParamTuple(r))
-		}
-	} else {
-		fmt.Fprintf(&b, "%d rows — see `%s`.\n", len(led.Rows), filepath.Base(ledgerPath(shapePath)))
+	if len(ledger.TopN(led, obj.Metric, obj.Direction, 10)) == 0 {
+		fmt.Fprintf(os.Stderr, "metis: warning: objective metric %q is not present in any ledger row — metrics are namespaced `<step>.<metric>` (e.g. train.%s)\n", obj.Metric, obj.Metric)
 	}
-	b.WriteString("\n" + end)
-
-	body := string(raw)
-	if i := strings.Index(body, begin); i >= 0 {
-		if j := strings.Index(body, end); j > i {
-			body = body[:i] + b.String() + body[j+len(end):]
-			return os.WriteFile(shapePath, []byte(body), 0o644)
-		}
-	}
-	if !strings.HasSuffix(body, "\n") {
-		body += "\n"
-	}
-	return os.WriteFile(shapePath, []byte(body+"\n"+b.String()+"\n"), 0o644)
 }
 
 // freeParamTuple renders a row's free-params as a compact `(k=v, …)` human key

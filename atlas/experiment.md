@@ -1,8 +1,10 @@
 # experiment — the reproducible unit of ML work
 
-An experiment is a git-tracked, declarative **pipeline of steps plus its run history** —
-*issue-shaped*: schematized frontmatter (the machine-executable pipeline + config) over a
-freeform body (hypothesis + an accreting `## Runs` log). The Go step-runner
+An experiment is a git-tracked, declarative **pipeline of steps** — *issue-shaped*: schematized
+frontmatter (the machine-executable pipeline + config) over a freeform body (hypothesis + prose).
+It is **immutable input** (#13): a run never writes back into the `.md` — run history lives in
+`runs/<id>/record.json` + the `.ledger.csv` sidecar (browse via `metis ledger show`), so a
+committed config is a stable content-hash. The Go step-runner
 (`metis run <id>`, M2) executes it with **no agent in the loop**, unifying data
 reconstruction, training, and experiment tracking under one entrypoint.
 
@@ -54,10 +56,11 @@ a Run. `--cache` (default on) enables the metis#2 validating-trace cache (see `a
   - **Scope line:** #3 owns the record + point-address; the read-set trace `D` + cache key are
     **metis#2** (they populate `Code.D`/`Deps`/`Upstream`); side-ref code *capture* is **metis#7/#8**
     (#3 records the current commit + dirty flag).
-- **Thin IO — `cmd/metis/`:** `execStep` (the real `os/exec` `StepExecutor`) + the run-ledger
-  writer + the record assembler (`assembleRecord`/`buildRecord`, git provenance via an injected
-  `gitProbe`, per-step output-hashing) that writes `record.json` and the knob→score `## Runs` line.
-  `runDir` is absolutized at this boundary so step paths resolve from any cwd.
+- **Thin IO — `cmd/metis/`:** `execStep` (the real `os/exec` `StepExecutor`) + the record assembler
+  (`assembleRecord`/`buildRecord`, git provenance via an injected `gitProbe`, per-step
+  output-hashing) that writes `record.json` (+ the sweep `.ledger.csv` sidecar). It does **not**
+  write to the experiment `.md` (#13 — immutable input). `runDir` is absolutized at this boundary so
+  step paths resolve from any cwd.
 
 ### Step-executable contract (what M3 step-types must honor)
 
@@ -77,10 +80,11 @@ if set, else `<repo-root>/steps`; first existing file wins.
   reserved contract channels and are NOT counted as artifacts; every other file is recorded in
   `Run.artifacts` as a `runs/<id>/`-relative (step-qualified) path. A non-zero exit fails the
   step and halts the run.
-- **Ledger:** `runs/<run-id>/run.json` (the `#Run` record — the record of truth) + a one-line
-  summary appended to the experiment's `## Runs` section. A run rejected at validation time
-  writes neither. M2 ships a process-level fake step (`testdata/steps/test/echo`) exercising
-  this contract end-to-end; real `metis/*` step-types arrive in M3.
+- **Ledger:** `runs/<run-id>/run.json` (the `#Run` record — the record of truth) + `record.json`
+  (provenance) + the sweep `.ledger.csv` sidecar. **The experiment `.md` is not touched** (#13 —
+  immutable input; the human top-N view is `metis ledger show`). A run rejected at validation time
+  writes nothing. M2 ships a process-level fake step (`testdata/steps/test/echo`) exercising this
+  contract end-to-end; real `metis/*` step-types arrive in M3.
 
 ## Surface (M3) — the Python data plane
 

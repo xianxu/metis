@@ -16,7 +16,8 @@ identical on a non-Kaggle platform?* — if yes, it lives here.
   `StepRecord` (emitted as `runs/<id>/record.json`, CUE-drift-guarded), `PointAddress` (the L0
   run-identity: config+repo-SHAs+seed content-address), `OutputHash` (multi-file output reduction).
   `Runner.Run` returns per-step `[]StepRun` so `cmd/metis` can assemble the record (git provenance
-  via an injected `gitProbe`), write `record.json`, and render the knob→score `## Runs` line. Scope
+  via an injected `gitProbe`) and write `record.json` (the experiment `.md` is immutable input, #13 —
+  no `## Runs` write-back). Scope
   line: #3 owns the record + point-address; the trace/cache-key are #2, side-ref code capture #7/#8.
   See [experiment.md](experiment.md). [metis#3]
 - **`pkg/ledger`** (the shape-run ledger) — metis#8, the L1 tracking layer: a pure append-only,
@@ -25,7 +26,8 @@ identical on a non-Kaggle platform?* — if yes, it lives here.
   `Best`/`TopN`, and `Filter`. It is an *aggregation view* over #3's per-run records, not a second run
   store. The driver (`cmd/metis/ledger.go`): after a sweep, `rowsFromManifest` (pure) turns #7's
   manifest + the per-point `record.json`s (namespaced per-step metrics — the collision fix) into rows,
-  appended to `<shape>.ledger.csv` (idempotent) with the shape body's top-N summary regenerated.
+  appended to `<shape>.ledger.csv` (idempotent); the shape `.md` is immutable input (#13) — the
+  human top-N view is on-demand `metis ledger show`, not a summary written into the body.
   **`metis ledger show <shape> [--sweep|--sort|--top]`** renders sorted/filtered views. **`metis
   promote <shape> (--best|--point 'k=v') --name X`** reconstructs the winning point as an all-singleton
   experiment (pure `promotedExperiment` — re-expands the shape + matches by free-params, reusing

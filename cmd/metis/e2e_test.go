@@ -27,7 +27,7 @@ func TestToyPipeline_EndToEnd(t *testing.T) {
 	root := repoRoot(t)
 
 	// Recreate the committed experiment/ + dataset/ sibling layout in a temp
-	// workspace so the run's artifacts and the ## Runs append never touch testdata/.
+	// workspace so the run’s artifacts never touch testdata/ (#13: the .md is immutable input).
 	ws := t.TempDir()
 	expDir := filepath.Join(ws, "experiment")
 	if err := os.MkdirAll(expDir, 0o755); err != nil {
