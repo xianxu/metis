@@ -1,12 +1,13 @@
 ---
 id: 000006
-status: working
+status: codecomplete
 deps: []
 github_issue:
 created: 2026-07-03
 updated: 2026-07-05
-estimate_hours:
+estimate_hours: 2
 started: 2026-07-05T16:41:40-07:00
+actual_hours: 1.12
 ---
 
 # experiment-shape datatype: lift the experiment config schema into a config-space (Space[T])
@@ -191,16 +192,50 @@ Point count = `features(4) × [ logreg:C(3) + rf:n_est(3)×depth(2)=6 ]` = **36*
 
 ## Plan
 
-- [x] Design settled 2026-07-04 — value-level `$`-vocab + algebra + `sweep:` block + expand/bundling (see `## Design`).
-- [ ] Space-descriptor vocab (`$any`/`$oneof`/`$linear-range`/`$log-range`) + `sweep:` block, recognized in the `with` bag; keep the CUE DAG-shape schema, add a light CUE constraint for `sweep:` if cheap.
-- [ ] `experiment-shape` datatype prototype (mirrors `experiment`) + `titanic-sweep` fixture; conformance that an all-singleton shape ≡ an `experiment`.
-- [ ] Pure `expand(shape) → [point]` (sum/product/leaf; `$oneof` bundles; ranges → grid-materialized; singleton→one-point), unit-tested.
-- [ ] Structural validator + atlas entry for the new type.
+Durable impl plan: `workshop/plans/000006-experiment-shape-plan.md` (the algebra recap, scope line
+vs. #7/#8, 2 review boundaries). TDD; the pure `Expand` core (M1) is reviewed before the datatype/CUE
+integration (M2).
+
+- [x] Design settled 2026-07-04 — value-level `$`-vocab + algebra + `sweep:` block + expand/bundling (see `## Design`); impl decomposed into the durable plan (2026-07-05).
+- [x] **M1 — the pure lift** (`pkg/shape` + `Expand`). `Point{With, FreeParams}`; `Expand(steps, rangeSteps) → []Point` — the pure recursion (product→cartesian; `$any`→set; `$oneof`→bundled labeled sum that ADDs; `$*-range`→grid linspace/logspace). Free-param path per point (only space-descriptor leaves; ragged). Malformed-descriptor errors. Unit tests: the **36-point titanic example** ($oneof adds not multiplies), bundling, range materialization + `range_steps` default, **all-singleton→exactly one v0 point**, ragged free-param paths, malformed errors.
+- [x] **M2 — datatype + CUE + parse integration.** CUE `#ExperimentShape` (`type`, `steps` DAG with untyped `with`, the `sweep:` block; `#Experiment` = singleton refinement) + drift guard. Go `Shape` parse (`type: experiment-shape` + `Sweep`). `experiment-shape` datatype prototype + a `titanic-baseline-shape` fixture that validates + expands. `metis run` on a shape: parse+validate+Expand; all-singleton → run the one point (cached runner); multi-point → clear "sweep driver is metis#7" pointer (the sweep loop is #7). e2e (singleton-shape runs like v0; multi-point expands to the right count). Atlas.
 
 ## Log
 
+
+
+
+
+- 2026-07-05: closed — Re-close Important (reviewer-reproduced cross-step aliasing) fixed: cloneWith now deep-clones every step (was half-delivered — only the terminal step deep-cloned, so siblings from a later step aliased earlier steps map). Guard test extended to a 2-step shape mutating a non-terminal step; regression-proofed (shallow → FAIL). go build+vet+test ./... green. Merge-gate deferral confirmed honest by reviewer (logged #7 follow-up). All Critical(0)/Important resolved. --no-verdict: M2 final milestone reviewed by this close. --no-project: brain tracker by hand.; review verdict: SHIP
+- 2026-07-05: closed — Close-review Important fixes re-reviewed: (1) TestCUE_ClosednessPreservedBySingleSource — #Experiment rejects stray sweep, #ExperimentShape rejects unknown field (locks the single-source closedness); (2) merge-gate + ariadne-vocabulary-noun deferral recorded as a #7 follow-up (no committed shape instances yet; runtime ValidateShape + drift guard cover it). Minor: 21-point fixture-expansion asserted, double-parse eliminated, $any-verbatim documented. go build+vet+test ./... green. --no-verdict: M2 final milestone reviewed by this close. --no-project: brain tracker by hand.; review verdict: FIX-THEN-SHIP
+- 2026-07-05: closed — metis#6 experiment-shape COMPLETE (M1 pure Expand SHIP + M2 datatype/CUE/integration). go build+vet+test ./... green. pkg/shape Expand: 36-point titanic keystone ($oneof ADDs), bundling, grid ranges (linspace/logspace), all-singleton→1-point, ragged free-params, deep-clone (no sibling aliasing), malformed+empty-set errors. CUE #ExperimentShape single-sourced with #Experiment via shared _pipeline (verified: #Experiment still validates valid-baseline + REJECTS stray sweep; #ExperimentShape validates fixture) + drift guard. ParseShape/ValidateShape reuse Validate. metis run resolves shapes: singleton runs like v0, multi-point→#7 pointer. VERIFIED IN REAL CLI (multi-point → 2-points/#7 message; singleton → runs, knob→score train.model=logreg). --no-verdict: M2 is the final milestone reviewed by this integration close; M1 already SHIP. --no-project: brain tracker ticked by hand (est 2.0/actual 0.55).; review verdict: FIX-THEN-SHIP
+- 2026-07-05: closed M1 — M1 pure lift: go build+vet+test ./... green. pkg/shape Expand — 7 tests incl the 36-point titanic keystone (proves $oneof ADDs: features(4)×[logreg:C(3)+rf:(3×2)]=36), $oneof bundling ({label:sub}), $any set, product×set, all-singleton→exactly-one-v0-point (byte-identical with), ragged free-param paths, $*-range→grid (linspace/logspace)+range_steps default (materialized value in free-param), malformed-descriptor errors (mixed $/plain, unknown $-key, non-numeric bounds). All pure, no IO. BYPASS --no-atlas + --no-project: M1 is the pure core; atlas (shape datatype + flow) + project tracker land at M2/final-close per the plan; milestone progress in the issue Plan/Log.; review verdict: FIX-THEN-SHIP
 ### 2026-07-03
 - Filed from the metis-v1 design brainstorm. The datatype is the L2 substrate; #7 (sweeper) and #8 (ledger) build on it. No hard dep, but conceptually first in the v1 chain.
 
 ### 2026-07-04
 - **Design settled** (syntax brainstorm). Lift is **value-level** on v0's untyped `with` bag (reserved `$`-keys), not CUE-typed leaves — reconciles the Spec's `Space[T] in CUE` framing with v0 reality (config is untyped; CUE types only the DAG shape). Algebra: `$any` (set, sugar) / `$oneof` (labeled conditional sum — branches ADD, fixing `logreg.C` vs `rf.n_estimators`) / plain map (product) / `$linear-range`·`$log-range: [lo,hi,steps?]` (domain+metric, **not** a distribution — dropped `Dist`/loguniform, the sampler owns traversal). `expand()` **bundles** `$oneof` to `{label:{…}}` (follows hierarchy, not flat siblings) and yields v0-shaped `with`. A `sweep:` block (sampler / objective{metric,direction} / range_steps) lives in the shape frontmatter — one artifact, no separate sweeper concept. **Cross-cutting decisions captured here pending their own passes:** #7 (the `propose(domains,history)→next|stop` seam + the objective feeding adaptive samplers), #8 (free-param-tuple ledger key, ragged→sparse columns, promotion driven by `objective`, and fixing v0's flat last-write-wins metric merge). Prior art: sklearn `ParameterGrid` list-of-dicts + Nevergrad `Choice`/`Dict` = this exact algebra.
+
+## Estimate
+
+*Produced via `brain/data/life/42shots/velocity/estimate-logic-v3.1.md` against `baseline-v3.1.md`. Method A only.*
+
+```estimate
+model: estimate-logic-v3.1
+familiarity: 1.0
+item: greenfield-go-module   design=0.5 impl=0.4
+item: smaller-go-module      design=0.2 impl=0.3
+item: milestone-review       design=0.0 impl=0.2
+item: milestone-review       design=0.0 impl=0.2
+item: atlas-docs             design=0.05 impl=0.05
+design-buffer: 0.15
+total: 1.96
+```
+
+Design pre-settled → design near the floor. M1 greenfield `pkg/shape` (the pure `Expand` algebra — the
+keystone, 36-point example); M2 a smaller-go-module *extend* (CUE `#ExperimentShape` + `Shape` parse +
+runner integration + fixture). Two `milestone-review` (2 boundaries). A small atlas note. Impl at
+40%-of-v2 (v3.1); +15% thorough-plan buffer.
+- **M1 built — the pure lift `pkg/shape`** (TDD, all green; build+vet+full-suite clean). `Point{With, FreeParams}` + `FreeParam{Path, Value}`; `Expand(steps, rangeSteps) → []Point` — the pure recursion: product (map) → cartesian; `$any` → verbatim set; `$oneof` → **bundled** labeled sum that **ADDs** (`{label: resolved-sub}`); `$linear-range`/`$log-range` → grid (linspace/logspace, `range_steps` default). Per-point **free-param path** (only descriptor leaves; ragged; range leaves record the *materialized* value). Malformed descriptors (mixed `$`+plain keys, unknown `$`-key, non-numeric bounds) error. Tests: **the 36-point titanic keystone** (`features(4) × [logreg:C(3) + rf:(3×2)] = 36`, proving `$oneof` adds not multiplies), product×set, all-singleton→1-point (byte-identical v0 with), ragged free-params, range→grid + `range_steps` default, malformed errors. Next: M2 (CUE `#ExperimentShape` + `Shape` parse + runner integration + fixture).
+- **M2 built — datatype + CUE + parse integration** (TDD, all green incl. drift guards; verified in the real CLI). CUE: refactored to a shared `_pipeline` field set embedded into both `#Experiment` (singleton, `type: experiment`, no sweep) and `#ExperimentShape` (`type: experiment-shape` + `sweep:` block) — **single-source** (plan-judge finding 1); verified `#Experiment` still validates valid-baseline AND rejects a stray `sweep` (closedness preserved), `#ExperimentShape` validates the fixture. Go: `experiment.Shape`/`Sweep`/`Objective` + `ParseShape`/`ValidateShape` (reuses `Validate` — ARCH-DRY) + `TestShapeConformsToCUE` drift guard. Runner: `resolveExperiment` dispatches on type — a shape is `Expand`ed; all-singleton → runs like a v0 experiment (overlay the point onto steps); multi-point → refused with a **metis#7 pointer** (sweep loop is #7). `titanic-baseline-shape` fixture (21 points); `construct/datatype/experiment-shape.md` prototype. e2e (singleton runs; multi-point points to #7). Atlas: `pkg/shape` entry. **Real-CLI verified:** multi-point → "expands to 2 points — sweep driver is metis#7"; singleton → runs, knob→score `train.model=logreg`.
+- **Close-review FIX-THEN-SHIP applied** (0 Critical, 2 Important): (1) **Closedness negative test** — `TestCUE_ClosednessPreservedBySingleSource` asserts `#Experiment` REJECTS a stray `sweep` + `#ExperimentShape` rejects an unknown field (the exact property the `_pipeline`-embed preserves; a future CUE edit can't regress it silently now). (2) **21-point fixture expansion asserted** — `TestShapeFixture_ExpandsTo21Points` (was positive-parse-only). Minor: eliminated `resolveExperiment`'s double-parse (always `ParseShape`, dispatch on type); documented `$any`-is-verbatim (vs `$oneof` recurses). **Deferred (Important #1, recorded):** the merge-gate `scripts/merge-checks.d/experiment-validate.sh` greps exactly `type: experiment`, so committed `experiment-shape` files aren't gate-validated — AND the ariadne `vocabulary` binary's noun registry doesn't know `experiment-shape` (`validate-instance --type experiment-shape` → "no vocabulary noun"). No impact yet (no committed shape *instances*; runtime `ValidateShape` + the Go drift guard cover it), but **#7 will commit shape instances** → needs an ariadne `vocabulary`-noun registration + the gate grep extended. **#7 follow-up.**
