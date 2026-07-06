@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -178,23 +179,35 @@ func runPromote(o promoteOpts) error {
 	}
 	led = ledger.Filter(led, o.sweep)
 
-	var freeParams map[string]any
+	var row ledger.Row
 	if o.best {
-		row, ok := ledger.Best(led, sh.Sweep.Objective.Metric, sh.Sweep.Objective.Direction)
+		best, ok := ledger.Best(led, sh.Sweep.Objective.Metric, sh.Sweep.Objective.Direction)
 		if !ok {
 			return fmt.Errorf("promote --best: no qualifying row for objective %q — metrics are namespaced `<step>.<metric>` (e.g. train.%s); check the shape's sweep.objective.metric", sh.Sweep.Objective.Metric, sh.Sweep.Objective.Metric)
 		}
-		freeParams = row.FreeParams
+		row = best
 	} else {
-		freeParams = parsePointSelector(o.point)
+		r, ok := findRow(led, parsePointSelector(o.point))
+		if !ok {
+			return fmt.Errorf("promote --point %q: no ledger row matches those free-params", o.point)
+		}
+		row = r
 	}
 
-	exp, err := promotedExperiment(sh, freeParams)
+	// A promoted winner from an OLDER code-version (its sweep-SHA ≠ HEAD) would be
+	// committed at HEAD, so its code isn't the code it was measured under — the promoted
+	// experiment wouldn't reproduce the row without `git checkout <its sweep-SHA>` first
+	// (the design's deliberate "go back"). Warn loudly rather than silently mis-attribute.
+	if _, headSHA, _ := probeRepo(o.git, filepath.Dir(o.shapePath)); row.SweepSHA != "" && headSHA != "" && row.SweepSHA != headSHA {
+		fmt.Fprintf(o.out, "metis: warning: the selected row ran at code %s but HEAD is %s — the promoted %s is committed at HEAD, so it reproduces only after `git checkout %s`\n", short(row.SweepSHA), short(headSHA), o.name, short(row.SweepSHA))
+	}
+
+	exp, err := promotedExperiment(sh, row.FreeParams)
 	if err != nil {
 		return err
 	}
 	exp.ID = o.name // the promoted experiment's id matches its <name>.md filename (the experiment convention)
-	doc := renderPromoted(exp, sh.ID, freeParams)
+	doc := renderPromoted(exp, sh.ID, row)
 	outPath := filepath.Join(filepath.Dir(o.shapePath), o.name+".md")
 	if err := os.WriteFile(outPath, []byte(doc), 0o644); err != nil {
 		return err
@@ -214,11 +227,31 @@ func runPromote(o promoteOpts) error {
 		if err := o.commit.Commit(dir, "metis promote: "+o.name); err != nil {
 			return err
 		}
-		fmt.Fprintf(o.out, "metis: promoted + committed %s → %s\n", freeParamTupleMap(freeParams), outPath)
+		fmt.Fprintf(o.out, "metis: promoted + committed %s → %s\n", freeParamTupleMap(row.FreeParams), outPath)
 	} else {
-		fmt.Fprintf(o.out, "metis: promoted %s → %s (not committed)\n", freeParamTupleMap(freeParams), outPath)
+		fmt.Fprintf(o.out, "metis: promoted %s → %s (not committed)\n", freeParamTupleMap(row.FreeParams), outPath)
 	}
 	return nil
+}
+
+// findRow returns the ledger row whose free-params equal the selector (JSON-tolerant,
+// so int/float CSV drift doesn't break the match).
+func findRow(led ledger.Ledger, want map[string]any) (ledger.Row, bool) {
+	wb, _ := json.Marshal(want)
+	for _, r := range led.Rows {
+		if rb, _ := json.Marshal(r.FreeParams); bytes.Equal(rb, wb) {
+			return r, true
+		}
+	}
+	return ledger.Row{}, false
+}
+
+// short renders a git SHA as its 8-char eyeballable prefix.
+func short(sha string) string {
+	if len(sha) > 8 {
+		return sha[:8]
+	}
+	return sha
 }
 
 // parsePointSelector parses `k=v,k2=v2` into a free-param map (values typed via the
@@ -234,8 +267,11 @@ func parsePointSelector(s string) map[string]any {
 	return m
 }
 
-// renderPromoted writes the all-singleton experiment markdown with a back-link.
-func renderPromoted(exp experiment.Experiment, fromShape string, fp map[string]any) string {
+// renderPromoted writes the all-singleton experiment markdown with a back-link that
+// records the FULL origin provenance — the shape, the row's point-address, its
+// sweep-SHA (the code-version it was measured under), and the free-param tuple — so the
+// promoted experiment can be checked against (and recovered to) its origin row.
+func renderPromoted(exp experiment.Experiment, fromShape string, row ledger.Row) string {
 	var b strings.Builder
 	b.WriteString("---\n")
 	fmt.Fprintf(&b, "type: experiment\nid: %s\n", exp.ID)
@@ -243,7 +279,7 @@ func renderPromoted(exp experiment.Experiment, fromShape string, fp map[string]a
 		fmt.Fprintf(&b, "competition: %s\n", exp.Competition)
 	}
 	fmt.Fprintf(&b, "seed: %d\nstatus: active\n", exp.Seed)
-	fmt.Fprintf(&b, "promoted_from: %s %s\n", fromShape, freeParamTupleMap(fp))
+	fmt.Fprintf(&b, "promoted_from: %s @ %s (sweep %s) %s\n", fromShape, row.PointAddr, short(row.SweepSHA), freeParamTupleMap(row.FreeParams))
 	b.WriteString("steps:\n")
 	for _, s := range exp.Steps {
 		fmt.Fprintf(&b, "  - id: %s\n    uses: %s\n", s.ID, s.Uses)

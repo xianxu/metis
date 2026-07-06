@@ -134,10 +134,15 @@ steps:
 	if !strings.Contains(string(wb), "id: winner") {
 		t.Errorf("promoted experiment id must be the --name (winner), not the shape id:\n%s", wb)
 	}
+	winRow := mustLedgerBest(t, expPath)
+	// The back-link must carry the origin provenance: the point-address (@ …) + the
+	// sweep-SHA (so the promoted experiment can be checked against / recovered to its row).
+	if !strings.Contains(string(wb), "@ "+winRow) || !strings.Contains(string(wb), "sweep ") {
+		t.Errorf("promoted_from must record the point-address + sweep-SHA; got:\n%s", wb)
+	}
 	// Round-trip: the promoted all-singleton experiment re-runs AND reproduces the
 	// winning row's point-address (the Done-when — not just status ok). We compare the
 	// promoted run's record.point_address to the winning row's point-address.
-	winRow := mustLedgerBest(t, expPath)
 	run, err := runExperiment(runOpts{
 		expPath:  winnerPath,
 		runID:    "rt",
