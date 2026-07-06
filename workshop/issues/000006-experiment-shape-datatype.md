@@ -7,7 +7,7 @@ created: 2026-07-03
 updated: 2026-07-05
 estimate_hours: 2
 started: 2026-07-05T16:41:40-07:00
-actual_hours: 0.90
+actual_hours: 1.12
 ---
 
 # experiment-shape datatype: lift the experiment config schema into a config-space (Space[T])
@@ -205,6 +205,8 @@ integration (M2).
 
 
 
+
+- 2026-07-05: closed — Re-close Important (reviewer-reproduced cross-step aliasing) fixed: cloneWith now deep-clones every step (was half-delivered — only the terminal step deep-cloned, so siblings from a later step aliased earlier steps map). Guard test extended to a 2-step shape mutating a non-terminal step; regression-proofed (shallow → FAIL). go build+vet+test ./... green. Merge-gate deferral confirmed honest by reviewer (logged #7 follow-up). All Critical(0)/Important resolved. --no-verdict: M2 final milestone reviewed by this close. --no-project: brain tracker by hand.; review verdict: SHIP
 - 2026-07-05: closed — Close-review Important fixes re-reviewed: (1) TestCUE_ClosednessPreservedBySingleSource — #Experiment rejects stray sweep, #ExperimentShape rejects unknown field (locks the single-source closedness); (2) merge-gate + ariadne-vocabulary-noun deferral recorded as a #7 follow-up (no committed shape instances yet; runtime ValidateShape + drift guard cover it). Minor: 21-point fixture-expansion asserted, double-parse eliminated, $any-verbatim documented. go build+vet+test ./... green. --no-verdict: M2 final milestone reviewed by this close. --no-project: brain tracker by hand.; review verdict: FIX-THEN-SHIP
 - 2026-07-05: closed — metis#6 experiment-shape COMPLETE (M1 pure Expand SHIP + M2 datatype/CUE/integration). go build+vet+test ./... green. pkg/shape Expand: 36-point titanic keystone ($oneof ADDs), bundling, grid ranges (linspace/logspace), all-singleton→1-point, ragged free-params, deep-clone (no sibling aliasing), malformed+empty-set errors. CUE #ExperimentShape single-sourced with #Experiment via shared _pipeline (verified: #Experiment still validates valid-baseline + REJECTS stray sweep; #ExperimentShape validates fixture) + drift guard. ParseShape/ValidateShape reuse Validate. metis run resolves shapes: singleton runs like v0, multi-point→#7 pointer. VERIFIED IN REAL CLI (multi-point → 2-points/#7 message; singleton → runs, knob→score train.model=logreg). --no-verdict: M2 is the final milestone reviewed by this integration close; M1 already SHIP. --no-project: brain tracker ticked by hand (est 2.0/actual 0.55).; review verdict: FIX-THEN-SHIP
 - 2026-07-05: closed M1 — M1 pure lift: go build+vet+test ./... green. pkg/shape Expand — 7 tests incl the 36-point titanic keystone (proves $oneof ADDs: features(4)×[logreg:C(3)+rf:(3×2)]=36), $oneof bundling ({label:sub}), $any set, product×set, all-singleton→exactly-one-v0-point (byte-identical with), ragged free-param paths, $*-range→grid (linspace/logspace)+range_steps default (materialized value in free-param), malformed-descriptor errors (mixed $/plain, unknown $-key, non-numeric bounds). All pure, no IO. BYPASS --no-atlas + --no-project: M1 is the pure core; atlas (shape datatype + flow) + project tracker land at M2/final-close per the plan; milestone progress in the issue Plan/Log.; review verdict: FIX-THEN-SHIP
