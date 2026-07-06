@@ -1,11 +1,12 @@
 ---
 id: 000014
-status: open
+status: working
 deps: [metis#11, metis#13]
 github_issue:
 created: 2026-07-06
 updated: 2026-07-06
 estimate_hours:
+started: 2026-07-06T16:33:59-07:00
 ---
 
 # Complete + harden code capture — snapshot the run-spec .md, wire single-run capture, make capture failures loud
