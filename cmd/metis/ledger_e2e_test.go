@@ -162,6 +162,70 @@ steps:
 	if string(rt.PointAddress) != winRow {
 		t.Errorf("promoted round-trip point_address %s != winning row %s — reproduction broke", rt.PointAddress, winRow)
 	}
+	// The round-trip must also reproduce the row's METRICS (Done-when: point-address +
+	// metrics). The winning row's train.echoed must match the re-run's train step metric.
+	wantMetric := mustRowMetric(t, expPath, "train.echoed")
+	got := 0.0
+	for _, st := range rt.Steps {
+		if v, ok := st.Metrics["echoed"]; ok && st.StepID == "train" {
+			got = v
+		}
+	}
+	if got != wantMetric {
+		t.Errorf("round-trip metric train.echoed = %g; want %g (the winning row's) — metrics didn't reproduce", got, wantMetric)
+	}
+}
+
+func mustRowMetric(t *testing.T, shapePath, metric string) float64 {
+	t.Helper()
+	raw, _ := os.ReadFile(shapePath)
+	sh, _ := experiment.ParseShape(string(raw))
+	led, _ := loadLedger(shapePath)
+	row, ok := ledger.Best(led, sh.Sweep.Objective.Metric, sh.Sweep.Objective.Direction)
+	if !ok {
+		t.Fatal("no best row")
+	}
+	return row.Metrics[metric]
+}
+
+// Promoting a winner from an OLDER code-version (its sweep-SHA ≠ HEAD) must warn that
+// it reproduces only after `git checkout <sweep-SHA>` — the guard for the "committed at
+// its code SHA" contract. Real git: sweep, advance HEAD, then promote.
+func TestPromote_WarnsOnCrossCodeVersion(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	root := gitInit(t)
+	stepsDir := filepath.Join(root, "steps")
+	if err := os.MkdirAll(filepath.Join(stepsDir, "test"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	copyFile(t, filepath.Join(repoRoot(t), "testdata", "steps", "test", "echo"), filepath.Join(stepsDir, "test", "echo"))
+	_ = os.Chmod(filepath.Join(stepsDir, "test", "echo"), 0o755)
+	expPath := filepath.Join(root, "sweep.md")
+	if err := os.WriteFile(expPath, []byte("---\ntype: experiment-shape\nid: x\nseed: 5\nstatus: active\nsweep: {sampler: grid, objective: {metric: train.echoed, direction: maximize}}\nsteps:\n  - id: train\n    uses: test/echo\n    with: {model: {$any: [logreg, rf]}}\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitCommitAll(t, root, "init")
+	if _, err := runExperiment(runOpts{expPath: expPath, stepPath: []string{stepsDir}, now: fixedNow(), out: io.Discard, git: gitCLI{}}); err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	// Advance HEAD (a new commit) so the row's sweep-SHA is now an OLDER code-version.
+	if err := os.WriteFile(filepath.Join(root, "note.txt"), []byte("advance\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitCommitAll(t, root, "advance HEAD")
+
+	var out bytes.Buffer
+	if err := runPromote(promoteOpts{
+		shapePath: expPath, best: true, name: "old", out: &out,
+		git: gitCLI{}, commit: gitCLICommitter{},
+	}); err != nil {
+		t.Fatalf("promote: %v", err)
+	}
+	if !strings.Contains(out.String(), "git checkout") || !strings.Contains(out.String(), "ran at code") {
+		t.Errorf("promoting an older-code-version winner must warn to re-checkout its sweep-SHA; got:\n%s", out.String())
+	}
 }
 
 // The CLI commands must work with the DOCUMENTED arg order (<shape.md> before flags) —

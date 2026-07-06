@@ -26,7 +26,7 @@ func cmdLedger(args []string) error {
 	fs := flag.NewFlagSet("ledger show", flag.ContinueOnError)
 	sweep := fs.String("sweep", "", "filter to one sweep-SHA (code-version)")
 	sortMetric := fs.String("sort", "", "sort by this namespaced metric (e.g. train.cv_score)")
-	direction := fs.String("dir", "maximize", "sort direction: maximize | minimize")
+	direction := fs.String("dir", "", "sort direction: maximize | minimize (default: the shape's objective direction)")
 	top := fs.Int("top", 0, "show only the top N (0 = all)")
 	shapePath, flags, err := hoistShapePath(args[1:])
 	if err != nil {
@@ -35,7 +35,18 @@ func cmdLedger(args []string) error {
 	if err := fs.Parse(flags); err != nil {
 		return err
 	}
-	return showLedger(shapePath, *sweep, *sortMetric, *direction, *top, os.Stdout)
+	// Default the sort direction from the shape's objective (so `--sort` on a minimize
+	// objective sorts best-first, not descending). Explicit --dir overrides.
+	dir := *direction
+	if dir == "" {
+		dir = "maximize"
+		if raw, err := os.ReadFile(shapePath); err == nil {
+			if sh, err := experiment.ParseShape(string(raw)); err == nil && sh.Sweep.Objective.Direction != "" {
+				dir = sh.Sweep.Objective.Direction
+			}
+		}
+	}
+	return showLedger(shapePath, *sweep, *sortMetric, dir, *top, os.Stdout)
 }
 
 // showLedger is the testable core of `ledger show`: load, filter, sort/top, render — to
@@ -155,7 +166,7 @@ type promoteOpts struct {
 	point     string
 	sweep     string
 	name      string
-	out       *os.File
+	out       io.Writer
 	git       gitProbe
 	commit    gitCommitter // nil → skip the commit (tests without a repo); cmdPromote injects the real one
 }
