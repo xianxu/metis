@@ -7,7 +7,9 @@
 //
 // The algebra:
 //   - product   — a plain map {a:…, b:…}: cartesian of its fields (counts MULTIPLY).
-//   - $any:[…]  — a set; each value verbatim (counts = len). Sugar for the flat sum.
+//   - $any:[…]  — a set; each value taken VERBATIM (nested $-descriptors inside a $any
+//     alternative are NOT expanded — unlike $oneof, which recurses into its branches).
+//     Counts = len. Sugar for the flat sum.
 //   - $oneof:{L:sub,…} — a labeled sum; counts ADD; resolves by BUNDLING (the chosen
 //     branch collapses to {label: resolved-sub}, not flat siblings).
 //   - $linear-range/$log-range: [lo,hi,steps?] — a domain+metric; the grid sampler

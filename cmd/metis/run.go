@@ -63,16 +63,14 @@ type runOpts struct {
 // fully-pinned shape works like a v0 experiment); a multi-point shape is a sweep — the
 // sweep driver is metis#7, so it's refused here with a pointer, not run inline.
 func resolveExperiment(raw string) (experiment.Experiment, error) {
-	base, err := experiment.Parse(raw)
-	if err != nil {
-		return experiment.Experiment{}, err
-	}
-	if base.Type != "experiment-shape" {
-		return base, nil // a plain experiment
-	}
+	// ParseShape handles both types (Shape embeds Experiment; a plain experiment just
+	// has an empty sweep) — one parse, then dispatch on the type.
 	sh, err := experiment.ParseShape(raw)
 	if err != nil {
 		return experiment.Experiment{}, err
+	}
+	if sh.Type != "experiment-shape" {
+		return sh.Experiment, nil // a plain experiment
 	}
 	if err := experiment.ValidateShape(sh); err != nil {
 		return experiment.Experiment{}, err

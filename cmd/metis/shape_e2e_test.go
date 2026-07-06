@@ -7,7 +7,32 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/xianxu/metis/pkg/experiment"
+	"github.com/xianxu/metis/pkg/shape"
 )
+
+// The titanic-baseline-shape fixture expands to exactly 21 points (as its body
+// documents: features(3) × [logreg:C(3) + rf:(2×2)=4] = 3 × 7 = 21) — asserting the
+// "validates AND expands" claim on the real committed fixture.
+func TestShapeFixture_ExpandsTo21Points(t *testing.T) {
+	root := repoRoot(t)
+	raw, err := os.ReadFile(filepath.Join(root, "testdata", "experiment", "titanic-baseline-shape.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sh, err := experiment.ParseShape(string(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	points, err := shape.Expand(sh.Steps, sh.Sweep.RangeSteps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(points) != 21 {
+		t.Errorf("titanic-baseline-shape should expand to 21 points, got %d", len(points))
+	}
+}
 
 // A singleton experiment-shape (every knob pinned) runs exactly like a v0 experiment
 // through `metis run` — the #Experiment = #ExperimentShape & all-singleton collapse,
