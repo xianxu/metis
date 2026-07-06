@@ -1,0 +1,252 @@
+// Package ledger is the metis#8 shape-run ledger: the L1 tracking layer that turns a
+// sweep's per-point results into a navigable, promotable table, so an engineer picks
+// the winner by sorting rather than scrolling logs. It is an APPEND-ONLY aggregation
+// VIEW over the per-run records (metis#3) — not a competing run store: a Row is the raw
+// reconstructable recipe (free-param tuple + code SHA + seed) plus the result. Pure —
+// the CSV codec, dedup, and pick-best have no IO; reading the manifest/record.json and
+// committing the sidecar are the cmd/metis shell.
+//
+// Three keys per row: the free-param tuple (human navigation, ragged/sparse — columns
+// are the union of all branches' free-params, blank where inactive), the sweep-SHA (the
+// code-version, git short-SHA human address), and the point-address (global content
+// identity, used for append dedup).
+package ledger
+
+import (
+	"bytes"
+	"encoding/csv"
+	"fmt"
+	"sort"
+	"strconv"
+	"strings"
+)
+
+// Row is one ledger entry: the free-param tuple + sweep-SHA + point-address (identity)
+// + namespaced metrics + status. The raw recipe + result.
+type Row struct {
+	FreeParams map[string]any
+	SweepSHA   string
+	PointAddr  string // the metis#3 point content-address — row identity for dedup
+	Metrics    map[string]float64
+	Status     string // "ok" | "failed"
+}
+
+// Ledger is an ordered, append-only set of rows (CSV-backed by the caller).
+type Ledger struct {
+	Rows []Row
+	seen map[string]bool // point-addresses already present (dedup)
+}
+
+// Append adds rows in order, skipping any whose point-address is already present
+// (append-only + idempotent: re-running the same code re-produces the same addresses →
+// no growth; a new code-version's rows carry new addresses → they append).
+func (l *Ledger) Append(rows ...Row) {
+	if l.seen == nil {
+		l.seen = make(map[string]bool, len(l.Rows)+len(rows))
+		for _, r := range l.Rows {
+			l.seen[r.PointAddr] = true
+		}
+	}
+	for _, r := range rows {
+		if l.seen[r.PointAddr] {
+			continue
+		}
+		l.seen[r.PointAddr] = true
+		l.Rows = append(l.Rows, r)
+	}
+}
+
+// column prefixes for the CSV header namespace.
+const (
+	fpPrefix     = "fp."
+	metricPrefix = "metric."
+)
+
+// Encode renders the ledger as append-order CSV. The header is the fixed keys
+// (sweep_sha, point_addr, status) plus the sorted UNION of every row's free-param and
+// metric columns; a row blanks the columns it lacks (ragged). Sorting/filtering is a
+// view (Decode → Filter/TopN), never a storage concern — the file stays append-order.
+func Encode(l Ledger) ([]byte, error) {
+	fpCols, metricCols := unionColumns(l.Rows)
+	header := append([]string{"sweep_sha", "point_addr", "status"}, fpCols...)
+	header = append(header, metricCols...)
+
+	var buf bytes.Buffer
+	w := csv.NewWriter(&buf)
+	if err := w.Write(header); err != nil {
+		return nil, err
+	}
+	for _, r := range l.Rows {
+		rec := make([]string, 0, len(header))
+		rec = append(rec, r.SweepSHA, r.PointAddr, r.Status)
+		for _, c := range fpCols {
+			rec = append(rec, cell(r.FreeParams[strings.TrimPrefix(c, fpPrefix)]))
+		}
+		for _, c := range metricCols {
+			if v, ok := r.Metrics[strings.TrimPrefix(c, metricPrefix)]; ok {
+				rec = append(rec, strconv.FormatFloat(v, 'g', -1, 64))
+			} else {
+				rec = append(rec, "")
+			}
+		}
+		if err := w.Write(rec); err != nil {
+			return nil, err
+		}
+	}
+	w.Flush()
+	return buf.Bytes(), w.Error()
+}
+
+// Decode parses append-order CSV back into a Ledger (blank cells → absent keys).
+func Decode(b []byte) (Ledger, error) {
+	r := csv.NewReader(bytes.NewReader(b))
+	recs, err := r.ReadAll()
+	if err != nil {
+		return Ledger{}, err
+	}
+	if len(recs) == 0 {
+		return Ledger{}, nil
+	}
+	header := recs[0]
+	var l Ledger
+	for _, rec := range recs[1:] {
+		row := Row{FreeParams: map[string]any{}, Metrics: map[string]float64{}}
+		for i, col := range header {
+			if i >= len(rec) || rec[i] == "" {
+				continue
+			}
+			switch {
+			case col == "sweep_sha":
+				row.SweepSHA = rec[i]
+			case col == "point_addr":
+				row.PointAddr = rec[i]
+			case col == "status":
+				row.Status = rec[i]
+			case strings.HasPrefix(col, fpPrefix):
+				row.FreeParams[strings.TrimPrefix(col, fpPrefix)] = parseCell(rec[i])
+			case strings.HasPrefix(col, metricPrefix):
+				if f, err := strconv.ParseFloat(rec[i], 64); err == nil {
+					row.Metrics[strings.TrimPrefix(col, metricPrefix)] = f
+				}
+			}
+		}
+		if len(row.FreeParams) == 0 {
+			row.FreeParams = nil
+		}
+		if len(row.Metrics) == 0 {
+			row.Metrics = nil
+		}
+		l.Append(row)
+	}
+	return l, nil
+}
+
+// Best returns the row optimizing the objective metric (maximize / minimize), skipping
+// failed rows and rows missing the metric. ok=false if no row qualifies.
+func Best(l Ledger, metric, direction string) (Row, bool) {
+	var best Row
+	found := false
+	for _, r := range l.Rows {
+		if r.Status == "failed" {
+			continue
+		}
+		v, ok := r.Metrics[metric]
+		if !ok {
+			continue
+		}
+		if !found || betterThan(v, best.Metrics[metric], direction) {
+			best, found = r, true
+		}
+	}
+	return best, found
+}
+
+// TopN returns the n best rows in objective order (skipping failed / metric-missing).
+func TopN(l Ledger, metric, direction string, n int) []Row {
+	qualified := make([]Row, 0, len(l.Rows))
+	for _, r := range l.Rows {
+		if r.Status == "failed" {
+			continue
+		}
+		if _, ok := r.Metrics[metric]; ok {
+			qualified = append(qualified, r)
+		}
+	}
+	sort.SliceStable(qualified, func(i, j int) bool {
+		return betterThan(qualified[i].Metrics[metric], qualified[j].Metrics[metric], direction)
+	})
+	if n < len(qualified) {
+		qualified = qualified[:n]
+	}
+	return qualified
+}
+
+// Filter returns the sub-ledger of rows at a given sweep-SHA (an invocation / code-
+// version view). Empty sweepSHA returns the whole ledger.
+func Filter(l Ledger, sweepSHA string) Ledger {
+	if sweepSHA == "" {
+		return l
+	}
+	var out Ledger
+	for _, r := range l.Rows {
+		if r.SweepSHA == sweepSHA {
+			out.Append(r)
+		}
+	}
+	return out
+}
+
+func betterThan(a, b float64, direction string) bool {
+	if direction == "minimize" {
+		return a < b
+	}
+	return a > b // default / maximize
+}
+
+// unionColumns returns the sorted union of free-param and metric column names (prefixed).
+func unionColumns(rows []Row) (fp, metric []string) {
+	fpSet, metricSet := map[string]bool{}, map[string]bool{}
+	for _, r := range rows {
+		for k := range r.FreeParams {
+			fpSet[fpPrefix+k] = true
+		}
+		for k := range r.Metrics {
+			metricSet[metricPrefix+k] = true
+		}
+	}
+	return sortedKeys(fpSet), sortedKeys(metricSet)
+}
+
+func sortedKeys(m map[string]bool) []string {
+	ks := make([]string, 0, len(m))
+	for k := range m {
+		ks = append(ks, k)
+	}
+	sort.Strings(ks)
+	return ks
+}
+
+// cell renders a free-param value for CSV; parseCell inverts it (numbers → float64,
+// bools → bool, else string) so a round-trip preserves the common config types.
+func cell(v any) string {
+	if v == nil {
+		return ""
+	}
+	return fmt.Sprintf("%v", v)
+}
+
+func parseCell(s string) any {
+	if s == "true" {
+		return true
+	}
+	if s == "false" {
+		return false
+	}
+	if i, err := strconv.Atoi(s); err == nil {
+		return i
+	}
+	if f, err := strconv.ParseFloat(s, 64); err == nil {
+		return f
+	}
+	return s
+}

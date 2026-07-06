@@ -5,7 +5,7 @@ deps: [metis#6, metis#7, metis#3]
 github_issue:
 created: 2026-07-03
 updated: 2026-07-05
-estimate_hours:
+estimate_hours: 3
 started: 2026-07-05T18:39:34-07:00
 ---
 
@@ -141,21 +141,63 @@ snapshots its full resolved point + code SHA, so old rows stay reproducible acro
 
 ## Done when
 
-- Sweeps (metis#7) append rows to the shape's CSV sidecar carrying both keys + metrics
-  + a point snapshot; batched commit boundaries; the body summary regenerates.
-- A `show`/query command renders + sorts/filters the ledger.
-- `promote` materializes a ledger row as an all-singleton experiment with a back-link;
-  round-trips (the promoted experiment reproduces the row's run).
-- Shape-mutability guard (immutable-with-runs, or per-row point snapshot) is enforced +
-  tested.
+*(Updated 2026-07-05 to the milestone plan — added the M3 durability criterion, reconciled the
+immutability wording to the delivered per-row-snapshot mechanism.)*
+
+- Sweeps (metis#7) append rows to the shape's CSV sidecar (three keys + ragged free-param cols +
+  namespaced metrics + status); idempotent (re-run dedups by point-address); the body top-N summary
+  regenerates.
+- A `metis ledger show` command renders + sorts/filters the ledger (a view).
+- `metis promote` materializes a ledger row (Best or a named point) as an all-singleton experiment
+  with a back-link, committed at its code SHA; round-trips (the promoted experiment re-runs and
+  reproduces the row's point-address + metrics).
+- **Immutability by per-row snapshot:** each row snapshots its full resolved point + sweep-SHA, so
+  old rows stay reproducible after a shape-space edit — tested (edit the shape's space, assert prior
+  rows still reproduce). (The Design's "or per-row snapshot" branch — delivered by the snapshot, not a
+  mutation guard.)
+- **(M3, durability) Side-ref code capture:** a dirty-closure run captures a real committed SHA to
+  `refs/metis/sweeps/*`; `record.CodeManifest.D`/`Commit` are populated; `git cat-file` of a captured
+  blob-hash returns the exact bytes; recovery via `git checkout <commit>` restores the code. A clean
+  closure captures nothing (Commit == HEAD).
+- **Repo-identity note (carried from #3's close-review):** the point-address keys `repo_shas` by the
+  local checkout basename, so its "global" dedup is env-invariant only within a single checkout —
+  **deliberately deferred** here (harmless within v1 single-checkout/Kaggle use; the ledger dedups
+  within an environment). Pinning repo identity to an env-invariant source (remote URL / configured
+  identity) is a post-v1 hardening, not in #8's scope.
 
 ## Plan
 
-- [x] Design settled 2026-07-05 — append-only ledger (3 keys, sparse cols, namespaced metrics), objective pick-best, promote command, git-owns-code durability (see `## Design`).
-- [ ] Append-only CSV writer (3 keys + sparse free-param cols + namespaced metrics + status); batched per-sweep commit; the sweep-captures-code side-ref hook.
-- [ ] Body top-N-by-objective summary + sidecar pointer; `show`/query sorted/filtered views.
-- [ ] `promote <shape> [--best|--point ..] --name X` → all-singleton experiment committed at its code SHA (self-contained); round-trip test.
-- [ ] Immutability guard (shape-with-rows ~immutable / per-row snapshot); test.
+Durable impl plan: `workshop/plans/000008-shape-run-ledger-plan.md` (3 review boundaries; full design
+incl. the side-ref durability capture — operator-confirmed in-scope 2026-07-05). TDD.
+
+- [x] Design settled 2026-07-05 — append-only ledger (3 keys, sparse cols, namespaced metrics), objective pick-best, promote command, git-owns-code durability (see `## Design`); impl decomposed into the durable plan (2026-07-05).
+- [ ] **M1 — pure ledger core** (`pkg/ledger`): `Row` (free-param tuple / sweep-SHA / point-address / namespaced metrics / status); `Ledger` append-only + **dedup by point-address**; **ragged** union columns; CSV codec (round-trip incl. blanks + namespaced metrics); `Best`/`TopN` (objective-driven, skip failed) + `Filter`. Unit tests.
+- [ ] **M2 — integration: rows + `show` + `promote`.** Aggregate #7's sweep manifest → rows (namespaced per-step metrics from each `record.json`) → append to `<shape>.ledger.csv` (idempotent) + regen body top-N. `metis ledger show <shape> [--sweep|--sort|--top]`. `metis promote` = a **pure** `promotedExperiment(shape, row)` reconstruction (singleton collapse, reusing `shapePointToExperiment`'s overlay — unit-tested without a repo) + write `<name>.md` (back-link) + commit at its code SHA; **round-trip** (re-run reproduces the row's point-address + metrics). **Immutability by per-row snapshot** (tested: edit the space, prior rows still reproduce). Atlas. The ledger is an *aggregation view* over the per-run `record.json`s — NOT a second run store (the "lift unification" is conceptual; no experiment `## Runs` retrofit).
+- [ ] **M3 — the side-ref dirty-code capture** (git durability). `gitCapture` seam: after a sweep, take the code closure (D from the sensor's reads.json); `git hash-object -w` each dirty/untracked closure file, build a tree + `commit-tree` + `update-ref refs/metis/sweeps/<shape-run-id>` (GC-protected). Populate `record.CodeManifest.D=(path,blob-hash)` + `Commit=<captured-or-HEAD SHA>`. Recovery = `git checkout <commit>`. Point-address stays HEAD-based (don't disturb #7). Tests: dirty-file capture + `cat-file` returns exact bytes, clean → no capture, recovery, CodeManifest populated. Atlas (updates #3/#2 "deferred to #8" → done).
+
+## Estimate
+
+*Produced via `brain/data/life/42shots/velocity/estimate-logic-v3.1.md` against `baseline-v3.1.md`. Method A only.*
+
+```estimate
+model: estimate-logic-v3.1
+familiarity: 1.0
+item: greenfield-go-module   design=0.4 impl=0.4
+item: smaller-go-module      design=0.2 impl=0.4
+item: greenfield-go-module   design=0.3 impl=0.4
+item: milestone-review       design=0.0 impl=0.2
+item: milestone-review       design=0.0 impl=0.2
+item: milestone-review       design=0.0 impl=0.2
+item: atlas-docs             design=0.05 impl=0.1
+design-buffer: 0.15
+total: 2.99
+```
+
+The largest v1 issue alongside #2 (3 milestones, full design incl. durability). M1 greenfield
+`pkg/ledger` (pure ragged CSV + pick-best); M2 a smaller-go-module *extend* (sweep→rows + `show` +
+`promote` + round-trip); M3 the greenfield git-plumbing side-ref capture (novel — hash-object -w /
+commit-tree / update-ref + CodeManifest). Three `milestone-review` (3 boundaries). Atlas. Impl at
+40%-of-v2 (v3.1); +15% thorough-plan buffer.
 
 ## Log
 
@@ -165,3 +207,4 @@ snapshots its full resolved point + code SHA, so old rows stay reproducible acro
 ### 2026-07-05
 - **Design settled** (ledger/durability discussion). Append-only CSV, **row identity = point-address** (not the free-param tuple — it repeats across code-versions); **three keys** (free-param tuple [human, ragged/sparse via `$oneof`] + sweep-SHA [code-version, = the git short-SHA human address] + point-address [global dedup]); **namespaced metrics** (fixes v0 flat last-write-wins); **objective-driven** pick-best (whole-ledger default). The ledger is the **lifted `## Runs`** — experiment = 1-config ledger, unifying with #3. **Promotion = a command** (`*` marker dropped) → writes an all-singleton experiment committed **at its code SHA** = a self-contained reproducible commit. **Durability refined (updates #2/#3/#9):** a sweep captures its code by committing the traced closure to a side ref on a miss; metis persists a `(path, git-blob-hash, commit)` **pointer-manifest** (git's blob-hash = the content-hash; git = content store) — **the CAS holds only wipeable large-output bytes; code lives in git**, durable across CAS wipes. Full spec in `## Design`.
 - **Carried from the #3 close-review (2026-07-05):** the point-address (which the global row-key derives from) currently keys `repo_shas` by the **local checkout basename** (`filepath.Base(git rev-parse --show-toplevel)` in `cmd/metis/record.go`). So the same commit+config+seed in `metis/` vs a `metis-2/` clone mints **different** point-addresses — harmless within v1 single-checkout/Kaggle use, but **#8 must pin repo identity to an environment-invariant source** (remote URL / configured identity) before the global ledger key relies on cross-environment stability. Also: the `dirty` flag sits *outside* the point-address by design (clean-vs-dirty is legibility; the read-set trace `D` is #2's precise encoding) — the coarse point-address is NOT a byte-exact identity.
+- **M1 built — the pure ledger core `pkg/ledger`** (TDD, all green; build+vet+full-suite clean). `Row` (free-param tuple / sweep-SHA / point-address / namespaced metrics / status); `Ledger.Append` (append-only + **dedup by point-address** — idempotent re-run, new code-version appends); **ragged** CSV codec over stdlib `encoding/csv` (header = fixed keys + sorted union of `fp.*` + `metric.*`; blank cells for absent keys; round-trips incl. blanks + namespaced metrics + failed-status); `Best`/`TopN` (objective-driven maximize/minimize, skip failed + metric-missing) + `Filter` (by sweep-SHA). Pure, no IO. Tests: dedup, ragged round-trip ($oneof logreg-blanks-n_estimators / rf-blanks-C), Best both directions + skip-failed/missing + empty, TopN ordering, Filter. Next: M2 (rows-from-manifest + `ledger show` + `promote` round-trip).
