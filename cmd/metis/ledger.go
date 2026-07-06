@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	"github.com/xianxu/metis/pkg/experiment"
@@ -159,8 +158,15 @@ func regenLedgerSummary(shapePath string, led ledger.Ledger, obj experiment.Obje
 	var b strings.Builder
 	b.WriteString(begin + "\n## Top runs\n")
 	if obj.Metric != "" {
+		top := ledger.TopN(led, obj.Metric, obj.Direction, 10)
+		if len(top) == 0 && len(led.Rows) > 0 {
+			// The objective metric matched no row — almost always a namespacing mistake
+			// (rows carry `<step>.<metric>`, e.g. train.cv_score). Make it loud, not a
+			// silently-empty summary.
+			fmt.Fprintf(os.Stderr, "metis: warning: objective metric %q is not present in any ledger row — metrics are namespaced `<step>.<metric>` (e.g. train.%s)\n", obj.Metric, obj.Metric)
+		}
 		fmt.Fprintf(&b, "By `%s` (%s) — see `%s` for all rows.\n\n", obj.Metric, obj.Direction, filepath.Base(ledgerPath(shapePath)))
-		for i, r := range ledger.TopN(led, obj.Metric, obj.Direction, 10) {
+		for i, r := range top {
 			fmt.Fprintf(&b, "%d. %s = %g — %s\n", i+1, obj.Metric, r.Metrics[obj.Metric], freeParamTuple(r))
 		}
 	} else {
@@ -181,16 +187,8 @@ func regenLedgerSummary(shapePath string, led ledger.Ledger, obj experiment.Obje
 	return os.WriteFile(shapePath, []byte(body+"\n"+b.String()+"\n"), 0o644)
 }
 
-// freeParamTuple renders a row's free-params as a compact `(k=v, …)` human key.
+// freeParamTuple renders a row's free-params as a compact `(k=v, …)` human key
+// (delegates to freeParamTupleMap over the row's free-param map — one renderer).
 func freeParamTuple(r ledger.Row) string {
-	keys := make([]string, 0, len(r.FreeParams))
-	for k := range r.FreeParams {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	parts := make([]string, len(keys))
-	for i, k := range keys {
-		parts[i] = fmt.Sprintf("%s=%v", k, r.FreeParams[k])
-	}
-	return "(" + strings.Join(parts, ", ") + ")"
+	return freeParamTupleMap(r.FreeParams)
 }

@@ -26,14 +26,14 @@ func cmdLedger(args []string) error {
 	sortMetric := fs.String("sort", "", "sort by this namespaced metric (e.g. train.cv_score)")
 	direction := fs.String("dir", "maximize", "sort direction: maximize | minimize")
 	top := fs.Int("top", 0, "show only the top N (0 = all)")
-	if err := fs.Parse(args[1:]); err != nil {
+	shapePath, flags, err := hoistShapePath(args[1:])
+	if err != nil {
+		return fmt.Errorf("ledger show: %w (usage: metis ledger show <shape.md> [--sweep SHA] [--sort metric] [--top N])", err)
+	}
+	if err := fs.Parse(flags); err != nil {
 		return err
 	}
-	rest := fs.Args()
-	if len(rest) != 1 {
-		return fmt.Errorf("ledger show: want one <shape.md>, got %d", len(rest))
-	}
-	led, err := loadLedger(rest[0])
+	led, err := loadLedger(shapePath)
 	if err != nil {
 		return err
 	}
@@ -51,6 +51,28 @@ func cmdLedger(args []string) error {
 	}
 	renderLedger(os.Stdout, rows)
 	return nil
+}
+
+// hoistShapePath pulls the single `<shape.md>` positional out of args and returns it
+// plus the remaining flag args — so flags may appear before OR after the path (Go's
+// stdlib flag stops at the first positional, which broke the documented
+// `metis <cmd> <shape.md> --flags` order). The positional is the lone `.md`-suffixed
+// arg; every other non-flag token is a flag value (e.g. `--point train.model=rf`).
+func hoistShapePath(args []string) (shapePath string, flags []string, err error) {
+	for _, a := range args {
+		if strings.HasSuffix(a, ".md") && !strings.HasPrefix(a, "-") {
+			if shapePath != "" {
+				return "", nil, fmt.Errorf("want exactly one <shape.md>, got multiple")
+			}
+			shapePath = a
+			continue
+		}
+		flags = append(flags, a)
+	}
+	if shapePath == "" {
+		return "", nil, fmt.Errorf("missing <shape.md>")
+	}
+	return shapePath, flags, nil
 }
 
 // renderLedger prints rows as an aligned table (sweep-SHA short, free-params, metrics).
@@ -94,17 +116,33 @@ func cmdPromote(args []string) error {
 	point := fs.String("point", "", "promote the row matching these free-params (e.g. 'train.model=rf')")
 	sweep := fs.String("sweep", "", "restrict selection to one sweep-SHA")
 	name := fs.String("name", "", "output experiment name (writes <name>.md)")
-	if err := fs.Parse(args); err != nil {
+	shapePath, flags, err := hoistShapePath(args)
+	if err != nil {
+		return fmt.Errorf("promote: %w (usage: metis promote <shape.md> (--best | --point 'k=v,..') [--sweep SHA] --name X)", err)
+	}
+	if err := fs.Parse(flags); err != nil {
 		return err
 	}
-	rest := fs.Args()
-	if len(rest) != 1 || *name == "" || (!*best && *point == "") {
+	if *name == "" || (!*best && *point == "") {
 		return fmt.Errorf("usage: metis promote <shape.md> (--best | --point 'k=v,..') [--sweep SHA] --name X")
 	}
 	return runPromote(promoteOpts{
-		shapePath: rest[0], best: *best, point: *point, sweep: *sweep, name: *name,
-		out: os.Stdout, git: gitCLI{},
+		shapePath: shapePath, best: *best, point: *point, sweep: *sweep, name: *name,
+		out: os.Stdout, git: gitCLI{}, commit: gitCLICommitter{},
 	})
+}
+
+// gitCLICommitter is the production gitCommitter: it shells `git -C <dir> add/commit`.
+type gitCLICommitter struct{}
+
+func (gitCLICommitter) Add(dir, path string) error {
+	_, err := gitOut(dir, "add", "--", path)
+	return err
+}
+
+func (gitCLICommitter) Commit(dir, msg string) error {
+	_, err := gitOut(dir, "commit", "-m", msg)
+	return err
 }
 
 type promoteOpts struct {
@@ -115,7 +153,7 @@ type promoteOpts struct {
 	name      string
 	out       *os.File
 	git       gitProbe
-	commit    gitCommitter // injected for tests; nil → real git
+	commit    gitCommitter // nil → skip the commit (tests without a repo); cmdPromote injects the real one
 }
 
 // gitCommitter commits a file at the current SHA (injected so promote is testable
@@ -144,7 +182,7 @@ func runPromote(o promoteOpts) error {
 	if o.best {
 		row, ok := ledger.Best(led, sh.Sweep.Objective.Metric, sh.Sweep.Objective.Direction)
 		if !ok {
-			return fmt.Errorf("promote --best: no qualifying row (objective %q)", sh.Sweep.Objective.Metric)
+			return fmt.Errorf("promote --best: no qualifying row for objective %q — metrics are namespaced `<step>.<metric>` (e.g. train.%s); check the shape's sweep.objective.metric", sh.Sweep.Objective.Metric, sh.Sweep.Objective.Metric)
 		}
 		freeParams = row.FreeParams
 	} else {
@@ -166,18 +204,20 @@ func runPromote(o promoteOpts) error {
 	// commit. Warn if the repo is dirty (a promoted winner should be commit-nameable;
 	// metis#8 M3's side-ref capture makes even a dirty run's SHA real).
 	dir := filepath.Dir(o.shapePath)
-	if _, _, dirty := probeRepo(o.git, dir); dirty {
-		fmt.Fprintf(o.out, "metis: warning: repo is dirty — the promoted %s is committed against a dirty tree\n", o.name)
-	}
 	if o.commit != nil {
+		if _, _, dirty := probeRepo(o.git, dir); dirty {
+			fmt.Fprintf(o.out, "metis: warning: repo is dirty — committing %s against a dirty tree\n", o.name)
+		}
 		if err := o.commit.Add(dir, filepath.Base(outPath)); err != nil {
 			return err
 		}
 		if err := o.commit.Commit(dir, "metis promote: "+o.name); err != nil {
 			return err
 		}
+		fmt.Fprintf(o.out, "metis: promoted + committed %s → %s\n", freeParamTupleMap(freeParams), outPath)
+	} else {
+		fmt.Fprintf(o.out, "metis: promoted %s → %s (not committed)\n", freeParamTupleMap(freeParams), outPath)
 	}
-	fmt.Fprintf(o.out, "metis: promoted %s → %s\n", freeParamTupleMap(freeParams), outPath)
 	return nil
 }
 

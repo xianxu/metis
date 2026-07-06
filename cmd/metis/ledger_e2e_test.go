@@ -1,15 +1,48 @@
 package main
 
 import (
+	"encoding/json"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/xianxu/metis/pkg/experiment"
+	"github.com/xianxu/metis/pkg/ledger"
+	"github.com/xianxu/metis/pkg/record"
 	"github.com/xianxu/metis/pkg/shape"
 )
+
+// mustLedgerBest returns the winning row's point-address by the shape's objective.
+func mustLedgerBest(t *testing.T, shapePath string) string {
+	t.Helper()
+	raw, _ := os.ReadFile(shapePath)
+	sh, _ := experiment.ParseShape(string(raw))
+	led, err := loadLedger(shapePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	row, ok := ledger.Best(led, sh.Sweep.Objective.Metric, sh.Sweep.Objective.Direction)
+	if !ok {
+		t.Fatalf("no best row for objective %q", sh.Sweep.Objective.Metric)
+	}
+	return row.PointAddr
+}
+
+func mustRecord(t *testing.T, path string) record.RunRecord {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rec record.RunRecord
+	if err := json.Unmarshal(b, &rec); err != nil {
+		t.Fatal(err)
+	}
+	return rec
+}
 
 // A sweep writes the shape's ledger sidecar (one row per point, namespaced metrics) and
 // regenerates the body top-N summary.
@@ -101,7 +134,10 @@ steps:
 	if !strings.Contains(string(wb), "id: winner") {
 		t.Errorf("promoted experiment id must be the --name (winner), not the shape id:\n%s", wb)
 	}
-	// Round-trip: the promoted all-singleton experiment re-runs (like a v0 experiment).
+	// Round-trip: the promoted all-singleton experiment re-runs AND reproduces the
+	// winning row's point-address (the Done-when — not just status ok). We compare the
+	// promoted run's record.point_address to the winning row's point-address.
+	winRow := mustLedgerBest(t, expPath)
 	run, err := runExperiment(runOpts{
 		expPath:  winnerPath,
 		runID:    "rt",
@@ -115,6 +151,92 @@ steps:
 	}
 	if run.Status != "ok" {
 		t.Errorf("promoted round-trip status = %q; want ok", run.Status)
+	}
+	rt := mustRecord(t, filepath.Join(ws, "runs", "rt", "record.json"))
+	if string(rt.PointAddress) != winRow {
+		t.Errorf("promoted round-trip point_address %s != winning row %s — reproduction broke", rt.PointAddress, winRow)
+	}
+}
+
+// The CLI commands must work with the DOCUMENTED arg order (<shape.md> before flags) —
+// Go's stdlib flag stops at the first positional, so this slipped past the e2es that
+// called runPromote directly. hoistShapePath makes flags order-independent.
+func TestCLI_ArgOrderIndependent(t *testing.T) {
+	root := repoRoot(t)
+	ws := t.TempDir()
+	expPath := writeShape(t, ws, `---
+type: experiment-shape
+id: argorder
+seed: 5
+status: active
+sweep: {sampler: grid, objective: {metric: train.echoed, direction: maximize}}
+steps:
+  - id: train
+    uses: test/echo
+    with: {model: {$any: [logreg, rf]}}
+---
+`)
+	if err := runSweepViaRun(t, expPath, root, runOpts{cache: false}); err != nil {
+		t.Fatal(err)
+	}
+	// `ledger show <shape> --sort M` (shape FIRST, as documented) must not error.
+	if err := cmdLedger([]string{"show", expPath, "--sort", "train.echoed"}); err != nil {
+		t.Errorf("`ledger show <shape> --sort M` (documented order) errored: %v", err)
+	}
+	// And flags-first still works.
+	if err := cmdLedger([]string{"show", "--top", "1", expPath}); err != nil {
+		t.Errorf("`ledger show --top 1 <shape>` errored: %v", err)
+	}
+}
+
+// promote must ACTUALLY commit the winner (a real gitCommitter), not just report it —
+// the production path (cmdPromote) injects gitCLICommitter. Verified against a real repo.
+func TestPromote_ActuallyCommits(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	root := gitInit(t)
+	// A shape + its ledger row inside the repo; test/echo steps on the path.
+	stepsDir := filepath.Join(root, "steps")
+	if err := os.MkdirAll(filepath.Join(stepsDir, "test"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	copyFile(t, filepath.Join(repoRoot(t), "testdata", "steps", "test", "echo"), filepath.Join(stepsDir, "test", "echo"))
+	_ = os.Chmod(filepath.Join(stepsDir, "test", "echo"), 0o755)
+	expPath := filepath.Join(root, "sweep.md")
+	if err := os.WriteFile(expPath, []byte(`---
+type: experiment-shape
+id: cmt
+seed: 5
+status: active
+sweep: {sampler: grid, objective: {metric: train.echoed, direction: maximize}}
+steps:
+  - id: train
+    uses: test/echo
+    with: {model: {$any: [logreg, rf]}}
+---
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitCommitAll(t, root, "init")
+	if _, err := runExperiment(runOpts{expPath: expPath, stepPath: []string{stepsDir}, now: fixedNow(), out: io.Discard, git: gitCLI{}}); err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	var out strings.Builder
+	if err := runPromote(promoteOpts{
+		shapePath: expPath, best: true, name: "champ",
+		out: os.Stdout, git: gitCLI{}, commit: gitCLICommitter{},
+	}); err != nil {
+		t.Fatalf("promote: %v\n%s", err, out.String())
+	}
+	// champ.md must be COMMITTED (not untracked) — the Critical the review caught.
+	status, _ := exec.Command("git", "-C", root, "status", "--porcelain", "champ.md").Output()
+	if strings.TrimSpace(string(status)) != "" {
+		t.Errorf("champ.md must be committed (clean status), got: %q", status)
+	}
+	log, _ := exec.Command("git", "-C", root, "log", "--oneline", "-1").Output()
+	if !strings.Contains(string(log), "promote") {
+		t.Errorf("a promote commit must land in git log; got: %s", log)
 	}
 }
 
