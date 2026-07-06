@@ -1,11 +1,12 @@
 ---
 id: 000013
-status: open
+status: working
 deps: []
 github_issue:
 created: 2026-07-06
 updated: 2026-07-06
 estimate_hours:
+started: 2026-07-06T15:07:51-07:00
 ---
 
 # Config immutability — run output (## Runs / ledger top-N) must leave the experiment .md
