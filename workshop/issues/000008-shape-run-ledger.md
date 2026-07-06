@@ -1,11 +1,12 @@
 ---
 id: 000008
-status: open
+status: working
 deps: [metis#6, metis#7, metis#3]
 github_issue:
 created: 2026-07-03
 updated: 2026-07-05
 estimate_hours:
+started: 2026-07-05T18:39:34-07:00
 ---
 
 # Shape run-ledger: CSV sidecar keyed by free-param tuple + promotion to an experiment
