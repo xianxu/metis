@@ -1,11 +1,12 @@
 ---
 id: 000011
-status: open
+status: working
 deps: []
 github_issue:
 created: 2026-07-05
-updated: 2026-07-05
+updated: 2026-07-06
 estimate_hours:
+started: 2026-07-06T15:42:13-07:00
 ---
 
 # Trace sensor is single-repo-rooted — cross-repo first-party code (kbench steps importing metis) never enters the cache read-set
