@@ -30,13 +30,42 @@ package experiment
 	artifacts?: [...string]          // repo-relative paths under runs/<id>/
 }
 
-#Experiment: {
-	type:         "experiment"
+// _pipeline is the shared field set of an experiment and its lifted shape — defined
+// ONCE here (ARCH-DRY) and embedded into both closed definitions below, so the DAG +
+// config shape isn't hand-maintained in two places. (A hidden field, not a `#` def, so
+// it can be embedded and each embedder stays closed over exactly its own fields.)
+_pipeline: {
 	id:           string   // slug; matches filename
 	competition?: string   // set on kbench instances; absent on metis fixtures
 	seed:         int
 	status:       #Status
-	steps: [...#Step]      // the pipeline (may be a single step)
+	steps: [...#Step]      // the pipeline DAG (may be a single step)
+}
+
+// #Experiment is the SINGLETON case: the shared pipeline narrowed to `type:
+// "experiment"` with no sweep block. Closed (no stray fields) for sharp diagnostics.
+// An all-singleton #ExperimentShape (every $any/$oneof/$*-range collapsed) expands to
+// exactly one of these.
+#Experiment: {
+	_pipeline
+	type: "experiment"
+}
+
+// #ExperimentShape (metis#6) is the experiment lifted into a config-space: the same
+// shared pipeline, plus `type: "experiment-shape"` and a `sweep:` block. The `$`-key
+// value-algebra ($any/$oneof/$*-range) lives in the untyped `with` bag (value-level,
+// NOT CUE-typed — pkg/shape expands it), so structurally a shape is a pipeline + sweep.
+#ExperimentShape: {
+	_pipeline
+	type: "experiment-shape"
+	sweep: {
+		sampler: string        // "grid" (v1); the propose/should-stop seam is metis#7
+		objective?: {
+			metric:    string
+			direction: "maximize" | "minimize"
+		}
+		range_steps?: int      // default grid resolution for a $*-range without its own steps
+	}
 }
 
 // The provenance record (metis#3) — the L0 reproducibility atom, emitted as

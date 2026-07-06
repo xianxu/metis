@@ -13,6 +13,7 @@ import (
 	"github.com/xianxu/metis/pkg/cas"
 	"github.com/xianxu/metis/pkg/experiment"
 	"github.com/xianxu/metis/pkg/record"
+	"github.com/xianxu/metis/pkg/shape"
 )
 
 // cacheProjectRoot resolves the metis code root (the module dir above steps/) that D
@@ -56,6 +57,53 @@ type runOpts struct {
 	out      io.Writer
 }
 
+// resolveExperiment turns raw markdown into a runnable Experiment, transparently
+// handling both `type: experiment` and `type: experiment-shape`. A shape is expanded
+// (metis#6); an all-singleton shape resolves to its one experiment (so `metis run` on a
+// fully-pinned shape works like a v0 experiment); a multi-point shape is a sweep — the
+// sweep driver is metis#7, so it's refused here with a pointer, not run inline.
+func resolveExperiment(raw string) (experiment.Experiment, error) {
+	base, err := experiment.Parse(raw)
+	if err != nil {
+		return experiment.Experiment{}, err
+	}
+	if base.Type != "experiment-shape" {
+		return base, nil // a plain experiment
+	}
+	sh, err := experiment.ParseShape(raw)
+	if err != nil {
+		return experiment.Experiment{}, err
+	}
+	if err := experiment.ValidateShape(sh); err != nil {
+		return experiment.Experiment{}, err
+	}
+	points, err := shape.Expand(sh.Steps, sh.Sweep.RangeSteps)
+	if err != nil {
+		return experiment.Experiment{}, err
+	}
+	if len(points) != 1 {
+		return experiment.Experiment{}, fmt.Errorf(
+			"experiment-shape %q expands to %d points — the sweep driver is metis#7 (not yet built); pin it to a single point or run a plain experiment",
+			sh.ID, len(points))
+	}
+	return shapePointToExperiment(sh, points[0]), nil
+}
+
+// shapePointToExperiment overlays an expanded point's resolved `with` onto the shape's
+// steps, yielding a concrete `type: experiment` — the singleton collapse
+// (#Experiment = #ExperimentShape & all-singleton) made runnable.
+func shapePointToExperiment(sh experiment.Shape, p shape.Point) experiment.Experiment {
+	exp := sh.Experiment
+	exp.Type = "experiment"
+	steps := make([]experiment.Step, len(sh.Steps))
+	for i, s := range sh.Steps {
+		s.With = p.With[s.ID]
+		steps[i] = s
+	}
+	exp.Steps = steps
+	return exp
+}
+
 // runExperiment reads the experiment at o.expPath, runs it through the pure
 // pkg/experiment.Runner wired to the real subprocess StepExecutor, writes
 // runs/<id>/run.json, and appends a summary to the experiment's `## Runs` log. All
@@ -76,7 +124,7 @@ func runExperiment(o runOpts) (experiment.Run, error) {
 	if err != nil {
 		return experiment.Run{}, err
 	}
-	exp, err := experiment.Parse(string(raw))
+	exp, err := resolveExperiment(string(raw))
 	if err != nil {
 		return experiment.Run{}, fmt.Errorf("%s: %w", o.expPath, err)
 	}

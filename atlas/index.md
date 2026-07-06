@@ -19,6 +19,15 @@ identical on a non-Kaggle platform?* — if yes, it lives here.
   via an injected `gitProbe`), write `record.json`, and render the knob→score `## Runs` line. Scope
   line: #3 owns the record + point-address; the trace/cache-key are #2, side-ref code capture #7/#8.
   See [experiment.md](experiment.md). [metis#3]
+- **`pkg/shape`** (the experiment-shape lift) — metis#6, the pure config-space algebra over v0's
+  untyped `with` bag. `Expand(steps, rangeSteps) → []Point` collapses a shape's reserved `$`-key
+  descriptors (`$any` set / `$oneof` bundled labeled-sum that ADDs / `$linear-range`·`$log-range`
+  grid) into concrete v0-shaped points, each carrying its **free-param path** (the swept coordinates →
+  #8 ledger key / #3 point-address). `experiment.Shape`/`Sweep` parse `type: experiment-shape` + the
+  `sweep:` block; CUE `#ExperimentShape` (with `#Experiment` = the singleton refinement, single-sourced
+  via the shared `_pipeline`); the `construct/datatype/experiment-shape.md` prototype. `metis run` on a
+  shape expands it — an all-singleton shape runs like a v0 experiment; a multi-point shape points to the
+  **sweep driver (metis#7)**. The ledger keyed off the free-param path is **metis#8**. [metis#6]
 - **`pkg/cache`** (the validating-trace policy layer) — metis#2, the step cache over `pkg/cas`
   (bytes) + `pkg/record` (key-material). Pure core shipped M1: `Kpre(rec, seed)` (ex-ante key =
   hash of step-id + uses + resolved-with + seed + sorted-upstream), `Validate(D, hasher)` (re-hash
