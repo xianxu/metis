@@ -96,7 +96,14 @@ wrapped by **thin step-executables** honoring the contract above. Hermetic via *
   - `split.py` `cv_folds(df, k, seed, stratify_col?)` — deterministic (Stratified)KFold
     fold assignment.
   - `model.py` `train`/`predict`/`cv_score` — sklearn `logreg`/`rf`, deterministic by seed;
-    `cv_score` averages per-fold validation accuracy.
+    `cv_score` averages per-fold validation accuracy. `make_model(kind, seed, params)` **applies
+    the swept hyperparams** (`logreg` C; `rf` n_estimators/max_depth); `params` threads through
+    `train`/`cv_score` (default `{}` = sklearn defaults).
+  - **Model-config contract (`parse_model_config`, metis#12):** the `with["model"]` value is EITHER
+    a kind string (`"logreg"`) OR metis#6's `$oneof` single-key bundle carrying the swept
+    hyperparams (`{"rf": {"n_estimators": 200, "max_depth": 4}}`); `parse_model_config(raw) →
+    (kind, params)` normalizes both (malformed = loud error). This is what lets a **hyperparam
+    sweep** (kbench#4) train — the `$oneof` branch reaches the estimator, not just the kind.
 - **Thin IO — `metis/io.py`:** the SINGLE Python encoding of the step contract (ARCH-DRY):
   `step_context()` (reads the `METIS_*` env), `read_with`, `exp_path` (experiment-relative),
   `upstream_path` (`$METIS_RUN_DIR/<step-id>/<file>`), `out_path`, `write_metrics`, plus
