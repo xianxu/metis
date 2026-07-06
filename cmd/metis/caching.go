@@ -171,11 +171,17 @@ func (c *cachingExecutor) isHit(step experiment.Step, entry cache.Entry) bool {
 
 // hashDByRepo groups D refs by repo root and git-blob-hashes each repo's paths in that
 // repo — the shared per-repo hasher for both the store (recordMiss) and validate (isHit)
-// sides. An empty/missing repo root (a legacy single-root entry) hashes in ""/git-fails →
-// a MISS, the safe direction.
+// sides. A ref with an empty repo root is a legacy (pre-#11) single-root entry: we reject
+// it with an error (→ MISS) rather than hashing it. NOTE: `git -C "" hash-object` does NOT
+// fail — `-C ""` is a no-op and git resolves the path against the CURRENT WORKING DIR, so
+// relying on "git fails" would make the HIT/MISS cwd-dependent. The explicit guard keeps
+// validation cwd-independent + symmetric with loadReadSet's loud rejection of legacy reads.json.
 func hashDByRepo(d []record.CodeRef) (map[string]map[string]record.Hash, error) {
 	byRepo := map[string][]string{}
 	for _, ref := range d {
+		if ref.Repo == "" {
+			return nil, fmt.Errorf("legacy read-set entry (empty repo root) — treating as MISS; metis#11 requires a repo-qualified D")
+		}
 		byRepo[ref.Repo] = append(byRepo[ref.Repo], ref.Path)
 	}
 	out := make(map[string]map[string]record.Hash, len(byRepo))

@@ -164,6 +164,77 @@ func TestSensor_RecordsFirstPartyCodeReads(t *testing.T) {
 	}
 }
 
+// The cross-repo invocation-path test metis#11 exists for (Done-when #1): trace a
+// CONSUMER-repo module that imports metis through the REAL `python -m metis.trace`
+// sensor, and assert BOTH repos land as roots in reads.json — exercising the audit-hook
+// + sys.modules snapshot + cross-repo import resolution end-to-end (not just _classify).
+func TestSensor_MultiRepo_CapturesConsumerCode(t *testing.T) {
+	if _, err := exec.LookPath("uv"); err != nil {
+		t.Skip("uv not on PATH")
+	}
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	root := repoRoot(t)
+	// A second git repo standing in for a consumer (kbench-shaped): a package whose
+	// module imports metis — the exact cross-repo topology (kbench step imports metis).
+	consumer := t.TempDir()
+	if out, err := exec.Command("git", "-C", consumer, "init").CombinedOutput(); err != nil {
+		t.Fatalf("git init consumer: %v\n%s", err, out)
+	}
+	pkg := filepath.Join(consumer, "consumerpkg")
+	if err := os.MkdirAll(pkg, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pkg, "__init__.py"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pkg, "mod.py"), []byte("import metis.io  # pulls metis code into sys.modules\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stepDir := t.TempDir()
+	cmd := exec.Command("uv", "run", "--project", root, "python", "-m", "metis.trace", "consumerpkg.mod")
+	cmd.Env = append(os.Environ(),
+		"PYTHONPATH="+consumer, // make consumerpkg importable from the consumer repo
+		"METIS_STEP_DIR="+stepDir,
+		"METIS_RUN_DIR="+filepath.Join(stepDir, "runs"),
+	)
+	_ = cmd.Run() // clean or failing, the sensor's finally writes reads.json
+
+	rs, err := loadReadSet(stepDir)
+	if err != nil {
+		t.Fatalf("sensor did not write a loadable reads.json: %v", err)
+	}
+	// Compare roots via EvalSymlinks (t.TempDir on macOS is /var → /private/var).
+	metisAbs, _ := filepath.EvalSymlinks(root)
+	consumerAbs, _ := filepath.EvalSymlinks(consumer)
+	rootFiles := func(want string) []string {
+		for repoRoot, paths := range rs.Roots {
+			if r, _ := filepath.EvalSymlinks(repoRoot); r == want {
+				return paths
+			}
+		}
+		return nil
+	}
+	// BOTH repos are roots: metis (its imported code) AND the consumer (its own module).
+	if f := rootFiles(metisAbs); len(f) == 0 {
+		t.Errorf("metis repo not a root — imported metis code missed D; roots=%v", rs.Roots)
+	}
+	consumerFiles := rootFiles(consumerAbs)
+	if len(consumerFiles) == 0 {
+		t.Fatalf("consumer repo not a root — its first-party code missed D (the metis#11 bug); roots=%v", rs.Roots)
+	}
+	found := false
+	for _, p := range consumerFiles {
+		if p == "consumerpkg/mod.py" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("consumerpkg/mod.py not captured under the consumer root; got %v", consumerFiles)
+	}
+}
+
 // The sensor's EXCLUSION filters are load-bearing: a read under METIS_RUN_DIR (a
 // step's own outputs + the upstream artifacts it reads — which change every run) or
 // a stdlib/site-packages read must NOT enter D, else at M3 every step MISSes forever.

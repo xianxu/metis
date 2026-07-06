@@ -362,3 +362,12 @@ func TestCachingExecutor_ImmutableLeafBypassesDValidation(t *testing.T) {
 		t.Error("a normal step must MISS when its D cannot re-hash clean")
 	}
 }
+
+// A legacy (pre-#11) D ref with an empty repo root must be rejected (→ MISS), NOT hashed:
+// `git -C "" hash-object` is a no-op that resolves against cwd (returns a hash), so relying
+// on "git fails" would make HIT/MISS cwd-dependent. The explicit guard keeps it sound (#11).
+func TestHashDByRepo_RejectsLegacyEmptyRepo(t *testing.T) {
+	if _, err := hashDByRepo([]record.CodeRef{{Repo: "", Path: "metis/io.py", BlobHash: "h"}}); err == nil {
+		t.Error("a D ref with an empty repo root must error (→ cwd-independent MISS), not hash against cwd")
+	}
+}
