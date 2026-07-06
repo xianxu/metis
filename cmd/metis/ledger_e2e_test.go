@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"os"
@@ -191,6 +192,50 @@ steps:
 	// And flags-first still works.
 	if err := cmdLedger([]string{"show", "--top", "1", expPath}); err != nil {
 		t.Errorf("`ledger show --top 1 <shape>` errored: %v", err)
+	}
+}
+
+// `ledger show`'s rendered table is asserted against a buffer: a header row + the rows
+// in objective-sorted order (a --sort/--dir regression would otherwise ship green).
+func TestLedgerShow_RendersSortedTable(t *testing.T) {
+	ws := t.TempDir()
+	shapePath := filepath.Join(ws, "s.md")
+	if err := os.WriteFile(shapePath, []byte("---\ntype: experiment-shape\nid: s\nseed: 1\nstatus: active\nsweep: {sampler: grid}\nsteps: []\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Hand-write a ledger with three rows of differing scores.
+	var l ledger.Ledger
+	l.Append(
+		ledger.Row{SweepSHA: "sha1", PointAddr: "a", FreeParams: map[string]any{"model": "logreg"}, Metrics: map[string]float64{"train.cv": 0.70}, Status: "ok"},
+		ledger.Row{SweepSHA: "sha1", PointAddr: "b", FreeParams: map[string]any{"model": "rf"}, Metrics: map[string]float64{"train.cv": 0.90}, Status: "ok"},
+		ledger.Row{SweepSHA: "sha1", PointAddr: "c", FreeParams: map[string]any{"model": "gbm"}, Metrics: map[string]float64{"train.cv": 0.80}, Status: "ok"},
+	)
+	csv, _ := ledger.Encode(l)
+	if err := os.WriteFile(ledgerPath(shapePath), csv, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var buf bytes.Buffer
+	if err := showLedger(shapePath, "", "train.cv", "maximize", 0, &buf); err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	if len(lines) != 4 { // header + 3 rows
+		t.Fatalf("want header + 3 rows, got %d:\n%s", len(lines), buf.String())
+	}
+	if !strings.Contains(lines[0], "sweep") || !strings.Contains(lines[0], "train.cv") {
+		t.Errorf("header row missing expected columns: %q", lines[0])
+	}
+	// maximize order: rf (0.90), gbm (0.80), logreg (0.70).
+	if !strings.Contains(lines[1], "model=rf") || !strings.Contains(lines[3], "model=logreg") {
+		t.Errorf("rows not in maximize order (rf, gbm, logreg):\n%s", buf.String())
+	}
+	// minimize flips the order.
+	buf.Reset()
+	_ = showLedger(shapePath, "", "train.cv", "minimize", 0, &buf)
+	min := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	if !strings.Contains(min[1], "model=logreg") {
+		t.Errorf("minimize should put logreg (0.70) first:\n%s", buf.String())
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -34,23 +35,28 @@ func cmdLedger(args []string) error {
 	if err := fs.Parse(flags); err != nil {
 		return err
 	}
+	return showLedger(shapePath, *sweep, *sortMetric, *direction, *top, os.Stdout)
+}
+
+// showLedger is the testable core of `ledger show`: load, filter, sort/top, render — to
+// any io.Writer (so the rendered table can be asserted against a buffer).
+func showLedger(shapePath, sweep, sortMetric, direction string, top int, out io.Writer) error {
 	led, err := loadLedger(shapePath)
 	if err != nil {
 		return err
 	}
-	led = ledger.Filter(led, *sweep)
-
+	led = ledger.Filter(led, sweep)
 	rows := led.Rows
-	if *sortMetric != "" {
-		n := *top
+	if sortMetric != "" {
+		n := top
 		if n == 0 {
 			n = len(rows)
 		}
-		rows = ledger.TopN(led, *sortMetric, *direction, n)
-	} else if *top > 0 && *top < len(rows) {
-		rows = rows[:*top]
+		rows = ledger.TopN(led, sortMetric, direction, n)
+	} else if top > 0 && top < len(rows) {
+		rows = rows[:top]
 	}
-	renderLedger(os.Stdout, rows)
+	renderLedger(out, rows)
 	return nil
 }
 
@@ -76,8 +82,9 @@ func hoistShapePath(args []string) (shapePath string, flags []string, err error)
 	return shapePath, flags, nil
 }
 
-// renderLedger prints rows as an aligned table (sweep-SHA short, free-params, metrics).
-func renderLedger(out *os.File, rows []ledger.Row) {
+// renderLedger prints rows as a table (a header row + sweep-SHA short, status,
+// free-params, metrics) to any io.Writer.
+func renderLedger(out io.Writer, rows []ledger.Row) {
 	if len(rows) == 0 {
 		fmt.Fprintln(out, "(no rows)")
 		return
@@ -93,15 +100,14 @@ func renderLedger(out *os.File, rows []ledger.Row) {
 		mCols = append(mCols, k)
 	}
 	sort.Strings(mCols)
+	fmt.Fprintln(out, strings.Join(append([]string{"sweep", "status", "free_params"}, mCols...), "  "))
 	for _, r := range rows {
-		sha := r.SweepSHA
-		if len(sha) > 8 {
-			sha = sha[:8]
-		}
-		parts := []string{sha, r.Status, freeParamTuple(r)}
+		parts := []string{short(r.SweepSHA), r.Status, freeParamTuple(r)}
 		for _, c := range mCols {
 			if v, ok := r.Metrics[c]; ok {
 				parts = append(parts, fmt.Sprintf("%s=%g", c, v))
+			} else {
+				parts = append(parts, "")
 			}
 		}
 		fmt.Fprintln(out, strings.Join(parts, "  "))
