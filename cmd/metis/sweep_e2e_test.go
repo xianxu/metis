@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/xianxu/metis/pkg/experiment"
+	"github.com/xianxu/metis/pkg/record"
 )
 
 func fixedNow() func() time.Time {
@@ -82,6 +83,23 @@ steps:
 	// Each point ran in its own content-addressed run dir.
 	if entries, _ := filepath.Glob(filepath.Join(ws, "runs", "*")); len(entries) != 2 {
 		t.Errorf("expected 2 point run dirs, got %d", len(entries))
+	}
+	// The LOAD-BEARING identity #8's ledger aggregation rests on: each manifest row's
+	// run_id must equal the point_address in that run's record.json. Asserted (not just
+	// traced) so a future normalization at either call-site can't silently desync the
+	// manifest from the records — a green suite would otherwise hide it.
+	for _, pr := range man.Points {
+		rb, err := os.ReadFile(filepath.Join(ws, "runs", pr.RunID, "record.json"))
+		if err != nil {
+			t.Fatalf("record.json for point %s: %v", pr.RunID, err)
+		}
+		var rec record.RunRecord
+		if err := json.Unmarshal(rb, &rec); err != nil {
+			t.Fatal(err)
+		}
+		if string(rec.PointAddress) != pr.RunID {
+			t.Errorf("manifest run_id %s != record.json point_address %s — the #8 handoff identity desynced", pr.RunID, rec.PointAddress)
+		}
 	}
 }
 
