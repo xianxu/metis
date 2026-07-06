@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 from sklearn.datasets import make_classification
 
-from metis.model import cv_score, make_model, predict, train
+from metis.model import cv_score, make_model, parse_model_config, predict, train
 from metis.split import cv_folds
 
 
@@ -36,6 +36,45 @@ def test_deterministic(kind):
 def test_unknown_model_rejected():
     with pytest.raises(ValueError, match="unknown model"):
         make_model("svm", seed=0)
+
+
+def test_make_model_applies_hyperparams():
+    """The swept hyperparams must reach the estimator — not be silently dropped (metis#12)."""
+    lr = make_model("logreg", seed=0, params={"C": 0.001})
+    assert lr.C == 0.001
+    rf = make_model("rf", seed=0, params={"n_estimators": 7, "max_depth": 2})
+    assert rf.n_estimators == 7
+    assert rf.max_depth == 2
+    # Defaults hold when a param is absent / params is None (backward-compat).
+    assert make_model("logreg", seed=0).C == 1.0
+    assert make_model("rf", seed=0, params={"max_depth": 3}).n_estimators == 100
+
+
+def test_hyperparams_change_the_fit():
+    """Two materially-different hyperparam settings must produce different CV scores on the
+    same data — proving the sweep isn't a sham (the params actually reach the fit)."""
+    import pandas as pd
+
+    X, y = _separable(n=120, seed=2)
+    df = pd.DataFrame(X)
+    df["target"] = y
+    folds = cv_folds(df, k=5, seed=3, stratify_col="target")
+    # An rf stump (max_depth=1, few trees) vs a deep forest → different accuracy.
+    weak = cv_score(X, y, folds, "rf", seed=3, params={"n_estimators": 1, "max_depth": 1})
+    strong = cv_score(X, y, folds, "rf", seed=3, params={"n_estimators": 300, "max_depth": None})
+    assert weak != strong
+
+
+def test_parse_model_config():
+    """with['model'] normalizes to (kind, params): a bare string OR the $oneof single-key bundle."""
+    assert parse_model_config("logreg") == ("logreg", {})
+    assert parse_model_config({"rf": {"n_estimators": 200, "max_depth": 4}}) == (
+        "rf", {"n_estimators": 200, "max_depth": 4})
+    assert parse_model_config({"logreg": {}}) == ("logreg", {})
+    assert parse_model_config({"logreg": None}) == ("logreg", {})
+    for bad in ({"a": 1, "b": 2}, 123, {}, None, ["logreg"]):
+        with pytest.raises(ValueError):
+            parse_model_config(bad)
 
 
 def test_cv_score_reasonable_and_deterministic():

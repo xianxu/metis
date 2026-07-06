@@ -7,7 +7,10 @@ cv-split step, records the CV score, and persists the model fit on all rows.
 with:
   dataset: experiment-relative path to a serialized Dataset dir   (required)
   folds:   id of the upstream cv-split step (reads its folds.json) (required)
-  model:   "logreg" | "rf"                                        (required)
+  model:   a kind string ("logreg" | "rf"), OR metis#6's $oneof    (required)
+           bundle carrying the swept hyperparams
+           ({"rf": {"n_estimators": 200, "max_depth": 4}}). Parsed by
+           metis.model.parse_model_config → (kind, params).
 Outputs: model.pkl (artifact) + metrics.json{cv_score}.
 """
 
@@ -17,7 +20,7 @@ import json
 import pickle
 
 from metis import io
-from metis.model import cv_score, train
+from metis.model import cv_score, parse_model_config, train
 
 
 def main() -> None:
@@ -28,9 +31,10 @@ def main() -> None:
         folds = json.load(f)
 
     X, y = ds.X(ds.train), ds.y(ds.train)
-    kind = w["model"]
-    score = cv_score(X, y, folds, kind, ctx.seed)
-    model = train(X, y, kind, ctx.seed)  # final model: fit on ALL training rows
+    # `model` is a kind string ("logreg") OR metis#6's $oneof bundle ({"rf": {n_estimators…}}).
+    kind, params = parse_model_config(w["model"])
+    score = cv_score(X, y, folds, kind, ctx.seed, params)
+    model = train(X, y, kind, ctx.seed, params)  # final model: fit on ALL training rows
 
     with open(io.out_path(ctx, "model.pkl"), "wb") as f:
         pickle.dump(model, f)

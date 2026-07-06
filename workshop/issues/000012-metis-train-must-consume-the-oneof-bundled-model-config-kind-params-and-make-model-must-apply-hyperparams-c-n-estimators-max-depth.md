@@ -1,12 +1,13 @@
 ---
 id: 000012
-status: working
+status: codecomplete
 deps: []
 github_issue:
 created: 2026-07-05
 updated: 2026-07-05
-estimate_hours:
+estimate_hours: 1.2
 started: 2026-07-05T23:33:31-07:00
+actual_hours: N/A
 ---
 
 # metis/train must consume the $oneof-bundled model config {kind:{params}} and make_model must apply hyperparams (C, n_estimators, max_depth)
@@ -58,17 +59,38 @@ the kbench#4 acceptance demo exists to catch.
 - Backward-compat: the existing `model: logreg` bare-string thread (titanic-baseline) still trains.
 - atlas: the model-config contract (`{kind: {params}}` ← `$oneof`) documented.
 
+Durable plan (TDD tasks + Core-concepts entities): `workshop/plans/000012-train-model-hyperparams-plan.md`. Single-pass atomic.
+
+## Estimate
+
+```estimate
+model: estimate-logic-v3.1
+familiarity: 1.0
+item: smaller-go-module      design=0.15  impl=0.25
+item: smaller-go-module      design=0.15  impl=0.25
+item: milestone-review       design=0.0   impl=0.2
+item: atlas-docs             design=0.05  impl=0.1
+design-buffer: 0.15
+total: 1.2
+```
+
+Σdesign 0.35 × 1.15 = 0.4025; Σimpl 0.80 × 1.00 = 0.80; total **1.2** (= `estimate_hours`). Two `smaller-go-module` = (make_model/train/cv_score params) + (parse_model_config + step wiring + integration test); `milestone-review` = the close boundary; `atlas-docs` = the model-config contract.
+
 ## Plan
 
-- [ ] RED: `make_model`/`train` unit test — swept hyperparams change the fitted estimator (fails today: params ignored).
-- [ ] GREEN: `make_model(kind, seed, params)` applies C / n_estimators / max_depth; thread through `train`/`cv_score`.
-- [ ] RED/GREEN: pure `parse_model_config` (string | `$oneof` dict | malformed) + wire into `metis/steps/train.py`.
-- [ ] Integration: a `$oneof`-expanded train point yields a `cv_score`; backward-compat bare-string still trains.
-- [ ] atlas: model-config contract.
+- [x] RED: `make_model`/`train` unit test — swept hyperparams change the fitted estimator (fails today: params ignored).
+- [x] GREEN: `make_model(kind, seed, params)` applies C / n_estimators / max_depth; thread through `train`/`cv_score`.
+- [x] RED/GREEN: pure `parse_model_config` (string | `$oneof` dict | malformed) + wire into `metis/steps/train.py`.
+- [x] Integration: a `$oneof`-expanded train point yields a `cv_score`; backward-compat bare-string still trains.
+- [x] atlas: model-config contract.
+
+### 2026-07-05 (implemented)
+- **DONE via TDD.** `parse_model_config(raw)` (string | `$oneof` single-key dict | malformed→ValueError); `make_model(kind, seed, params)` applies C/n_estimators/max_depth; `train`/`cv_score` thread `params`; `metis/steps/train.py` wires it (backward-compat bare string). Tests: `test_make_model_applies_hyperparams`, `test_hyperparams_change_the_fit` (regression-proofed — reverting make_model to ignore params fails it), `test_parse_model_config` (table), `test_train_step_accepts_oneof_model_config` (the exact kbench#4 input). Full python suite 31 passed; Go build+vet+test green. **Validated end-to-end:** rebuilt the metis binary and re-ran kbench#4's 42-point sweep — all points now `ok` (was: all `failed`), `train.cv_score` populates the ledger + ranks, the objective-metric warning is gone (the earlier `train.train.cv_score` hint was a red herring from all-failed runs). Unblocks kbench#4.
 
 ## Log
 
 ### 2026-07-05
+- 2026-07-05: closed — metis#12 done via TDD — metis/train consumes the $oneof model bundle + make_model applies hyperparams. parse_model_config(string | single-key $oneof dict | malformed→ValueError); make_model applies C/n_estimators/max_depth; train/cv_score thread params; metis/steps/train.py wired (backward-compat bare string). Tests: make_model-applies-hyperparams, hyperparams-change-the-fit (regression-proofed: reverting make_model to ignore params fails it), parse_model_config table, train-step-accepts-$oneof (exact kbench#4 input). 31 python passed + Go build/vet/test green. VALIDATED END-TO-END: rebuilt metis + re-ran kbench#4 42-point sweep → all points ok (was all failed), train.cv_score populates+ranks the ledger, objective-warning gone. --no-actual: sdlc actual gave a degenerate 0.13h (window = only the 2 #12-tagged commits; design+plan+TDD were not #12-anchored) AND interleaved with kbench#4 sweep-validation in one session (attributed across #4,#12) — a contaminated measurement artifact (0.11x est) that would skew calibration; excluded per the interleaved-session active-time practice.; review verdict: SHIP
 - Filed from kbench#4's composition test. The shape/sweep/ledger/features-knob all compose (the
   ledger `show` renders the free-param tuple incl. list-valued `features` + `$oneof` model paths);
   the sole blocker is `metis/train` not consuming the `$oneof` model bundle + `make_model` ignoring
