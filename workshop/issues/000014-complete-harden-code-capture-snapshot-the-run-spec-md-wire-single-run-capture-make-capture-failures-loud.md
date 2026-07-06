@@ -5,7 +5,7 @@ deps: [metis#11, metis#13]
 github_issue:
 created: 2026-07-06
 updated: 2026-07-06
-estimate_hours:
+estimate_hours: 1.79
 started: 2026-07-06T16:33:59-07:00
 ---
 
@@ -55,6 +55,23 @@ wiring + loudness.)
 - Capture failure is loud: a test asserting a no-git (or degraded) run reports the reproducibility
   gap in its output + record, not a silent success.
 - atlas: the two-hook capture (code via trace, spec via explicit hash) + the record's capture-status.
+
+Durable plan: `workshop/plans/000014-complete-harden-capture-plan.md`. Single-pass atomic.
+
+## Estimate
+
+```estimate
+model: estimate-logic-v3.1
+familiarity: 1.0
+item: smaller-go-module      design=0.2   impl=0.45
+item: smaller-go-module      design=0.2   impl=0.45
+item: milestone-review       design=0.0   impl=0.2
+item: atlas-docs             design=0.05  impl=0.15
+design-buffer: 0.15
+total: 1.79
+```
+
+Σdesign 0.45 × 1.15 = 0.5175; Σimpl 1.25 × 1.00 = 1.25; total **1.79** (= `estimate_hours`). `smaller-go-module` #1 = shared `captureRunCode` + single-run wiring + sweep delegation; #2 = the run-spec `.md` hook + loud `CaptureStatus` (record + CUE + stderr); `milestone-review` = close; `atlas-docs` = two-hook capture + capture-status.
 
 ## Plan
 

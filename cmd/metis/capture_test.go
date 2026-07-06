@@ -54,7 +54,7 @@ func TestCaptureClosure_DirtyFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	commit, refs, err := captureClosure(root, []string{"model.py"}, "srun-abc")
+	commit, refs, err := captureClosure(root, []string{"model.py"}, "refs/metis/sweeps/srun-abc")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +96,7 @@ func TestCaptureClosure_CleanIsHead(t *testing.T) {
 	}
 	gitCommitAll(t, root, "init")
 
-	commit, refs, err := captureClosure(root, []string{"model.py"}, "srun-clean")
+	commit, refs, err := captureClosure(root, []string{"model.py"}, "refs/metis/sweeps/srun-clean")
 	if err != nil {
 		t.Fatal(err)
 	}

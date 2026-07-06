@@ -95,7 +95,9 @@ func runSweep(o runOpts, sh experiment.Shape, points []shape.Point, now func() t
 			return fmt.Errorf("point %d: %w", n, err)
 		}
 		exp := shapePointToExperiment(sh, p)
-		run, runErr := runResolvedExperiment(exp, o, string(runID), now, out)
+		pointOpts := o
+		pointOpts.inSweep = true // metis#14: suppress per-point capture — the sweep captures once (below)
+		run, runErr := runResolvedExperiment(exp, pointOpts, string(runID), now, out)
 		if !isPointOutcome(run, runErr) {
 			// Not a per-point outcome (a validation never-started error, or a
 			// metis-internal persistence error like a failed writeRecordJSON) — surface
