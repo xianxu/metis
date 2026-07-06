@@ -67,6 +67,9 @@ sensor's). Options to weigh:
 
 ## Log
 
+### 2026-07-06
+- Folded into the **reproducible dirty-run capture** effort (`workshop/pensive/2026-07-06-reproducible-dirty-run-capture.md`, item 1) alongside #13 (config immutability) + #14 (complete/harden capture). This issue is the cross-repo half: without it, a consumer repo's code (e.g. kbench `features.py`) never enters the capture closure, so #14's spec+single-run capture still can't pin a kbench step's bytes.
+
 ### 2026-07-05
 - Filed from the kbench#3 plan-quality review (the plan proposed routing `titanic/features` through
   `metis.trace` for caching; the judge empirically found the read-set never captures kbench code).
