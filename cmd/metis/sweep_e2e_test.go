@@ -2,12 +2,15 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/xianxu/metis/pkg/experiment"
 )
 
 func fixedNow() func() time.Time {
@@ -265,6 +268,29 @@ steps:
 	}
 	if man := readManifest(t, ws); len(man.Points) != 3 {
 		t.Errorf("all 3 points should run despite dirty=true, got %d", len(man.Points))
+	}
+}
+
+// isPointOutcome is the sweep's continue-vs-abort classifier. Pinned directly so a
+// revert to the old `run.Started=="" && runErr!=nil` swallowing (which would treat an
+// ok-run-with-persistence-error as a recordable outcome) fails a test.
+func TestIsPointOutcome_Classification(t *testing.T) {
+	errBoom := fmt.Errorf("boom")
+	cases := []struct {
+		name string
+		run  experiment.Run
+		err  error
+		want bool // true = record + continue; false = surface (sweep-fatal)
+	}{
+		{"clean run", experiment.Run{Status: "ok", Started: "t"}, nil, true},
+		{"step failure", experiment.Run{Status: "failed", Started: "t"}, errBoom, true},
+		{"ok run with persistence error", experiment.Run{Status: "ok", Started: "t"}, errBoom, false},
+		{"never-started validation error", experiment.Run{}, errBoom, false},
+	}
+	for _, c := range cases {
+		if got := isPointOutcome(c.run, c.err); got != c.want {
+			t.Errorf("%s: isPointOutcome = %v, want %v", c.name, got, c.want)
+		}
 	}
 }
 

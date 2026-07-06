@@ -96,13 +96,11 @@ func runSweep(o runOpts, sh experiment.Shape, points []shape.Point, now func() t
 		}
 		exp := shapePointToExperiment(sh, p)
 		run, runErr := runResolvedExperiment(exp, o, string(runID), now, out)
-		// A per-point STEP failure (run.Status == "failed") is recorded and the sweep
-		// continues — the design's "one bad config can't kill the sweep." But any OTHER
-		// error (validation never-started, OR a metis-internal persistence error like a
-		// failed writeRecordJSON/assembleRecord that returns with run.Started != "") is
-		// NOT a point outcome — surface it, so a real persistence failure isn't silently
-		// recorded as `ok` and left to break #8's per-point aggregation.
-		if runErr != nil && run.Status != "failed" {
+		if !isPointOutcome(run, runErr) {
+			// Not a per-point outcome (a validation never-started error, or a
+			// metis-internal persistence error like a failed writeRecordJSON) — surface
+			// it, so a real failure isn't silently recorded as `ok` and left to break
+			// #8's per-point aggregation.
 			return fmt.Errorf("point %d (%s): %w", n, freeParamStr(p), runErr)
 		}
 		man.Points = append(man.Points, pointRun{
@@ -119,6 +117,19 @@ func runSweep(o runOpts, sh experiment.Shape, points []shape.Point, now func() t
 	}
 	fmt.Fprintf(out, "metis: sweep %s done — %d points recorded (manifest %s)\n", sh.ID, len(man.Points), shapeRunID[:12])
 	return nil
+}
+
+// isPointOutcome classifies a per-point run result: true = a legitimate point outcome
+// the sweep records and continues past (a clean run, or a STEP failure — "one bad
+// config can't kill the sweep"); false = a sweep-fatal error (a validation
+// never-started run, or a metis-internal persistence error on an otherwise-ok run)
+// that must be surfaced, not swallowed. Pure — the classification the IO loop rests on,
+// unit-tested directly so a revert to the old swallowing guard fails a test.
+func isPointOutcome(run experiment.Run, runErr error) bool {
+	if runErr == nil {
+		return true // a clean run
+	}
+	return run.Status == "failed" // a step failure is a recorded point outcome; anything else is fatal
 }
 
 // shapeRunIdentity mints the invocation identity that groups the sweep's point-runs:
