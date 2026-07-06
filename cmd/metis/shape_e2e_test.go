@@ -76,10 +76,12 @@ steps:
 	if run.Status != "ok" {
 		t.Errorf("run status = %q; want ok", run.Status)
 	}
-	// The resolved record shows the pinned singleton config (knob→score).
+	// #13: the config .md stays immutable — the resolved singleton config is captured in
+	// record.json (the run succeeded above, which proves it resolved), not written back into
+	// the experiment body.
 	body, _ := os.ReadFile(expPath)
-	if !strings.Contains(string(body), "prep.k=5") {
-		t.Errorf("## Runs should show the resolved singleton config; got:\n%s", body)
+	if strings.Contains(string(body), "## Runs") {
+		t.Errorf("run mutated the config .md (must be immutable input):\n%s", body)
 	}
 }
 

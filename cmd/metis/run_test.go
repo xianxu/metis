@@ -70,13 +70,14 @@ func TestRunExperiment_EndToEnd(t *testing.T) {
 		t.Errorf("artifacts = %v; want exactly %v", got.Artifacts, wantArtifacts)
 	}
 
-	// `## Runs` log appended to the experiment.
+	// The experiment file is IMMUTABLE input — a run must leave it byte-for-byte unchanged
+	// (#13). Run output lives in runs/<id>/{run,record}.json, never in the config.
 	updated, err := os.ReadFile(expPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(updated), "- run-001 — ok") {
-		t.Errorf("`## Runs` line not appended:\n%s", updated)
+	if string(updated) != string(b) {
+		t.Errorf("run mutated the experiment .md (must be immutable input); after:\n%s", updated)
 	}
 }
 
@@ -166,13 +167,15 @@ func TestRunExperiment_FailedStepStillWritesLedger(t *testing.T) {
 		t.Errorf("run.json wrong: %+v", got)
 	}
 
-	// `## Runs` bullet appended for the failed run.
+	// #13: a failed run is recorded in run.json/record.json (asserted above) — the config .md
+	// stays byte-for-byte immutable input (the fixture already carries a `## Runs` heading, so
+	// this asserts equality, not absence).
 	updated, err := os.ReadFile(expPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(updated), "- run-001 — failed") {
-		t.Errorf("`## Runs` failed-run line not appended:\n%s", updated)
+	if string(updated) != string(b) {
+		t.Errorf("failed run mutated the config .md (must be immutable input):\n%s", updated)
 	}
 }
 

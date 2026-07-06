@@ -6,13 +6,11 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/xianxu/metis/internal/repo"
 	"github.com/xianxu/metis/pkg/cas"
 	"github.com/xianxu/metis/pkg/experiment"
-	"github.com/xianxu/metis/pkg/record"
 	"github.com/xianxu/metis/pkg/shape"
 )
 
@@ -181,9 +179,10 @@ func runResolvedExperiment(exp experiment.Experiment, o runOpts, runID string, n
 	if err := writeRecordJSON(runDir, rec); err != nil {
 		return run, err
 	}
-	if err := appendRunLog(o.expPath, rec); err != nil {
-		return run, err
-	}
+	// The experiment .md is IMMUTABLE input (#13): a run writes its output to
+	// runs/<id>/{run,record}.json (+ the .ledger.csv sidecar for sweeps), NEVER to the
+	// config file — so a committed config is a stable content-hash. The human "recent
+	// runs / top-N" view is on-demand via `metis ledger show` over the sidecar.
 	if runErr != nil {
 		return run, runErr
 	}
@@ -200,22 +199,4 @@ func writeRunJSON(runDir string, run experiment.Run) error {
 		return err
 	}
 	return os.WriteFile(filepath.Join(runDir, "run.json"), append(b, '\n'), 0o644)
-}
-
-// appendRunLog appends a one-line knob→score summary (from the provenance record) to
-// the experiment's `## Runs` section (creating the heading if absent). The
-// human-readable bullet; the machine records are runs/<id>/{run,record}.json.
-func appendRunLog(expPath string, rec record.RunRecord) error {
-	raw, err := os.ReadFile(expPath)
-	if err != nil {
-		return err
-	}
-	body := string(raw)
-	if !strings.HasSuffix(body, "\n") {
-		body += "\n"
-	}
-	if !strings.Contains(body, "## Runs") {
-		body += "\n## Runs\n"
-	}
-	return os.WriteFile(expPath, []byte(body+"- "+recordSummary(rec)+"\n"), 0o644)
 }

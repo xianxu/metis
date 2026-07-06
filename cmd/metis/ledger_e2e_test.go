@@ -79,10 +79,11 @@ body here
 	if !strings.Contains(lines[0], "fp.train.model") || !strings.Contains(lines[0], "metric.train.echoed") {
 		t.Errorf("ledger header missing expected columns: %s", lines[0])
 	}
-	// The body top-N summary regenerated between the markers.
+	// #13: the sweep must NOT mutate the config .md — the top-N view is `metis ledger show`
+	// over the sidecar, not a summary written into the experiment body (immutable input).
 	body, _ := os.ReadFile(expPath)
-	if !strings.Contains(string(body), "metis:ledger:begin") || !strings.Contains(string(body), "## Top runs") {
-		t.Errorf("body summary not regenerated:\n%s", body)
+	if strings.Contains(string(body), "metis:ledger") || strings.Contains(string(body), "## Top runs") {
+		t.Errorf("sweep mutated the config .md (must be immutable input):\n%s", body)
 	}
 	// Idempotent: a second identical sweep dedups (still 2 rows).
 	if err := runSweepViaRun(t, expPath, root, runOpts{cache: false}); err != nil {
