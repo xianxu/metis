@@ -179,3 +179,9 @@ Appended per AGENTS.md §1 (plan diverged mid-stream during the REWORK + close-r
   (round-4) rather than dropping them through `TopN` (which stays the body-summary leaderboard).
 - **`Deps` (uv.lock digest) re-scoped post-v1** (change-code plan-judge) — M3 backfills `CodeManifest.D`
   + `Commit`; the uv.lock digest is separable Python-env provenance.
+- **Dirty-run ledger fidelity is HEAD-based (tracked: metis#10)** — the row `SweepSHA` and the
+  `promoted_from` back-link derive from `rec.RepoSHAs` (HEAD), **not** the captured
+  `refs/metis/sweeps/*` commit in `CodeManifest.Commit`. So recovering a *dirty* row routes through
+  `CodeManifest.Commit` (not the recorded sweep-SHA), and two dirty iterations at one HEAD share a
+  point-address → the second dedups away. Inside v1's documented single-checkout/clean-iteration
+  scope (Done-when repo-identity note); the durable per-row commit fidelity is metis#10.

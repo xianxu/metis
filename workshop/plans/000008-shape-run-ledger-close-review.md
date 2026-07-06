@@ -451,3 +451,76 @@ Pure-core coverage is excellent and pins real properties (dedup, ragged round-tr
 - A `## Revisions` note that the sweep **writes but does not commit** the `.ledger.csv` sidecar (the Design's "committed batched (per-sweep)" is unwired; the sidecar is a reconstructable idempotent view, so nothing irreplaceable is at risk) — or scope a follow-up if auto-commit is still wanted.
 - A `## Revisions` note on the dirty-run residual: the ledger `SweepSHA`/back-link are HEAD-based, so dirty-run recovery requires `CodeManifest.Commit`, not the recorded sweep-SHA (metis#10).
 - No Core-concepts-table cross-check applies — the plan uses per-milestone prose; all named entities (`pkg/ledger`, `cmd/metis/ledger.go`/`ledger_cmd.go`/`capture.go`, `CodeManifest.D`/`Commit`) exist at their stated paths and are verified above.
+
+---
+
+## Re-review — 2026-07-05T22:08:09-07:00 (SHIP)
+
+| field | value |
+|-------|-------|
+| issue | 8 — Shape run-ledger: CSV sidecar keyed by free-param tuple + promotion to an experiment |
+| repo | metis |
+| issue file | workshop/issues/000008-shape-run-ledger.md |
+| boundary | whole-issue close |
+| milestone | — |
+| window | 23730c010966d0bb8924c82bb7b16b58166e4575..HEAD |
+| command | sdlc close --issue 8 |
+| reviewer | claude |
+| timestamp | 2026-07-05T22:08:09-07:00 |
+| verdict | SHIP |
+
+## Review
+
+Ignoring 6 permissions.allow entries from .claude/settings.json: this workspace has not been trusted. Run Claude Code interactively here once and accept the trust dialog, or set projects["/Users/xianxu/workspace/metis"].hasTrustDialogAccepted: true in /Users/xianxu/.claude.json.
+I have everything I need. I independently verified the build/vet/full suite are green, traced the promote/capture/ledger paths against the issue's Spec/Plan/Done-when, and confirmed the sweep→capture glob matches the real runner layout. Here is my fresh review.
+
+```verdict
+verdict: SHIP
+confidence: high
+```
+
+**Summary.** metis#8's whole-issue close is genuinely done, and I confirmed it independently rather than trusting the (six) prior review rounds baked into the diff. Every Done-when item is delivered and pinned by a test that would catch its regression: sweeps append idempotent rows + regen the body top-N (`TestLedger_SweepWritesSidecarAndSummary`); `metis ledger show` sorts/filters with the direction defaulted from the shape's objective (`TestLedgerShow_RendersSortedTable`, `TestLedgerShow_DefaultsDirFromObjective`, `TestCLI_ArgOrderIndependent`); `metis promote` really commits and round-trips the row's point-address **and** metrics (`TestPromote_ActuallyCommits`, `TestLedger_PromoteBestRoundTrips`, `TestPromote_WarnsOnCrossCodeVersion`); immutability-by-snapshot is a real property test; and M3's side-ref capture provably commits recoverable bytes (`TestCaptureClosure_DirtyFile`/`_CleanIsHead`, `TestCaptureSweepCode_BackfillsCodeManifest`). `pkg/ledger` is a textbook pure core (ARCH-PURE holds cleanly), `promotedExperiment` reconstructs by re-derivation (ARCH-DRY), and the two blocking Criticals from the earlier REWORK (promote never committed; documented arg order errored) are verified-fixed in code, not just in commit messages. `go build`/`go vet`/`go test ./...` are all green. The docs gate is satisfied (atlas + datatype doc updated in-range; no README exists), and the plan carries a `## Revisions` section reconciling the delivered promote semantics per AGENTS.md §1. Nothing I found rises to Critical or to a blocking Important — what remains is a set of genuinely-Minor edge cases plus a documented dirty-run residual (metis#10). The work has converged; ship it.
+
+### 1. Strengths
+
+- **`pkg/ledger` is a clean pure core, unit-tested without IO** (`pkg/ledger/ledger.go`): append-only dedup-by-point-address with lazy `seen` rebuild, ragged union columns over stdlib `encoding/csv`, objective-driven `Best`/`TopN`/`SortAll` with a stable strict tie-break. Struct-literal tests, zero disk.
+- **The prior Criticals are fixed with side-effect-asserting tests.** `TestPromote_ActuallyCommits` drives the real `cmdPromote`/`gitCLICommitter` (`ledger_cmd.go:146`,`:158`) against a real repo and asserts the *committed file* + a `promote` log entry — exactly the `lessons.md` "don't let the success print outrun the action" rule. `TestCLI_ArgOrderIndependent` drives the real `cmdLedger` entrypoint in the documented `<shape>`-first order via `hoistShapePath`.
+- **The sweep→capture wiring is sound.** I checked `sweepClosure`'s glob (`capture.go:107`) against the real runner layout — `runDir/<stepID>/reads.json` (`exec.go:39`, `caching.go:81`,`:209`) — and it matches; non-dir entries (`record.json`/`run.json`) are harmlessly skipped by `loadReadSet`. The throwaway `GIT_INDEX_FILE` tree build leaves the real index/worktree untouched.
+- **`promotedExperiment` reconstructs by re-derivation** (`cmd/metis/ledger.go:66`) reusing `shape.Expand`+`shapePointToExperiment`, and `freeParamsEqual` compares via canonical JSON so int-vs-float64 CSV drift can't break the match — the round-trip asserts the exact reproduced `PointAddress` + metrics, and `TestLedger_PriorRowsReproduceAfterSpaceEdit` pins immutability against a real space edit.
+- **The cross-version guard is format-consistent.** Both `row.SweepSHA` (`sweepSHAOf`→`RepoSHAs`) and `probeRepo`'s HEAD derive from the same git source, so the `row.SweepSHA != headSHA` compare at `ledger_cmd.go:215` can't false-fire on a short-vs-full mismatch; `TestPromote_WarnsOnCrossCodeVersion` exercises it with real git.
+
+### 2. Critical findings
+
+None. The blocking Criticals from the earlier REWORK are verified fixed in code and pinned by new tests; the full suite is green.
+
+### 3. Important findings
+
+None blocking. The two residuals worth naming are both documented-scope and low-risk (kept out of Critical/Important deliberately):
+- **Dirty-run ledger fidelity (documented metis#10).** The ledger row `SweepSHA` and the `promoted_from` back-link are HEAD-based (`sweepSHAOf` reads `rec.RepoSHAs`, not the captured `refs/metis/sweeps/*` commit in `CodeManifest.Commit`). So recovering a *dirty* row needs `CodeManifest.Commit`, not the recorded sweep-SHA; and two dirty iterations at one HEAD share a point-address, so the second dedups away. This is inside the v1 scope the Done-when carves out (repo-identity note, lines 163-167) and the mechanism is documented in the issue Log (line 216). Non-blocking; see the plan-revision note in §7.
+- **The sweep→capture path is proven piecewise, never end-to-end together.** The ledger e2es use `cache:false` (no `reads.json` → empty closure → `captureSweepCode` no-ops), and `capture_e2e_test.go` calls `captureSweepCode` directly. I verified the glob path is correct, so the risk is low — but a single real-sweep-with-dirty-closure e2e would close the gap.
+
+### 4. Minor findings
+
+- `gitCLICommitter.Commit` runs `git commit -m` with **no pathspec** (`ledger_cmd.go:159`) — only the `git add`'d file is normally staged, so this bites only with pre-staged unrelated state, but `-- <file>` would harden the "single self-contained" promise.
+- Re-promoting the same `--name` with byte-identical content → `git add` stages nothing, `git commit` errors "nothing to commit" *after* `<name>.md` was rewritten (`runPromote`). Treat the no-op as success.
+- **ARCH-DRY:** `ledgerParseCell` (`ledger_cmd.go:326`) duplicates `pkg/ledger.parseCell` **minus** the list/map JSON branch, so a `--point` selector can't match a list-/`$oneof`-valued free-param (and comma-splitting can't express one). Export/reuse one parser; note the scalar-only `--point` limit.
+- `hoistShapePath` grabs any `.md`-suffixed non-flag token, including a flag *value* (`ledger_cmd.go:78`) — `--name winner.md` would misparse. Documented usage uses bare names, so it works.
+- A numeric-looking **string** free-param (e.g. `model: "300"`) drifts to `int(300)` on CSV round-trip (`cell`/`parseCell`), so its `promoted_from`/`--point` match via JSON would differ (`"300"` vs `300`). Rare, but a real edge in the codec's value model.
+- `backfillCodeManifest` sets **every** step's `Code.D` to the whole-sweep closure union (`capture.go`) — coarser than the per-step `reads.json` on disk; fine for recovery, imprecise as per-step provenance (matches plan wording).
+- `captureClosure` hardcodes mode `100644` in `update-index --cacheinfo` (`capture.go:70`) — an executable closure file loses its exec bit on `git checkout` recovery. Edge (Python is 0644).
+- `sweepSHAOf` returns an arbitrary map entry when `RepoSHAs` has >1 repo (`cmd/metis/ledger.go:54`) — non-deterministic beyond v1's single repo; acknowledged in the comment.
+- The `.ledger.csv` sidecar is **written but never committed** by the sweep (`writeSweepLedger`), vs the Design's "committed batched (per-sweep)." The sidecar is a reconstructable idempotent view, so nothing irreplaceable is at risk — already recorded in the plan's `## Revisions`.
+
+### 5. Test coverage notes
+
+Pure-core coverage is excellent and pins real properties (dedup, ragged round-trip incl. list free-params, `Best`/`TopN`/`SortAll`, immutability-by-snapshot). The rework closed the big gaps: real commit path, documented arg order, point-address **and** metrics reproduction, `--sort` keeps failed rows, cross-version warning, default-`--dir`-from-objective. Remaining thin spots (all Minor): (a) the sweep→capture wiring never fires end-to-end with an active capture (each half tested; glob verified correct); (b) the best-effort capture branch (`sweep.go:124` warn-and-continue) has no failure-injection test; (c) the dirty-run dedup/back-link behavior isn't pinned by a test (it's a documented metis#10 characteristic).
+
+### 6. Architectural notes for upcoming work
+
+- **ARCH-DRY — pass.** `freeParamTuple` delegates to `freeParamTupleMap`; `promotedExperiment` reuses `Expand`+`shapePointToExperiment`; the codec reuses stdlib. Only the `ledgerParseCell`/`parseCell` split remains (Minor).
+- **ARCH-PURE — pass.** `pkg/ledger` and the pure helpers (`rowsFromManifest`, `namespacedMetrics`, `promotedExperiment`, `freeParamsEqual`) are deterministic and unit-tested without IO; `writeSweepLedger`/`loadLedger`/`captureClosure`/`runPromote` are the thin injected shell. The ledger stays a pure aggregation *view* over #3's records, not a competing store — the plan's "no `## Runs` retrofit" scope held.
+- **ARCH-PURPOSE — pass, one scoped residual.** Shadow-sweep on "the ledger is the single navigable/promotable source": `show`, `promote`, and the body top-N all derive from the sidecar, and capture populates `CodeManifest.D`/`Commit`. The residual is dirty-run fidelity (§3): the L1 navigation layer is HEAD-based while the recoverable commit lives in `CodeManifest.Commit` — documented as metis#10, so a deliberate deferral, not an under-delivery. Forward (kbench#4): capture's `root` is the *code* repo while promote commits into the *experiment* repo — coincident under v1's single-repo assumption, but needs an explicit decision once they diverge.
+
+### 7. Plan revision recommendations
+
+The plan already carries a `## Revisions` entry (added round-6) reconciling commit-at-HEAD+warn, the richer `promoted_from` format, the sidecar-not-auto-committed gap, and the sort semantics — I confirmed it matches the delivered code. One small addition would complete it: a `## Revisions` (or issue `## Log`) line making the **dirty-run dedup/back-link residual** explicit — the ledger `SweepSHA`/back-link are HEAD-based, so a dirty row's recovery routes through `CodeManifest.Commit` (not the recorded sweep-SHA), and two dirty iterations at one HEAD collapse to one row (metis#10). This is note-only and non-blocking. No Core-concepts-table cross-check applies — the plan uses per-milestone prose; all named entities (`pkg/ledger`, `cmd/metis/ledger.go`/`ledger_cmd.go`/`capture.go`, `CodeManifest.D`/`Commit`) exist at their stated paths and are verified above.
