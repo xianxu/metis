@@ -58,7 +58,7 @@ func gitOut(dir string, args ...string) (string, error) {
 // Git provenance degrades gracefully: if the probe fails (e.g. running outside a git
 // repo) the run does NOT fail — it warns and records no repo-SHAs (the design's "v1:
 // warn" for a non-reproducible run). The point-address still mints from config+seed.
-func assembleRecord(git gitProbe, out io.Writer, dir, runDir string, run experiment.Run, steps []experiment.StepRun) (record.RunRecord, error) {
+func assembleRecord(git gitProbe, out io.Writer, dir, runDir string, exp experiment.Experiment, run experiment.Run, steps []experiment.StepRun) (record.RunRecord, error) {
 	if git == nil {
 		git = gitCLI{}
 	}
@@ -75,7 +75,7 @@ func assembleRecord(git gitProbe, out io.Writer, dir, runDir string, run experim
 		}
 		outputHashes[sr.Step.ID] = record.OutputHash(fhs)
 	}
-	return buildRecord(run, steps, outputHashes, name, sha, dirty)
+	return buildRecord(run, exp.Steps, steps, outputHashes, name, sha, dirty)
 }
 
 // buildRecord assembles the RunRecord from the executed steps, their per-step output
@@ -85,11 +85,20 @@ func assembleRecord(git gitProbe, out io.Writer, dir, runDir string, run experim
 // (commit + dirty); Upstream is populated below (each step's needs → the upstream
 // output-hashes, sorted — the metis#2 K_pre wiring). Code.D / Deps stay empty in the
 // record — that provenance population is deferred to metis#8 (git-side-ref durability).
-func buildRecord(run experiment.Run, steps []experiment.StepRun, outputHashes map[string]record.Hash, repoName, sha string, dirty bool) (record.RunRecord, error) {
-	resolvedWith := make(map[string]map[string]any, len(steps))
+func buildRecord(run experiment.Run, allSteps []experiment.Step, steps []experiment.StepRun, outputHashes map[string]record.Hash, repoName, sha string, dirty bool) (record.RunRecord, error) {
+	// The point-address is minted from the point's FULL INTENDED config (allSteps) —
+	// the point's stable repro identity, the SAME whether the run succeeded or a step
+	// failed mid-run. Runner.Run returns only the pre-failure StepRuns, so deriving
+	// resolvedWith from the executed `steps` would make a failed point's address
+	// PARTIAL (empty if the first step failed) → it would diverge from the sweep's
+	// full-config run-id AND collide across distinct failed configs (breaking #8's
+	// per-point aggregation). Per-step records still come from the executed steps.
+	resolvedWith := make(map[string]map[string]any, len(allSteps))
+	for _, s := range allSteps {
+		resolvedWith[s.ID] = s.With
+	}
 	stepRecs := make([]record.StepRecord, 0, len(steps))
 	for _, sr := range steps {
-		resolvedWith[sr.Step.ID] = sr.Step.With
 		// Populate Upstream (the metis#3 slot #2 fills): this step's needs → the
 		// upstream steps' output-hashes (sorted — shared upstreamHashes helper, so this
 		// and cachingExecutor.kpre derive K_pre's upstream term identically).
@@ -103,10 +112,9 @@ func buildRecord(run experiment.Run, steps []experiment.StepRun, outputHashes ma
 			Metrics:    sr.Result.Metrics,
 		})
 	}
-	repoSHAs := map[string]string{}
-	if repoName != "" {
-		repoSHAs[repoName] = sha
-	}
+	// Single-source the {repoName: sha} construction (repoSHAsOf) so the sweep driver's
+	// pre-computed point-address runID can't drift from this record's internal address.
+	repoSHAs := repoSHAsOf(repoName, sha)
 	addr, err := record.PointAddress(resolvedWith, repoSHAs, run.Seed)
 	if err != nil {
 		return record.RunRecord{}, err

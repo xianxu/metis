@@ -18,16 +18,26 @@ func sampleSteps() []experiment.StepRun {
 	}
 }
 
+// stepsOf extracts the full step list from executed StepRuns (the intended config the
+// point-address mints from). In these tests every step ran, so allSteps == the runs.
+func stepsOf(runs []experiment.StepRun) []experiment.Step {
+	out := make([]experiment.Step, len(runs))
+	for i, sr := range runs {
+		out[i] = sr.Step
+	}
+	return out
+}
+
 func TestBuildRecord_MintsStablePointAddress(t *testing.T) {
 	run := experiment.Run{ID: "r1", Experiment: "exp", Seed: 7, Started: "t0", Finished: "t1", Status: "ok"}
 	steps := sampleSteps()
 	oh := map[string]record.Hash{"prep": "h1", "train": "h2"}
 
-	rec1, err := buildRecord(run, steps, oh, "metis", "sha1", false)
+	rec1, err := buildRecord(run, stepsOf(steps), steps, oh, "metis", "sha1", false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	rec2, err := buildRecord(run, steps, oh, "metis", "sha1", false)
+	rec2, err := buildRecord(run, stepsOf(steps), steps, oh, "metis", "sha1", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,7 +45,7 @@ func TestBuildRecord_MintsStablePointAddress(t *testing.T) {
 		t.Errorf("point-address must be stable across identical runs: %q vs %q", rec1.PointAddress, rec2.PointAddress)
 	}
 	// Sensitive to the repo SHA (a determinant).
-	rec3, _ := buildRecord(run, steps, oh, "metis", "sha2", false)
+	rec3, _ := buildRecord(run, stepsOf(steps), steps, oh, "metis", "sha2", false)
 	if rec3.PointAddress == rec1.PointAddress {
 		t.Error("point-address must change with the repo SHA")
 	}
@@ -69,7 +79,7 @@ func TestBuildRecord_PopulatesUpstreamFromNeeds(t *testing.T) {
 		{Step: experiment.Step{ID: "train", Uses: "metis/train", Needs: []string{"prep"}}},
 	}
 	oh := map[string]record.Hash{"prep": "hp", "train": "ht"}
-	rec, err := buildRecord(run, steps, oh, "metis", "sha", false)
+	rec, err := buildRecord(run, stepsOf(steps), steps, oh, "metis", "sha", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +95,7 @@ func TestBuildRecord_PopulatesUpstreamFromNeeds(t *testing.T) {
 func TestBuildRecord_PropagatesConfigError(t *testing.T) {
 	run := experiment.Run{ID: "r", Seed: 0}
 	steps := []experiment.StepRun{{Step: experiment.Step{ID: "s", With: map[string]any{"lr": math.Inf(1)}}}}
-	if _, err := buildRecord(run, steps, nil, "m", "sha", false); err == nil {
+	if _, err := buildRecord(run, stepsOf(steps), steps, nil, "m", "sha", false); err == nil {
 		t.Error("buildRecord must propagate the point-address error on non-finite config")
 	}
 }
