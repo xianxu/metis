@@ -174,7 +174,7 @@ func runResolvedExperiment(exp experiment.Experiment, o runOpts, runID string, n
 	// Assemble + persist the provenance record (metis#3): repo provenance, per-step
 	// output hashes, and the minted point-address. A config that can't be
 	// canonicalized (e.g. a non-finite value) surfaces here as a run error.
-	rec, err := assembleRecord(o.git, out, expDir, runDir, run, steps)
+	rec, err := assembleRecord(o.git, out, expDir, runDir, exp, run, steps)
 	if err != nil {
 		return run, err
 	}

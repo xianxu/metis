@@ -167,6 +167,75 @@ steps:
 	if man.Points[1].Status != "ok" {
 		t.Errorf("point 1 (fail:false) status = %q; want ok — the sweep must run it AFTER the failure", man.Points[1].Status)
 	}
+	// The run_id == record.point_address identity must hold for a FAILED point too —
+	// Runner.Run returns only pre-failure StepRuns, so the record must mint its
+	// point-address from the point's FULL intended config (not the partial executed
+	// config), else a failed point's address diverges from its run-id and collides
+	// across distinct failed configs (breaking #8's aggregation).
+	failed := man.Points[0]
+	rb, err := os.ReadFile(filepath.Join(ws, "runs", failed.RunID, "record.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rec record.RunRecord
+	if err := json.Unmarshal(rb, &rec); err != nil {
+		t.Fatal(err)
+	}
+	if string(rec.PointAddress) != failed.RunID {
+		t.Errorf("failed point: record point_address %s != run_id %s (partial-config drift)", rec.PointAddress, failed.RunID)
+	}
+}
+
+// Two distinct FAILED configs (both failing at their only step) must mint DISTINCT
+// point-addresses — a regression guard for the partial-config collision (deriving the
+// address from executed steps made both empty → same hash). Uses distinct extra knobs
+// alongside fail:true so only the full-config address distinguishes them.
+func TestSweep_DistinctFailedConfigsHaveDistinctAddresses(t *testing.T) {
+	root := repoRoot(t)
+	ws := t.TempDir()
+	expPath := writeShape(t, ws, `---
+type: experiment-shape
+id: failcollide
+seed: 5
+status: active
+sweep: {sampler: grid, objective: {metric: echoed, direction: maximize}}
+steps:
+  - id: train
+    uses: test/echo
+    with: {fail: true, model: {$any: [xx, yy]}}
+---
+`)
+	if err := runSweepViaRun(t, expPath, root, runOpts{cache: false}); err != nil {
+		t.Fatal(err)
+	}
+	man := readManifest(t, ws)
+	if len(man.Points) != 2 {
+		t.Fatalf("both failed points recorded, got %d", len(man.Points))
+	}
+	// The collision was in record.point_address (minted from PARTIAL executed config —
+	// empty for a first-step failure → same hash for both). The manifest run_id is
+	// minted from full p.With so it never collided; read the RECORDS to catch it.
+	addrs := map[string]bool{}
+	for _, pr := range man.Points {
+		if pr.Status != "failed" {
+			t.Errorf("point %s should be failed, got %q", pr.RunID, pr.Status)
+		}
+		rb, err := os.ReadFile(filepath.Join(ws, "runs", pr.RunID, "record.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var rec record.RunRecord
+		if err := json.Unmarshal(rb, &rec); err != nil {
+			t.Fatal(err)
+		}
+		if string(rec.PointAddress) != pr.RunID {
+			t.Errorf("failed point: record point_address %s != run_id %s", rec.PointAddress, pr.RunID)
+		}
+		addrs[string(rec.PointAddress)] = true
+	}
+	if len(addrs) != 2 {
+		t.Errorf("two distinct failed configs must have distinct record point_addresses, got %d unique: %v", len(addrs), addrs)
+	}
 }
 
 // --max-points caps a sweep before exhaustion.
