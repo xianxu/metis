@@ -5,7 +5,7 @@ deps: []
 github_issue:
 created: 2026-07-06
 updated: 2026-07-06
-estimate_hours:
+estimate_hours: 0.9
 started: 2026-07-06T15:07:51-07:00
 ---
 
@@ -35,10 +35,10 @@ reproducibility model (git rev / blob of the committed config = its identity) un
 - Run output already has durable homes — keep them: `runs/<id>/record.json` (per-run provenance) +
   the `.ledger.csv` sidecar (sweeps). Nothing is lost by not touching the `.md`.
 - **The human "recent runs / top-N" browse view** (which the body summary provided) is preserved
-  **outside** the config — decide at plan time between: (a) on-demand only via `metis ledger show`
-  (already exists); (b) a **generated summary sidecar** (e.g. `<shape>.runs.md`, gitignored or
-  clearly-marked generated). Leaning (a)+(b): the ledger sidecar is the record, a generated summary
-  file for eyeballing, the committed `.md` stays pure input.
+  **outside** the config via **on-demand `metis ledger show`** (already exists) over the `.ledger.csv`
+  sidecar — **no new generated sidecar** (decision settled in the plan; keeps #13 a pure removal).
+  Single-run *aggregated* history (the dropped `## Runs` bullets) defers to the metis#8
+  "experiment = 1-config ledger" unification; per-single-run provenance stays in `record.json`.
 - The `<!-- metis:ledger:begin/end -->` markers + `## Runs` heading are no longer written into the
   experiment body.
 
@@ -52,13 +52,29 @@ reproducibility model (git rev / blob of the committed config = its identity) un
 - Existing tests that asserted the `## Runs` append / body-summary regen are updated to the new home.
 - atlas: the run-output-vs-config-input boundary.
 
+Durable plan: `workshop/plans/000013-config-immutability-plan.md`. Single-pass atomic.
+
+## Estimate
+
+```estimate
+model: estimate-logic-v3.1
+familiarity: 1.0
+item: smaller-go-module      design=0.15  impl=0.35
+item: milestone-review       design=0.0   impl=0.2
+item: atlas-docs             design=0.05  impl=0.1
+design-buffer: 0.15
+total: 0.9
+```
+
+Σdesign 0.20 × 1.15 = 0.23; Σimpl 0.65 × 1.00 = 0.65; total **0.9** (= `estimate_hours`). `smaller-go-module` = remove the two `.md` writes (appendRunLog + regenLedgerSummary's body regen) + reconcile tests; `milestone-review` = close boundary; `atlas-docs` = the config-immutability boundary.
+
 ## Plan
 
-- [ ] RED: a test asserting `krun` leaves the experiment `.md` unchanged (fails today — it's appended to).
-- [ ] Remove `appendRunLog`'s `.md` write + the in-body ledger-summary regen from the run/sweep path.
-- [ ] Re-home the human summary (decision: `metis ledger show` + a generated sidecar).
-- [ ] Update the e2e (drop the experiment-file snapshot/restore) + any `## Runs`-asserting tests.
-- [ ] atlas: config-immutability boundary.
+- [x] RED: a test asserting `krun` leaves the experiment `.md` unchanged (fails today — it's appended to).
+- [x] Remove `appendRunLog`'s `.md` write + the in-body ledger-summary regen from the run/sweep path.
+- [x] Human sweep view = on-demand `metis ledger show` (no new sidecar); single-run history deferred (metis#8 unification).
+- [x] Update any `## Runs`/body-summary-asserting metis tests; the kbench e2e snapshot/restore drop is a kbench follow-up.
+- [x] atlas: config-immutability boundary.
 
 ## Log
 

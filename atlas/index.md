@@ -16,7 +16,8 @@ identical on a non-Kaggle platform?* — if yes, it lives here.
   `StepRecord` (emitted as `runs/<id>/record.json`, CUE-drift-guarded), `PointAddress` (the L0
   run-identity: config+repo-SHAs+seed content-address), `OutputHash` (multi-file output reduction).
   `Runner.Run` returns per-step `[]StepRun` so `cmd/metis` can assemble the record (git provenance
-  via an injected `gitProbe`), write `record.json`, and render the knob→score `## Runs` line. Scope
+  via an injected `gitProbe`) and write `record.json` (the experiment `.md` is immutable input, #13 —
+  no `## Runs` write-back). Scope
   line: #3 owns the record + point-address; the trace/cache-key are #2, side-ref code capture #7/#8.
   See [experiment.md](experiment.md). [metis#3]
 - **`pkg/ledger`** (the shape-run ledger) — metis#8, the L1 tracking layer: a pure append-only,
