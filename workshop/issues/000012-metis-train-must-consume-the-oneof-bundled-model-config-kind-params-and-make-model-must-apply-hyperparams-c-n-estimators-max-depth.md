@@ -1,12 +1,13 @@
 ---
 id: 000012
-status: working
+status: codecomplete
 deps: []
 github_issue:
 created: 2026-07-05
 updated: 2026-07-05
 estimate_hours: 1.2
 started: 2026-07-05T23:33:31-07:00
+actual_hours: N/A
 ---
 
 # metis/train must consume the $oneof-bundled model config {kind:{params}} and make_model must apply hyperparams (C, n_estimators, max_depth)
@@ -89,6 +90,7 @@ total: 1.2
 ## Log
 
 ### 2026-07-05
+- 2026-07-05: closed — metis#12 done via TDD — metis/train consumes the $oneof model bundle + make_model applies hyperparams. parse_model_config(string | single-key $oneof dict | malformed→ValueError); make_model applies C/n_estimators/max_depth; train/cv_score thread params; metis/steps/train.py wired (backward-compat bare string). Tests: make_model-applies-hyperparams, hyperparams-change-the-fit (regression-proofed: reverting make_model to ignore params fails it), parse_model_config table, train-step-accepts-$oneof (exact kbench#4 input). 31 python passed + Go build/vet/test green. VALIDATED END-TO-END: rebuilt metis + re-ran kbench#4 42-point sweep → all points ok (was all failed), train.cv_score populates+ranks the ledger, objective-warning gone. --no-actual: sdlc actual gave a degenerate 0.13h (window = only the 2 #12-tagged commits; design+plan+TDD were not #12-anchored) AND interleaved with kbench#4 sweep-validation in one session (attributed across #4,#12) — a contaminated measurement artifact (0.11x est) that would skew calibration; excluded per the interleaved-session active-time practice.; review verdict: SHIP
 - Filed from kbench#4's composition test. The shape/sweep/ledger/features-knob all compose (the
   ledger `show` renders the free-param tuple incl. list-valued `features` + `$oneof` model paths);
   the sole blocker is `metis/train` not consuming the `$oneof` model bundle + `make_model` ignoring
