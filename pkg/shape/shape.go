@@ -255,10 +255,14 @@ func concat(a, b []FreeParam) []FreeParam {
 	return append(append(out, a...), b...)
 }
 
+// cloneWith DEEP-clones a point's per-step with map so no two points ever alias the
+// same inner map for ANY step — not just the terminal one. (A shallow outer copy left
+// every earlier step's `with` shared across the siblings a later step's expansion
+// spawns; #7 overlaying a resolved path in place would then mutate every sibling.)
 func cloneWith(in map[string]map[string]any) map[string]map[string]any {
 	out := make(map[string]map[string]any, len(in))
 	for k, v := range in {
-		out[k] = v
+		out[k] = deepCloneMap(v)
 	}
 	return out
 }

@@ -237,12 +237,17 @@ func TestExpand_EmptyDescriptorErrors(t *testing.T) {
 }
 
 // Sibling points must NOT alias each other's inner `with` maps — mutating one point's
-// resolved value (as #7's overlay will) must not bleed into a sibling.
+// resolved value (as #7's overlay will) must not bleed into a sibling. Uses a ≥2-step
+// shape and mutates a NON-TERMINAL (earlier) step, the case a single-step guard misses:
+// the terminal step's expansion spawns the siblings, so they must not share the earlier
+// step's map.
 func TestExpand_PointsDoNotAliasInnerMaps(t *testing.T) {
-	steps := []experiment.Step{step("train", map[string]any{
-		"model": map[string]any{"$any": []any{"logreg", "rf"}},
-		"opts":  map[string]any{"verbose": true}, // a shared nested map in the shape
-	})}
+	steps := []experiment.Step{
+		step("prep", map[string]any{"dataset": "titanic"}), // fixed, non-terminal
+		step("train", map[string]any{ // the $any here spawns the siblings
+			"model": map[string]any{"$any": []any{"logreg", "rf"}},
+		}, "prep"),
+	}
 	points, err := Expand(steps, 0)
 	if err != nil {
 		t.Fatal(err)
@@ -250,10 +255,11 @@ func TestExpand_PointsDoNotAliasInnerMaps(t *testing.T) {
 	if len(points) != 2 {
 		t.Fatalf("want 2 points, got %d", len(points))
 	}
-	// Mutate point 0's nested opts map in place (what #7's overlay would do).
-	points[0].With["train"]["opts"].(map[string]any)["verbose"] = false
-	if points[1].With["train"]["opts"].(map[string]any)["verbose"] != true {
-		t.Error("sibling point aliased the same inner map — mutation bled across points")
+	// Mutate point 0's EARLIER-step `with` in place (what #7's overlay of a resolved
+	// dataflow path would do) — must not bleed into the sibling.
+	points[0].With["prep"]["dataset"] = "MUTATED"
+	if points[1].With["prep"]["dataset"] != "titanic" {
+		t.Error("sibling aliased an earlier step's `with` map — cross-step mutation bled across points")
 	}
 }
 

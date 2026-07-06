@@ -62,3 +62,68 @@ Strong where it counts: the 36-point keystone, `$oneof` bundling/ADD, `$linear-r
 ### 7. Plan revision recommendations
 - Append a `## Revisions` entry to `workshop/plans/000006-experiment-shape-plan.md` (or an issue `## Log` line) recording that **merge-gate structural validation of `experiment-shape` files is deferred** — it depends on the ariadne `vocabulary` binary gaining an `experiment-shape` noun — so the plan/close doesn't imply enforcement parity with `experiment`. Assign it to #7 (when shape instances start being committed).
 - Optionally note the **closedness-regression test** and the **fixture-`Expand`-assertion** as cheap hardening follow-ups so the "single-source, conformance-tested" Done-when claim is backed by a *negative* test, not just positive drift guards.
+
+---
+
+## Re-review — 2026-07-05T17:22:48-07:00 (FIX-THEN-SHIP)
+
+| field | value |
+|-------|-------|
+| issue | 6 — experiment-shape datatype: lift the experiment config schema into a config-space (Space[T]) |
+| repo | metis |
+| issue file | workshop/issues/000006-experiment-shape-datatype.md |
+| boundary | whole-issue close |
+| milestone | — |
+| window | 492bf8ae4972792f9de51b869e824c616fca3574..HEAD |
+| command | sdlc close --issue 6 |
+| reviewer | claude |
+| timestamp | 2026-07-05T17:22:48-07:00 |
+| verdict | FIX-THEN-SHIP |
+
+## Review
+
+Ignoring 6 permissions.allow entries from .claude/settings.json: this workspace has not been trusted. Run Claude Code interactively here once and accept the trust dialog, or set projects["/Users/xianxu/workspace/metis"].hasTrustDialogAccepted: true in /Users/xianxu/.claude.json.
+I have everything I need. I verified the build/vet/tests are green, independently confirmed CUE closedness by direct `cue vet` (not on the implementor's word), confirmed the parse dispatch is centralized and the plain-experiment path is byte-faithful, and — the key discovery — **empirically confirmed a cross-step inner-map aliasing bug** that the deep-clone comment claims to prevent but only half-delivers, with a guard test that structurally cannot catch it. Here is the review.
+
+```verdict
+verdict: FIX-THEN-SHIP
+confidence: high
+```
+
+**Summary.** The heart of metis#6 — `pkg/shape.Expand` and the `$`-descriptor config-space algebra — is correct, well-tested, and exemplary ARCH-PURE work, and the M2 CUE single-source refactor genuinely delivers what it claims: I confirmed by direct `cue vet` that the `_pipeline` embed keeps `#Experiment` closed (rejects a stray `sweep`) *and* `#ExperimentShape` closed (rejects unknown fields, requires `sweep`). Build/vet/full suite are green, plain-experiment behavior is preserved (`resolveExperiment` returns the parsed `Experiment` verbatim for non-shapes; validation still deferred to `Runner.Run`), and the prior close-review's two Importants were both addressed in-diff (the closedness negative test `TestCUE_ClosednessPreservedBySingleSource` now exists; the 21-point fixture expansion is now asserted). What keeps it from a clean SHIP: a **latent cross-step aliasing bug** — `Expand`'s deep-clone only protects the *current* step, so sibling points spawned by a later step share the *same* inner `with` map for every earlier step, and the guard test that claims to cover this uses a single step so it can't. It ships no wrong behavior today (the singleton path reads read-only; multi-point is refused), but it will bite metis#7 the instant it overlays a resolved value onto a non-terminal step — exactly the scenario the deep-clone comment says is prevented. Cheap to fix; non-blocking at the gate.
+
+### 1. Strengths
+- **ARCH-PURE, textbook.** `pkg/shape/shape.go` imports only `fmt`/`math`/`sort`/`strings`/`experiment`; `ParseShape`/`ValidateShape` are pure `string→value`; `resolveExperiment` (`cmd/metis/run.go:65`) is a pure `raw→Experiment` and the only IO (`os.ReadFile`) stays up in `runExperiment`. Tests run with zero IO.
+- **CUE single-source is real and closed — verified, not on faith.** `_pipeline` (`experiment.cue:37`) embeds into both defs; I ran `cue vet` against hand-built docs and confirmed `#Experiment` rejects a stray `sweep` ("field not allowed"), `#ExperimentShape` rejects `bogus`, and a shape missing `sweep` fails. ARCH-DRY done right, and better than the plan's proposed `#Experiment: #ExperimentShape & {…}` (which would have inherited the required `sweep`).
+- **The keystone test pins real logic.** `TestExpand_TitanicSweep36Points` asserts `4 × [3+6] = 36` *and* that every `train.model` is a single-key bundle — the exact `$oneof`-ADDs-not-multiplies invariant; a flat-product regression fails it loudly.
+- **Prior close-review Importants closed in-diff.** `TestCUE_ClosednessPreservedBySingleSource` + `TestShapeFixture_ExpandsTo21Points` are exactly the negative-closedness and fixture-expansion tests the earlier review asked for.
+- **Fails loud on malformed shapes** (empty `$any`/`$oneof`, mixed `$`+plain keys, unknown `$`-key, non-numeric bounds, non-positive `$log-range`) — right default for an authoring surface, and covered.
+- **Parse dispatch centralized.** The only production parse path (`run.go:125`) goes through `resolveExperiment`; `experiment.Parse` survives only as the pure primitive (tests) — no orphan second dispatch.
+
+### 2. Critical findings
+None. (No shipped code path currently produces incorrect output — the finding below is latent.)
+
+### 3. Important findings
+
+- **Cross-step inner-map aliasing — the deep-clone is only half-delivered, and its guard test can't catch the miss (`pkg/shape/shape.go:80-81`).** `cloneWith` (`:258`) shallow-copies the outer `map[stepID]→with` map; `deepCloneMap(w)` at `:81` only deep-clones the *current* step. So all sibling points spawned from one base by a later step's expansion **share the same inner `with` map object for every earlier step**. I confirmed empirically with a 2-step shape (`split` fixed → `train` `$any` over 2 models): `points[0].With["split"]["dataset"] = "MUTATED"` bled into `points[1]`. On the real titanic fixture, the 7 `train`-siblings under each `features` value all alias the same `adapt` and `split` maps. The code comment at `:77-79` explicitly claims this is prevented so "#7 overlaying a resolved path in place [won't] silently mutate every sibling" — but it's only true for the *terminal* step. Worse, the guard `TestExpand_PointsDoNotAliasInnerMaps` uses a **single step**, so it structurally cannot exercise cross-step sharing → false confidence. Latent today (singleton path at `run.go:98` only *reads* `p.With[s.ID]`; multi-point is refused), but it's a correctness landmine for metis#7's overlay. *Fix (one line):* make `cloneWith` deep — `out[k] = deepCloneMap(v)` — (or deep-clone the whole assembled `np.With`); then extend the guard test to a **≥2-step** shape that mutates a **non-terminal** step's `with`. Fix before #7 consumes `Point.With`.
+
+- **Merge-gate enforcement not extended to `experiment-shape` (ARCH-PURPOSE shadow-sweep) — already logged, confirming the deferral is honest.** `scripts/merge-checks.d/experiment-validate.sh`'s frontmatter probe is anchored `^type:[[:space:]]*experiment[[:space:]]*$`, which I confirmed does **not** match `type: experiment-shape`; and `vocabulary validate-instance --type experiment-shape` has no such noun in the ariadne binary. So committed shape *instances* would get no gate-time structural validation. **No current impact** (there are zero committed `type: experiment-shape` instances; the prototype is `type: type`, testdata is skipped), and the issue `## Log` (line 237) already records this as a #7 follow-up with the ariadne vocabulary-noun dependency named. I'm satisfied the deferral is complete and honest — flagging only so the close verdict doesn't imply enforcement parity with `experiment`.
+
+### 4. Minor findings
+- `ValidateShape` (`pkg/experiment/shape.go:55`) doesn't require `objective.metric` when an `objective` block is present, but CUE `#ExperimentShape` marks `metric: string` required within `objective?` — a small Go/CUE asymmetry. Low impact (objective is forward-looking for #7/#8); could tighten Go to require `metric` when an objective is non-empty.
+- `atlas/experiment.md` got no `experiment-shape`/`pkg/shape` cross-link (only `atlas/index.md` was updated). The index bullet is adequate; a one-line cross-link from `experiment.md` would aid discoverability.
+- `shapePointToExperiment` (`run.go:98`) sets `s.With = p.With[s.ID]`, which is a non-nil empty map for a step that declared no `with` (the original `Parse` left it nil). Immaterial for the singleton run (no source to be byte-faithful to); noting for completeness.
+
+### 5. Test coverage notes
+Strong where it counts: the 36-point keystone, `$oneof` bundling/ADD, `$linear-range` **and** `$log-range` (incl. the non-positive-bounds guard), `range_steps` default, empty/malformed-descriptor errors, the closedness negative test, the 21-point fixture, and both e2e paths (singleton-runs-like-v0, multi-point-refused with injected fake git/clock). The one real gap is the **aliasing guard**: it exercises a single step only and therefore gives false confidence on the exact invariant it names (Important #1). Add a ≥2-step non-terminal-mutation case alongside the fix.
+
+### 6. Architectural notes for upcoming work
+- **ARCH-DRY: pass.** `_pipeline` single-sources the CUE field set (both defs verified closed); Go `Shape` embeds `Experiment` and reuses `Validate`/`frontmatter.Split`; parse dispatch centralized. No duplication.
+- **ARCH-PURE: pass.** Pure core + thin IO seam is textbook; #7's sweep loop should keep driving `Expand` as a pure library and confine execution to `cmd/metis`.
+- **ARCH-PURPOSE: pass with the one logged shadow-sweep gap** (merge-gate consumer, deferred to #7 with a valid external dependency). Every Done-when item is delivered and the single-source is *enforced* (closedness verified), so the experiment consumer derives rather than restates.
+- **Before #7 overlays points:** the `Point.With`-is-independent-per-point contract is what makes in-place overlay safe — but per Important #1 it is **not yet true across steps**. Land that fix (and its ≥2-step guard) as the first thing #7 depends on.
+- **Freeze the free-param path grammar.** The dotted-path form (`train.model`, `train.model.rf.n_estimators`) becomes #8's ledger key + feeds #3's point-address; note the label-inclusive path (`model.rf.n_estimators`, not flat `n_estimators`) — #8 must expect that shape.
+
+### 7. Plan revision recommendations
+- No plan-vs-code contradiction requiring a `## Revisions` entry: the Core-concepts entities all exist at their stated paths, PURE/INTEGRATION classification holds, and the two milestone claims are delivered.
+- Optionally add a one-line `## Log` note that the **`Point.With` cross-step independence** invariant (the deep-clone contract) was found incompletely delivered at close and is fixed as prerequisite hardening for #7 — so the "no sibling aliasing" claim in the M2 Log/atlas is backed by a test that actually covers the multi-step case.
