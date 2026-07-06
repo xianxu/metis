@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	"github.com/xianxu/metis/pkg/cas"
@@ -157,58 +156,8 @@ func writeRecordJSON(runDir string, rec record.RunRecord) error {
 	return os.WriteFile(filepath.Join(runDir, "record.json"), append(b, '\n'), 0o644)
 }
 
-// recordSummary renders the one-line knob→score `## Runs` entry the record makes
-// possible: the resolved config knobs beside the metrics, so the log reads as
-// knob→score rather than an opaque metric line. (The full free-param *table* is
-// metis#8's ledger; this is the per-run line.)
-func recordSummary(rec record.RunRecord) string {
-	s := fmt.Sprintf("%s — %s — %s", rec.RunID, rec.Status, rec.Finished)
-	if knobs := formatKnobs(rec); knobs != "" {
-		s += " — knobs: " + knobs
-	}
-	metrics := map[string]float64{}
-	for _, st := range rec.Steps {
-		for k, v := range st.Metrics {
-			metrics[k] = v // flat merge across steps, matching the run ledger
-		}
-	}
-	if m := formatMetrics(metrics); m != "" {
-		s += " — metrics: " + m
-	}
-	return s
-}
-
-// formatKnobs renders each step's resolved config as `stepID.key=value`, steps in
-// topo order, keys sorted — the "knobs" half of the knob→score line.
-func formatKnobs(rec record.RunRecord) string {
-	var parts []string
-	for _, st := range rec.Steps {
-		keys := make([]string, 0, len(st.With))
-		for k := range st.With {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		for _, k := range keys {
-			parts = append(parts, fmt.Sprintf("%s.%s=%v", st.StepID, k, st.With[k]))
-		}
-	}
-	return strings.Join(parts, " ")
-}
-
-// formatMetrics renders a flat metric map as `key=value` pairs, sorted — extracted
-// from the old runSummary so the record renderer reuses one formatter (ARCH-DRY).
-func formatMetrics(m map[string]float64) string {
-	if len(m) == 0 {
-		return ""
-	}
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	parts := make([]string, len(keys))
-	for i, k := range keys {
-		parts[i] = fmt.Sprintf("%s=%g", k, m[k])
-	}
-	return strings.Join(parts, " ")
-}
+// (recordSummary/formatKnobs/formatMetrics were the `## Runs` knob→score renderers —
+// deleted with #13, which stopped writing run output into the experiment .md. The per-run
+// provenance lives structured in record.json; the human free-param view is the ledger's
+// `metis ledger show`. Reintroduce a per-run renderer here if metis#8's "experiment =
+// 1-config ledger" unification wants one.)

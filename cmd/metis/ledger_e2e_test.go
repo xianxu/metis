@@ -46,8 +46,9 @@ func mustRecord(t *testing.T, path string) record.RunRecord {
 }
 
 // A sweep writes the shape's ledger sidecar (one row per point, namespaced metrics) and
-// regenerates the body top-N summary.
-func TestLedger_SweepWritesSidecarAndSummary(t *testing.T) {
+// leaves the experiment .md untouched (#13 — the top-N view is `metis ledger show`, not a
+// body summary).
+func TestLedger_SweepWritesSidecarNotBody(t *testing.T) {
 	root := repoRoot(t)
 	ws := t.TempDir()
 	expPath := writeShape(t, ws, `---

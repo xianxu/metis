@@ -16,9 +16,9 @@ import (
 // TestRunExperiment_EndToEnd exercises the REAL subprocess executor: it runs the
 // run-echo fixture (two test/echo steps) through cmd/metis, which spawns the
 // process-level fake step (testdata/steps/test/echo) via os/exec, and asserts the
-// ledger is written (runs/<id>/run.json) and the `## Runs` log is appended. The
-// fixture is copied into a temp dir first so the run artifacts and the ## Runs
-// append never touch the committed testdata/.
+// run record is written (runs/<id>/run.json) and the experiment .md is left immutable
+// (#13). The fixture is copied into a temp dir first so the run artifacts never touch
+// the committed testdata/.
 func TestRunExperiment_EndToEnd(t *testing.T) {
 	root := repoRoot(t)
 	src := filepath.Join(root, "testdata", "experiment", "run-echo.md")
@@ -210,7 +210,8 @@ func TestRunExperiment_RejectsInvalidAtRunTime(t *testing.T) {
 	if !strings.Contains(err.Error(), "cycle") {
 		t.Errorf("error = %q; want it to mention the cycle", err)
 	}
-	// No ledger written and the source untouched (no ## Runs bullet appended).
+	// A rejected run writes no runs/ dir and leaves the config .md untouched (#13 — the
+	// config is immutable input in every case, rejected or not).
 	if _, statErr := os.Stat(filepath.Join(dir, "runs")); statErr == nil {
 		t.Error("a runs/ dir was created for a rejected experiment; want none")
 	}
@@ -218,7 +219,7 @@ func TestRunExperiment_RejectsInvalidAtRunTime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(after), "- run-001") {
-		t.Errorf("a ## Runs line was appended for a rejected experiment:\n%s", after)
+	if string(after) != string(b) {
+		t.Errorf("a rejected experiment's config .md was mutated (must be immutable input):\n%s", after)
 	}
 }

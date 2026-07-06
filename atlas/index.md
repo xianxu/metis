@@ -26,7 +26,8 @@ identical on a non-Kaggle platform?* — if yes, it lives here.
   `Best`/`TopN`, and `Filter`. It is an *aggregation view* over #3's per-run records, not a second run
   store. The driver (`cmd/metis/ledger.go`): after a sweep, `rowsFromManifest` (pure) turns #7's
   manifest + the per-point `record.json`s (namespaced per-step metrics — the collision fix) into rows,
-  appended to `<shape>.ledger.csv` (idempotent) with the shape body's top-N summary regenerated.
+  appended to `<shape>.ledger.csv` (idempotent); the shape `.md` is immutable input (#13) — the
+  human top-N view is on-demand `metis ledger show`, not a summary written into the body.
   **`metis ledger show <shape> [--sweep|--sort|--top]`** renders sorted/filtered views. **`metis
   promote <shape> (--best|--point 'k=v') --name X`** reconstructs the winning point as an all-singleton
   experiment (pure `promotedExperiment` — re-expands the shape + matches by free-params, reusing

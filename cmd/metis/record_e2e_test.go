@@ -30,7 +30,7 @@ func (f fakeGitProbe) Probe(string) (string, string, bool, error) {
 // TestRunExperiment_WritesProvenanceRecord is the metis#3 M2 e2e: a `metis run`
 // through the no-uv test/echo fake steps writes runs/<id>/record.json that conforms
 // to #RunRecord, carries the minted point-address + repo provenance + per-step
-// output hashes, and appends a knob→score line to ## Runs. It also confirms two
+// output hashes, and keeps the experiment .md immutable (#13 — provenance is in record.json). It also confirms two
 // identical runs mint the SAME point-address (the repro-identity guarantee). No uv,
 // so it runs in a bare checkout.
 func TestRunExperiment_WritesProvenanceRecord(t *testing.T) {

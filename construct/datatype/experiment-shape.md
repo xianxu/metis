@@ -67,7 +67,8 @@ A plain map `{a: …, b: …}` is a **product** (counts multiply). So
 ## Body
 
 Freeform: the sweep's hypothesis + notes. The structured run-ledger (per-point rows keyed by the
-free-param tuple) is metis#8; a shape's body carries a top-N summary + a pointer to the ledger.
+free-param tuple, `<shape>.ledger.csv`) is metis#8; the shape's body is **immutable input** (#13) —
+browse the top-N via on-demand `metis ledger show`, not a summary written into the body.
 
 ## Distinct from siblings
 

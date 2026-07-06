@@ -73,9 +73,9 @@ func shapePointToExperiment(sh experiment.Shape, p shape.Point) experiment.Exper
 }
 
 // runExperiment reads the experiment at o.expPath, runs it through the pure
-// pkg/experiment.Runner wired to the real subprocess StepExecutor, writes
-// runs/<id>/run.json, and appends a summary to the experiment's `## Runs` log. All
-// side effects (read, subprocess, write) live here; the ordering/validation logic
+// pkg/experiment.Runner wired to the real subprocess StepExecutor, and writes
+// runs/<id>/{run,record}.json. The experiment `.md` is immutable input (#13) — never
+// written back. All side effects (read, subprocess, write) live here; the ordering/validation logic
 // stays in pkg/experiment. Returns the assembled Run and the run error (if any),
 // after the ledger is written — so a failed run is still recorded.
 func runExperiment(o runOpts) (experiment.Run, error) {
@@ -124,9 +124,10 @@ func defaultRunID(runID string, now func() time.Time) string {
 }
 
 // runResolvedExperiment runs one already-resolved experiment (a single point) under
-// runID, through the cached runner, and writes its run.json + provenance record +
-// ## Runs line. The shared per-point runner both the 1-point path and the sweep loop
-// (metis#7) call — so the run/cache/record wiring lives in ONE place (ARCH-DRY).
+// runID, through the cached runner, and writes its run.json + provenance record (the
+// experiment `.md` is immutable input — not written back, #13). The shared per-point runner
+// both the 1-point path and the sweep loop (metis#7) call — so the run/cache/record wiring
+// lives in ONE place (ARCH-DRY).
 func runResolvedExperiment(exp experiment.Experiment, o runOpts, runID string, now func() time.Time, out io.Writer) (experiment.Run, error) {
 	baseDir := filepath.Dir(o.expPath)
 	// Absolutize at the runner boundary: execStep injects runDir/stepDir/expDir into
@@ -159,7 +160,7 @@ func runResolvedExperiment(exp experiment.Experiment, o runOpts, runID string, n
 	// step executes, so a semantically-invalid experiment (dangling needs, bad
 	// uses, a cycle) is rejected here — closing the SHAPE-only gap M1 left. Such a
 	// rejection never started a run (run.Started is empty), so surface the error
-	// without writing a bogus ledger or touching the ## Runs log.
+	// without writing a bogus record.
 	if run.Started == "" {
 		return run, runErr
 	}

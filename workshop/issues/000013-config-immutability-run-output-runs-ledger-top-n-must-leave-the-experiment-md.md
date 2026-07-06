@@ -1,12 +1,13 @@
 ---
 id: 000013
-status: working
+status: codecomplete
 deps: []
 github_issue:
 created: 2026-07-06
 updated: 2026-07-06
 estimate_hours: 0.9
 started: 2026-07-06T15:07:51-07:00
+actual_hours: 0.41
 ---
 
 # Config immutability — run output (## Runs / ledger top-N) must leave the experiment .md
@@ -79,6 +80,7 @@ total: 0.9
 ## Log
 
 ### 2026-07-06
+- 2026-07-06: closed — Config immutability done: a metis run no longer mutates the experiment .md. Removed appendRunLog (single-run ## Runs write) + regenLedgerSummary body top-N regen (sweep); kept the useful objective-metric-missing warning (warnIfObjectiveMissing). Run output stays in runs/<id>/{run,record}.json + the .ledger.csv sidecar; human top-N view is on-demand `metis ledger show`. Inverted 5 tests that asserted the old .md mutation into config-immutability guards (byte-identical where the run-fail fixture carries its own ## Runs heading). go build+vet+test ./... green. Atlas reconciled (4 stale ## Runs-mutation refs across experiment.md + index.md). Single-run aggregated history deferred to the metis#8 1-config-ledger unification (per-run provenance stays in record.json). Prereq for #14 (capture the run-spec) now satisfied.; review verdict: FIX-THEN-SHIP
 - Filed from the reproducible-dirty-run design pass (pensive). Prerequisite for #14 (capture the
   run-spec). The config `.md` becomes immutable input; run output stays in record.json + the ledger
   sidecar; the browse view moves to `metis ledger show` / a generated sidecar.

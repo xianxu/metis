@@ -13,6 +13,8 @@ steps:
 One `test/echo` step told via `with.fail` to exit non-zero. Structurally and
 semantically valid (it runs), so it reaches execution and fails there —
 exercising the branch where `metis run` still writes `runs/<id>/run.json` with
-status `failed` and appends a `## Runs` line, then returns an error.
+status `failed`, then returns an error. The `## Runs` heading below is a
+deliberate adversarial leftover: #13 makes the config immutable input, so the
+run must NOT append under it (the test asserts the file is byte-unchanged).
 
 ## Runs
