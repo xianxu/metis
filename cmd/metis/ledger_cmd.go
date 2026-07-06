@@ -1,0 +1,260 @@
+package main
+
+import (
+	"encoding/json"
+	"flag"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"strconv"
+	"strings"
+
+	"github.com/xianxu/metis/pkg/experiment"
+	"github.com/xianxu/metis/pkg/ledger"
+)
+
+// cmdLedger handles `metis ledger show <shape.md> [--sweep SHA] [--sort metric] [--top N]`
+// — renders the shape's append-only ledger sidecar as a sorted/filtered VIEW (the CSV
+// stays append-order; sorting is never a storage concern).
+func cmdLedger(args []string) error {
+	if len(args) == 0 || args[0] != "show" {
+		return fmt.Errorf("usage: metis ledger show <shape.md> [--sweep SHA] [--sort metric] [--top N]")
+	}
+	fs := flag.NewFlagSet("ledger show", flag.ContinueOnError)
+	sweep := fs.String("sweep", "", "filter to one sweep-SHA (code-version)")
+	sortMetric := fs.String("sort", "", "sort by this namespaced metric (e.g. train.cv_score)")
+	direction := fs.String("dir", "maximize", "sort direction: maximize | minimize")
+	top := fs.Int("top", 0, "show only the top N (0 = all)")
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	rest := fs.Args()
+	if len(rest) != 1 {
+		return fmt.Errorf("ledger show: want one <shape.md>, got %d", len(rest))
+	}
+	led, err := loadLedger(rest[0])
+	if err != nil {
+		return err
+	}
+	led = ledger.Filter(led, *sweep)
+
+	rows := led.Rows
+	if *sortMetric != "" {
+		n := *top
+		if n == 0 {
+			n = len(rows)
+		}
+		rows = ledger.TopN(led, *sortMetric, *direction, n)
+	} else if *top > 0 && *top < len(rows) {
+		rows = rows[:*top]
+	}
+	renderLedger(os.Stdout, rows)
+	return nil
+}
+
+// renderLedger prints rows as an aligned table (sweep-SHA short, free-params, metrics).
+func renderLedger(out *os.File, rows []ledger.Row) {
+	if len(rows) == 0 {
+		fmt.Fprintln(out, "(no rows)")
+		return
+	}
+	metricCols := map[string]bool{}
+	for _, r := range rows {
+		for k := range r.Metrics {
+			metricCols[k] = true
+		}
+	}
+	mCols := make([]string, 0, len(metricCols))
+	for k := range metricCols {
+		mCols = append(mCols, k)
+	}
+	sort.Strings(mCols)
+	for _, r := range rows {
+		sha := r.SweepSHA
+		if len(sha) > 8 {
+			sha = sha[:8]
+		}
+		parts := []string{sha, r.Status, freeParamTuple(r)}
+		for _, c := range mCols {
+			if v, ok := r.Metrics[c]; ok {
+				parts = append(parts, fmt.Sprintf("%s=%g", c, v))
+			}
+		}
+		fmt.Fprintln(out, strings.Join(parts, "  "))
+	}
+}
+
+// cmdPromote handles `metis promote <shape.md> (--best | --point 'k=v,...') [--sweep SHA]
+// --name X` — selects a ledger row, reconstructs its all-singleton experiment, writes
+// <name>.md with a back-link, and commits it at the code SHA (warns if dirty).
+func cmdPromote(args []string) error {
+	fs := flag.NewFlagSet("promote", flag.ContinueOnError)
+	best := fs.Bool("best", false, "promote the whole-ledger champion by the shape's objective")
+	point := fs.String("point", "", "promote the row matching these free-params (e.g. 'train.model=rf')")
+	sweep := fs.String("sweep", "", "restrict selection to one sweep-SHA")
+	name := fs.String("name", "", "output experiment name (writes <name>.md)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	rest := fs.Args()
+	if len(rest) != 1 || *name == "" || (!*best && *point == "") {
+		return fmt.Errorf("usage: metis promote <shape.md> (--best | --point 'k=v,..') [--sweep SHA] --name X")
+	}
+	return runPromote(promoteOpts{
+		shapePath: rest[0], best: *best, point: *point, sweep: *sweep, name: *name,
+		out: os.Stdout, git: gitCLI{},
+	})
+}
+
+type promoteOpts struct {
+	shapePath string
+	best      bool
+	point     string
+	sweep     string
+	name      string
+	out       *os.File
+	git       gitProbe
+	commit    gitCommitter // injected for tests; nil → real git
+}
+
+// gitCommitter commits a file at the current SHA (injected so promote is testable
+// without a real repo when needed; the real impl shells git).
+type gitCommitter interface {
+	Add(dir, path string) error
+	Commit(dir, msg string) error
+}
+
+func runPromote(o promoteOpts) error {
+	raw, err := os.ReadFile(o.shapePath)
+	if err != nil {
+		return err
+	}
+	sh, err := experiment.ParseShape(string(raw))
+	if err != nil {
+		return err
+	}
+	led, err := loadLedger(o.shapePath)
+	if err != nil {
+		return err
+	}
+	led = ledger.Filter(led, o.sweep)
+
+	var freeParams map[string]any
+	if o.best {
+		row, ok := ledger.Best(led, sh.Sweep.Objective.Metric, sh.Sweep.Objective.Direction)
+		if !ok {
+			return fmt.Errorf("promote --best: no qualifying row (objective %q)", sh.Sweep.Objective.Metric)
+		}
+		freeParams = row.FreeParams
+	} else {
+		freeParams = parsePointSelector(o.point)
+	}
+
+	exp, err := promotedExperiment(sh, freeParams)
+	if err != nil {
+		return err
+	}
+	exp.ID = o.name // the promoted experiment's id matches its <name>.md filename (the experiment convention)
+	doc := renderPromoted(exp, sh.ID, freeParams)
+	outPath := filepath.Join(filepath.Dir(o.shapePath), o.name+".md")
+	if err := os.WriteFile(outPath, []byte(doc), 0o644); err != nil {
+		return err
+	}
+
+	// Commit the promoted experiment at the code SHA — a self-contained reproducible
+	// commit. Warn if the repo is dirty (a promoted winner should be commit-nameable;
+	// metis#8 M3's side-ref capture makes even a dirty run's SHA real).
+	dir := filepath.Dir(o.shapePath)
+	if _, _, dirty := probeRepo(o.git, dir); dirty {
+		fmt.Fprintf(o.out, "metis: warning: repo is dirty — the promoted %s is committed against a dirty tree\n", o.name)
+	}
+	if o.commit != nil {
+		if err := o.commit.Add(dir, filepath.Base(outPath)); err != nil {
+			return err
+		}
+		if err := o.commit.Commit(dir, "metis promote: "+o.name); err != nil {
+			return err
+		}
+	}
+	fmt.Fprintf(o.out, "metis: promoted %s → %s\n", freeParamTupleMap(freeParams), outPath)
+	return nil
+}
+
+// parsePointSelector parses `k=v,k2=v2` into a free-param map (values typed via the
+// same round-trip as the CSV, so a selector matches a decoded row).
+func parsePointSelector(s string) map[string]any {
+	m := map[string]any{}
+	for _, kv := range strings.Split(s, ",") {
+		kv = strings.TrimSpace(kv)
+		if i := strings.Index(kv, "="); i > 0 {
+			m[strings.TrimSpace(kv[:i])] = ledgerParseCell(strings.TrimSpace(kv[i+1:]))
+		}
+	}
+	return m
+}
+
+// renderPromoted writes the all-singleton experiment markdown with a back-link.
+func renderPromoted(exp experiment.Experiment, fromShape string, fp map[string]any) string {
+	var b strings.Builder
+	b.WriteString("---\n")
+	fmt.Fprintf(&b, "type: experiment\nid: %s\n", exp.ID)
+	if exp.Competition != "" {
+		fmt.Fprintf(&b, "competition: %s\n", exp.Competition)
+	}
+	fmt.Fprintf(&b, "seed: %d\nstatus: active\n", exp.Seed)
+	fmt.Fprintf(&b, "promoted_from: %s %s\n", fromShape, freeParamTupleMap(fp))
+	b.WriteString("steps:\n")
+	for _, s := range exp.Steps {
+		fmt.Fprintf(&b, "  - id: %s\n    uses: %s\n", s.ID, s.Uses)
+		if len(s.Needs) > 0 {
+			fmt.Fprintf(&b, "    needs: [%s]\n", strings.Join(s.Needs, ", "))
+		}
+		wb, _ := yamlInline(s.With)
+		fmt.Fprintf(&b, "    with: %s\n", wb)
+	}
+	b.WriteString("---\n\n# " + exp.ID + "\n\nPromoted from the `" + fromShape + "` sweep.\n")
+	return b.String()
+}
+
+// freeParamTupleMap renders a {path: value} free-param map as `(k=v, …)`, keys sorted.
+func freeParamTupleMap(m map[string]any) string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, len(keys))
+	for i, k := range keys {
+		parts[i] = fmt.Sprintf("%s=%v", k, m[k])
+	}
+	return "(" + strings.Join(parts, ", ") + ")"
+}
+
+// ledgerParseCell types a selector value the same way the CSV codec does, so a
+// `--point 'k=v'` selector matches a decoded row's free-param value.
+func ledgerParseCell(s string) any {
+	switch s {
+	case "true":
+		return true
+	case "false":
+		return false
+	}
+	if i, err := strconv.Atoi(s); err == nil {
+		return i
+	}
+	if f, err := strconv.ParseFloat(s, 64); err == nil {
+		return f
+	}
+	return s
+}
+
+// yamlInline renders a `with` map as an inline YAML mapping (JSON is valid YAML flow
+// syntax, so the promoted experiment re-parses cleanly).
+func yamlInline(m map[string]any) (string, error) {
+	if len(m) == 0 {
+		return "{}", nil
+	}
+	b, err := json.Marshal(m)
+	return string(b), err
+}

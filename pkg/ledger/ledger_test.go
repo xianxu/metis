@@ -76,6 +76,45 @@ func TestCSV_RaggedRoundTrip(t *testing.T) {
 	}
 }
 
+// List-valued free-params (kbench#4 sweeps `features: [[], [title], [title,family]]`)
+// must round-trip as LISTS, not collapse to an unparseable string.
+func TestCSV_ListFreeParamsRoundTrip(t *testing.T) {
+	var l Ledger
+	l.Append(row("s", "a", map[string]any{"features": []any{"title", "family"}}, nil, "ok"))
+	b, err := Encode(l)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := Decode(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	feat, ok := got.Rows[0].FreeParams["features"].([]any)
+	if !ok {
+		t.Fatalf("features must round-trip as a list, got %T: %v", got.Rows[0].FreeParams["features"], got.Rows[0].FreeParams["features"])
+	}
+	if len(feat) != 2 || feat[0] != "title" || feat[1] != "family" {
+		t.Errorf("list free-param corrupted on round-trip: %v", feat)
+	}
+	// Empty-list feature (the v0 baseline anchor) round-trips too.
+	var l2 Ledger
+	l2.Append(row("s", "b", map[string]any{"features": []any{}}, nil, "ok"))
+	b2, _ := Encode(l2)
+	g2, _ := Decode(b2)
+	if f, ok := g2.Rows[0].FreeParams["features"].([]any); !ok || len(f) != 0 {
+		t.Errorf("empty-list feature must round-trip as an empty list, got %#v", g2.Rows[0].FreeParams["features"])
+	}
+}
+
+// TopN with a negative n returns empty (not a panic).
+func TestTopN_NegativeN(t *testing.T) {
+	var l Ledger
+	l.Append(row("s", "a", nil, map[string]float64{"m": 0.5}, "ok"))
+	if got := TopN(l, "m", "maximize", -1); len(got) != 0 {
+		t.Errorf("TopN(-1) should return empty, got %d", len(got))
+	}
+}
+
 // Best is objective-driven (maximize/minimize), skipping failed / metric-missing rows.
 func TestBest_ObjectiveDriven(t *testing.T) {
 	var l Ledger

@@ -15,6 +15,7 @@ package ledger
 import (
 	"bytes"
 	"encoding/csv"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strconv"
@@ -175,6 +176,9 @@ func TopN(l Ledger, metric, direction string, n int) []Row {
 	sort.SliceStable(qualified, func(i, j int) bool {
 		return betterThan(qualified[i].Metrics[metric], qualified[j].Metrics[metric], direction)
 	})
+	if n < 0 {
+		n = 0
+	}
 	if n < len(qualified) {
 		qualified = qualified[:n]
 	}
@@ -184,16 +188,13 @@ func TopN(l Ledger, metric, direction string, n int) []Row {
 // Filter returns the sub-ledger of rows at a given sweep-SHA (an invocation / code-
 // version view). Empty sweepSHA returns the whole ledger.
 func Filter(l Ledger, sweepSHA string) Ledger {
-	if sweepSHA == "" {
-		return l
-	}
 	var out Ledger
 	for _, r := range l.Rows {
-		if r.SweepSHA == sweepSHA {
+		if sweepSHA == "" || r.SweepSHA == sweepSHA {
 			out.Append(r)
 		}
 	}
-	return out
+	return out // a fresh Ledger with its own Rows/seen — appending to it never touches l
 }
 
 func betterThan(a, b float64, direction string) bool {
@@ -226,21 +227,35 @@ func sortedKeys(m map[string]bool) []string {
 	return ks
 }
 
-// cell renders a free-param value for CSV; parseCell inverts it (numbers → float64,
-// bools → bool, else string) so a round-trip preserves the common config types.
+// cell renders a free-param value for CSV; parseCell inverts it. Scalars stay bare for
+// human navigation (`rf`, `300`, `true`); lists/maps (a `features: [title, family]`
+// free-param — kbench#4 sweeps these) are JSON-encoded so they round-trip losslessly
+// instead of collapsing to an unparseable `[title family]` string.
 func cell(v any) string {
-	if v == nil {
+	switch v.(type) {
+	case nil:
 		return ""
+	case []any, map[string]any:
+		b, err := json.Marshal(v)
+		if err == nil {
+			return string(b)
+		}
 	}
 	return fmt.Sprintf("%v", v)
 }
 
 func parseCell(s string) any {
-	if s == "true" {
+	switch s {
+	case "true":
 		return true
-	}
-	if s == "false" {
+	case "false":
 		return false
+	}
+	if len(s) > 0 && (s[0] == '[' || s[0] == '{') {
+		var v any
+		if err := json.Unmarshal([]byte(s), &v); err == nil {
+			return v
+		}
 	}
 	if i, err := strconv.Atoi(s); err == nil {
 		return i
