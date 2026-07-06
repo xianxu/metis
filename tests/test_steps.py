@@ -58,6 +58,19 @@ def test_train_then_predict_chain(tmp_path, monkeypatch):
     assert len(preds) == 20  # the toy test split
 
 
+def test_train_step_accepts_oneof_model_config(tmp_path, monkeypatch):
+    """The train step must consume metis#6's $oneof bundle `{kind: {params}}` — the EXACT
+    shape a hyperparam sweep (kbench#4) emits (was: `kind = w["model"]` failed on the dict)."""
+    run = tmp_path / "runs" / "r-oneof"
+    _run_step(monkeypatch, run, "split", {"dataset": "toy", "k": 3, "stratify": True}, cv_split.main)
+    ts = _run_step(monkeypatch, run, "train",
+                   {"dataset": "toy", "folds": "split",
+                    "model": {"rf": {"n_estimators": 50, "max_depth": 3}}}, train.main)
+    assert (ts / "model.pkl").exists()
+    cv = json.loads((ts / "metrics.json").read_text())["cv_score"]
+    assert 0.0 < cv <= 1.0  # a real CV score — the sweep point trains, no unknown-model error
+
+
 def test_step_context_requires_env(monkeypatch):
     for v in ("METIS_STEP_DIR", "METIS_RUN_DIR", "METIS_STEP_ID", "METIS_EXP_DIR", "METIS_SEED"):
         monkeypatch.delenv(v, raising=False)
