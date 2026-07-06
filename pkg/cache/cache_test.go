@@ -74,15 +74,15 @@ func TestKpre_ErrorsOnNonFiniteWith(t *testing.T) {
 // Validate re-hashes D: all-match → HIT; a changed or vanished file → MISS; empty D
 // is a vacuous HIT (K_pre alone determines the output).
 func TestValidate_HitAndMiss(t *testing.T) {
-	d := []record.CodeRef{{Path: "a.py", BlobHash: "h1"}, {Path: "b.py", BlobHash: "h2"}}
-	clean := func(p string) (record.Hash, error) {
-		return map[string]record.Hash{"a.py": "h1", "b.py": "h2"}[p], nil
+	d := []record.CodeRef{{Repo: "r", Path: "a.py", BlobHash: "h1"}, {Repo: "r", Path: "b.py", BlobHash: "h2"}}
+	clean := func(ref record.CodeRef) (record.Hash, error) {
+		return map[string]record.Hash{"a.py": "h1", "b.py": "h2"}[ref.Path], nil
 	}
 	if !Validate(d, clean) {
 		t.Error("all-match D must HIT")
 	}
-	changed := func(p string) (record.Hash, error) {
-		if p == "b.py" {
+	changed := func(ref record.CodeRef) (record.Hash, error) {
+		if ref.Path == "b.py" {
 			return "CHANGED", nil
 		}
 		return "h1", nil
@@ -90,7 +90,7 @@ func TestValidate_HitAndMiss(t *testing.T) {
 	if Validate(d, changed) {
 		t.Error("a changed file must MISS")
 	}
-	missing := func(string) (record.Hash, error) { return "", fmt.Errorf("no such file") }
+	missing := func(record.CodeRef) (record.Hash, error) { return "", fmt.Errorf("no such file") }
 	if Validate(d, missing) {
 		t.Error("a vanished file must MISS")
 	}

@@ -70,7 +70,14 @@ identical on a non-Kaggle platform?* — if yes, it lives here.
   read-sensor + blob-hasher: `metis/trace.py` (a `python -m metis.trace <step>` launcher installing a
   `sys.addaudithook` + `sys.modules` snapshot → writes the first-party code closure to
   `runs/<id>/<step>/reads.json`; the step wrappers launch through it), and Go `loadReadSet` /
-  `gitBlobHashes` (batched `git hash-object`) / `buildD` turning reads → `D = [(path, git-blob-hash)]`.
+  `gitBlobHashes` (batched `git hash-object`) / `buildD` turning reads → `D`. **Multi-root (metis#11):**
+  the sensor discovers each read's git repo root (`_repo_root` walk-up for a `.git` marker — dir OR
+  file, minus stdlib/site-packages/.venv), so a **consumer repo's** code (kbench importing metis)
+  enters `D` alongside metis's. `reads.json` v2 = `{roots: {<repo-root>: [rel-paths]}, used_site_packages}`;
+  `D = [(repo, path, git-blob-hash)]` is **repo-qualified**, hashed + re-validated per-repo (store side
+  `recordMiss` and validate side `isHit` group by repo identically — a false-HIT/MISS pair otherwise).
+  `loadReadSet` rejects a legacy v1 `reads.json` LOUD rather than let it parse to an empty `D` → a
+  vacuous K_pre-only false HIT.
   Honest limit: the audit hook is a *lower-bound* (a C-extension `fopen` bypasses it), but those are
   class-1 data reads (keyed via upstream output-hashes), not first-party code. **M3 shipped** the
   runner integration: `cachingExecutor` (cmd/metis) decorates the step executor — per step it computes

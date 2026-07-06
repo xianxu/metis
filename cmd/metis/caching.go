@@ -51,25 +51,26 @@ type outputManifest struct {
 // sensor's reads.json) + stores the output, and writes the index entry. Runner.Run
 // executes in topo order, so a step's upstream output-hashes are ready when reached.
 type cachingExecutor struct {
-	inner       experiment.StepExecutor
-	store       cas.Store
-	indexDir    string
-	projectRoot string // where D paths resolve + git hash-object runs (the metis code root)
-	seed        int
-	out         io.Writer
+	inner    experiment.StepExecutor
+	store    cas.Store
+	indexDir string
+	seed     int
+	out      io.Writer
 
 	outputs map[string]record.Hash // step-id → output-hash, accumulated across the run
 }
 
-func newCachingExecutor(inner experiment.StepExecutor, store cas.Store, cacheDir, projectRoot string, seed int, out io.Writer) *cachingExecutor {
+// newCachingExecutor: D paths are now repo-qualified (metis#11) — each ref carries its own
+// repo root, so there's no single project-root to thread here; store + validate hash each
+// ref in its own repo.
+func newCachingExecutor(inner experiment.StepExecutor, store cas.Store, cacheDir string, seed int, out io.Writer) *cachingExecutor {
 	return &cachingExecutor{
-		inner:       inner,
-		store:       store,
-		indexDir:    filepath.Join(cacheDir, "index"),
-		projectRoot: projectRoot,
-		seed:        seed,
-		out:         out,
-		outputs:     map[string]record.Hash{},
+		inner:    inner,
+		store:    store,
+		indexDir: filepath.Join(cacheDir, "index"),
+		seed:     seed,
+		out:      out,
+		outputs:  map[string]record.Hash{},
 	}
 }
 
@@ -152,21 +153,40 @@ func (c *cachingExecutor) isHit(step experiment.Step, entry cache.Entry) bool {
 	if isImmutableLeaf(step) {
 		return true
 	}
-	paths := make([]string, len(entry.D))
-	for i, ref := range entry.D {
-		paths[i] = ref.Path
-	}
-	hashes, err := gitBlobHashes(c.projectRoot, paths)
+	// Re-hash the stored D per-repo (metis#11): group the refs by their repo root, hash
+	// each repo's paths in ITS repo (git -C repo), then validate. Symmetric with the store
+	// side (recordMiss) — both key by repo, so store and HIT-check can't disagree.
+	hashesByRepo, err := hashDByRepo(entry.D)
 	if err != nil {
 		return false
 	}
-	return cache.Validate(entry.D, func(p string) (record.Hash, error) {
-		h, ok := hashes[p]
+	return cache.Validate(entry.D, func(ref record.CodeRef) (record.Hash, error) {
+		h, ok := hashesByRepo[ref.Repo][ref.Path]
 		if !ok {
-			return "", fmt.Errorf("no hash for %s", p)
+			return "", fmt.Errorf("no hash for %s:%s", ref.Repo, ref.Path)
 		}
 		return h, nil
 	})
+}
+
+// hashDByRepo groups D refs by repo root and git-blob-hashes each repo's paths in that
+// repo — the shared per-repo hasher for both the store (recordMiss) and validate (isHit)
+// sides. An empty/missing repo root (a legacy single-root entry) hashes in ""/git-fails →
+// a MISS, the safe direction.
+func hashDByRepo(d []record.CodeRef) (map[string]map[string]record.Hash, error) {
+	byRepo := map[string][]string{}
+	for _, ref := range d {
+		byRepo[ref.Repo] = append(byRepo[ref.Repo], ref.Path)
+	}
+	out := make(map[string]map[string]record.Hash, len(byRepo))
+	for repo, paths := range byRepo {
+		h, err := gitBlobHashes(repo, paths)
+		if err != nil {
+			return nil, err
+		}
+		out[repo] = h
+	}
+	return out, nil
 }
 
 // materialize reconstructs a cached step: fetch its output manifest from the CAS,
@@ -210,27 +230,34 @@ func (c *cachingExecutor) recordMiss(kpre cache.Hash, res experiment.StepResult,
 	if err != nil {
 		return err
 	}
-	// Resolve D paths against c.projectRoot — the SAME root isHit re-hashes against
-	// (both = the metis code root the sensor records), so a store and a later HIT
-	// check can never disagree on where a D path lives.
-	root := c.projectRoot
-	// Fold uv.lock into D when the step touched site-packages, so a dependency
-	// upgrade (a new uv.lock) invalidates the cache — otherwise a pandas/sklearn bump
-	// would false-HIT and serve output computed against the old deps.
-	paths := rs.Reads
-	if rs.UsedSitePackages {
-		if _, err := os.Stat(filepath.Join(root, depsLockFile)); err == nil {
-			paths = append(append([]string(nil), rs.Reads...), depsLockFile)
+	// Build the per-repo path set (metis#11: D can span metis + a consumer repo). Fold
+	// uv.lock into each root that HAS one when the step touched site-packages, so a
+	// dependency upgrade (a new uv.lock → its blob-hash moves) invalidates the cache —
+	// otherwise a pandas/sklearn bump would false-HIT against the old deps.
+	roots := map[string][]string{}
+	for repo, paths := range rs.Roots {
+		p := append([]string(nil), paths...)
+		if rs.UsedSitePackages {
+			if _, err := os.Stat(filepath.Join(repo, depsLockFile)); err == nil {
+				p = append(p, depsLockFile)
+			}
 		}
+		roots[repo] = p
 	}
-	hashes, err := gitBlobHashes(root, paths)
-	if err != nil {
-		return err
+	// Hash each repo's paths in ITS repo — the SAME grouping isHit re-hashes against, so
+	// store and a later HIT-check can never disagree on where a D path lives.
+	hashesByRepo := map[string]map[string]record.Hash{}
+	for repo, paths := range roots {
+		h, err := gitBlobHashes(repo, paths)
+		if err != nil {
+			return err
+		}
+		hashesByRepo[repo] = h
 	}
-	d, err := buildD(paths, func(p string) (record.Hash, error) {
-		h, ok := hashes[p]
+	d, err := buildD(roots, func(repo, path string) (record.Hash, error) {
+		h, ok := hashesByRepo[repo][path]
 		if !ok {
-			return "", fmt.Errorf("no hash for %s", p)
+			return "", fmt.Errorf("no hash for %s:%s", repo, path)
 		}
 		return h, nil
 	})

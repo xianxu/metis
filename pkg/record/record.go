@@ -24,7 +24,8 @@ type FileHash struct {
 // CodeRef pins one source file by its git blob-hash — git's blob-hash IS the
 // content-hash (metis stores no code bytes). One entry of the read-set D.
 type CodeRef struct {
-	Path     string `json:"path"`
+	Repo     string `json:"repo,omitempty"` // the repo root the path is relative to (metis#11
+	Path     string `json:"path"`           // multi-root — D can span metis + a consumer repo)
 	BlobHash Hash   `json:"blob_hash"`
 }
 

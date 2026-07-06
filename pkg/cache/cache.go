@@ -54,9 +54,9 @@ func Kpre(rec record.StepRecord, seed int) (Hash, error) {
 // or a hasher failure (a vanished/unreadable file), is a MISS — the safe direction,
 // since a MISS only recomputes; it never serves stale bytes. An empty D is a vacuous
 // HIT: the step read no first-party code to invalidate, so K_pre alone determines it.
-func Validate(storedD []record.CodeRef, hash func(path string) (record.Hash, error)) bool {
+func Validate(storedD []record.CodeRef, hash func(ref record.CodeRef) (record.Hash, error)) bool {
 	for _, ref := range storedD {
-		got, err := hash(ref.Path)
+		got, err := hash(ref)
 		if err != nil || got != ref.BlobHash {
 			return false
 		}

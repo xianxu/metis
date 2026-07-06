@@ -5,7 +5,7 @@ deps: []
 github_issue:
 created: 2026-07-05
 updated: 2026-07-06
-estimate_hours:
+estimate_hours: 2.35
 started: 2026-07-06T15:42:13-07:00
 ---
 
@@ -58,15 +58,36 @@ sensor's). Options to weigh:
   feature-code edits correctly invalidate the metis#2 cache (kbench#3 currently defers to direct
   invocation with an honest atlas note — see kbench#3 plan decision #2).
 
+Durable plan: `workshop/plans/000011-trace-multi-root-plan.md`. Single-pass atomic.
+
+## Estimate
+
+```estimate
+model: estimate-logic-v3.1
+familiarity: 1.0
+item: typed-data-prototype   design=0.2   impl=0.4
+item: smaller-go-module      design=0.2   impl=0.4
+item: smaller-go-module      design=0.2   impl=0.45
+item: milestone-review       design=0.0   impl=0.2
+item: atlas-docs             design=0.05  impl=0.15
+design-buffer: 0.15
+total: 2.35
+```
+
+Σdesign 0.45 × 1.15 = 0.5175; Σimpl 1.15 × 1.00 = 1.15; total **2.35** (= `estimate_hours`). Widened for the Go surface the plan-judge flagged: sensor multi-root + reads.json v2 (`typed-data-prototype`); Go per-repo consumer (`smaller-go-module`); the cache store/validate symmetry (persisted per-repo `D` + `Validate`/`isHit`) + HIT→MISS test + capture multi-root (`smaller-go-module`); close review; atlas. kbench wrapper flip is a tracked follow-up, out of estimate.
+
 ## Plan
 
-- [ ] Reproduce: a failing test tracing a consumer-repo module (imports metis) — assert its
-      first-party code is absent from `D` today.
-- [ ] Multi-root the sensor (root at the target module's repo and/or the `METIS_STEP_PATH` roots).
-- [ ] Regression: metis's own steps still capture metis code.
-- [ ] Atlas: the trace sensor's cross-repo behavior + the per-repo read-set.
+- [x] Reproduce + fix: two-repo tests (Python `_classify` groups by repo root; Go `buildD`/`isHit` repo-qualified).
+- [x] Multi-root the sensor (`_repo_root` walk-up, per-read repo discovery, `reads.json` v2 `roots` map) + Go per-repo consumer + store/validate symmetry.
+- [x] Regression: metis's own steps unbroken (single-repo case); stdlib/site-packages excluded (the multi-root walk-would-mis-root-stdlib bug, fixed via `_STDLIB_PREFIXES`).
+- [x] Atlas: multi-root read-set + `reads.json` v2 + repo-qualified `D`.
 
 ## Log
+
+### 2026-07-06 (implemented — fork)
+- **DONE via TDD.** Sensor multi-root (`metis/trace.py`: `_repo_root` walk-up for a `.git` marker [dir OR file], `_STDLIB_PREFIXES` exclusion, `reads.json` v2 `{roots: {repo: [paths]}}`); Go per-repo consumer (`readSet.Roots`, repo-qualified `buildD`, `record.CodeRef.Repo` + CUE, `cache.Validate` ref-hasher); store/validate symmetry (`recordMiss` + `isHit` both group by repo via `hashDByRepo`); capture (`sweepClosure` per-root, `captureSweepCode` loops roots + per-repo side refs); `loadReadSet` rejects legacy v1 LOUD (the empty-D false-HIT guard). Removed the now-dead `cachingExecutor.projectRoot`. **Three heart-tests green + regression-proofed:** two-repo→D (`test_classify_groups_reads_by_repo_root`, `TestBuildD_MapsReadsToCodeRefs`), **HIT→MISS on consumer edit** (`TestCachingExecutor_MultiRepoDMissesOnConsumerEdit` — breaking per-repo grouping fails it), empty-D guard (`TestLoadReadSet_RejectsLegacyV1`). 9 Go pkgs + 37 Python tests green. **Bug caught:** the multi-root walk mis-rooted the whole uv stdlib under a git-tracked HOME → excluded Python-install prefixes.
+- **kbench wrapper flip is a follow-up (Task 3.3, NOT done here — metis#11 is metis-only):** `kbench/steps/titanic/{adapt,features,submission}` can now route through `python -m metis.trace kbench.titanic.<mod>`; kbench#3 deferred `features` to direct invocation with an atlas note — flip it in a kbench change after this merges.
 
 ### 2026-07-06
 - Folded into the **reproducible dirty-run capture** effort (`workshop/pensive/2026-07-06-reproducible-dirty-run-capture.md`, item 1) alongside #13 (config immutability) + #14 (complete/harden capture). This issue is the cross-repo half: without it, a consumer repo's code (e.g. kbench `features.py`) never enters the capture closure, so #14's spec+single-run capture still can't pin a kbench step's bytes.
