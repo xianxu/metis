@@ -157,3 +157,25 @@ Filter). Integration (M2) → a sweep-then-ledger e2e (a multi-point test/echo s
 `show` renders it; `promote --best` writes + commits a round-tripping experiment). Fixtures in
 `t.TempDir()`; the fake gitProbe + fixed clock already exist. The round-trip uses the real cached
 runner so the promoted experiment genuinely reproduces the row.
+
+## Revisions
+
+### 2026-07-05 — delivered semantics (reconciling the plan with the shipped code)
+Appended per AGENTS.md §1 (plan diverged mid-stream during the REWORK + close-review rounds):
+- **promote commits at HEAD, not "at the code SHA"** — M2 said "commit at the code SHA (warn if
+  dirty)." The code commits the promoted experiment at **HEAD** and, when the selected row's
+  sweep-SHA ≠ HEAD (an older-code-version winner), **warns** that it "reproduces only after
+  `git checkout <sweep-SHA>`" — the design's deliberate "go back." (You can't commit a file *at* a
+  past SHA without checking it out; the warning makes the code-version mismatch loud instead.)
+- **Richer `promoted_from` back-link** — delivered as `promoted_from: <shape> @ <point-addr>
+  (sweep <sha>) (k=v, …)` (point-address + sweep-SHA + free-param tuple), not the plan's plainer
+  `@ <point-addr>` — so a promoted experiment is checkable against AND recoverable to its origin row.
+- **The ledger sidecar is written but not auto-committed** — the Design's "committed batched
+  (per-sweep)" is not done; `writeSweepLedger` writes `<shape>.ledger.csv` + regenerates the body
+  top-N, and committing it is left to the user / `promote` (which commits the promoted experiment,
+  not the sidecar). Auto-commit of the sidecar is a post-v1 convenience.
+- **`ledger show --sort` defaults `--dir` from the shape's objective direction** (round-5) so a
+  minimize objective sorts best-first; and keeps failed/metric-missing rows via `ledger.SortAll`
+  (round-4) rather than dropping them through `TopN` (which stays the body-summary leaderboard).
+- **`Deps` (uv.lock digest) re-scoped post-v1** (change-code plan-judge) — M3 backfills `CodeManifest.D`
+  + `Commit`; the uv.lock digest is separable Python-env provenance.

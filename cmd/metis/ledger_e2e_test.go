@@ -313,6 +313,68 @@ func TestLedgerShow_RendersSortedTable(t *testing.T) {
 	}
 }
 
+// captureStdout runs fn with os.Stdout redirected to a pipe and returns what it wrote —
+// so a test can drive the real cmdLedger entrypoint (which prints to os.Stdout) and assert
+// the rendered table, exercising the CLI's own direction-defaulting rather than showLedger.
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	old := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = w
+	done := make(chan string, 1)
+	go func() {
+		var b bytes.Buffer
+		_, _ = io.Copy(&b, r)
+		done <- b.String()
+	}()
+	fn()
+	_ = w.Close()
+	os.Stdout = old
+	return <-done
+}
+
+// `ledger show --sort M` with NO --dir must default the direction from the shape's
+// objective, so a MINIMIZE objective sorts best-first (lowest metric on top). This drives
+// the real cmdLedger (which reads the shape + defaults --dir) — the showLedger tests all
+// pass direction explicitly, so this is the only guard on the round-5 defaulting path.
+func TestLedgerShow_DefaultsDirFromObjective(t *testing.T) {
+	ws := t.TempDir()
+	shapePath := filepath.Join(ws, "loss.md")
+	// A shape whose objective MINIMIZES train.loss.
+	if err := os.WriteFile(shapePath, []byte("---\ntype: experiment-shape\nid: loss\nseed: 1\nstatus: active\nsweep: {sampler: grid, objective: {metric: train.loss, direction: minimize}}\nsteps: []\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Rows of differing loss; lowest is model=good (0.10), highest model=bad (0.90).
+	var l ledger.Ledger
+	l.Append(
+		ledger.Row{SweepSHA: "s", PointAddr: "a", FreeParams: map[string]any{"model": "mid"}, Metrics: map[string]float64{"train.loss": 0.50}, Status: "ok"},
+		ledger.Row{SweepSHA: "s", PointAddr: "b", FreeParams: map[string]any{"model": "bad"}, Metrics: map[string]float64{"train.loss": 0.90}, Status: "ok"},
+		ledger.Row{SweepSHA: "s", PointAddr: "c", FreeParams: map[string]any{"model": "good"}, Metrics: map[string]float64{"train.loss": 0.10}, Status: "ok"},
+	)
+	csv, _ := ledger.Encode(l)
+	if err := os.WriteFile(ledgerPath(shapePath), csv, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// NO --dir: cmdLedger must read the shape's minimize objective and sort best-first.
+	out := captureStdout(t, func() {
+		if err := cmdLedger([]string{"show", shapePath, "--sort", "train.loss"}); err != nil {
+			t.Errorf("cmdLedger show: %v", err)
+		}
+	})
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if len(lines) < 2 {
+		t.Fatalf("want header + rows, got:\n%s", out)
+	}
+	// Best-first for MINIMIZE = lowest loss (model=good) on the first data row. If the
+	// default silently fell back to maximize, model=bad (0.90) would render first.
+	if !strings.Contains(lines[1], "model=good") {
+		t.Errorf("minimize objective must default to best-first (model=good, loss 0.10) first row; got:\n%s", out)
+	}
+}
+
 // promote must ACTUALLY commit the winner (a real gitCommitter), not just report it —
 // the production path (cmdPromote) injects gitCLICommitter. Verified against a real repo.
 func TestPromote_ActuallyCommits(t *testing.T) {
