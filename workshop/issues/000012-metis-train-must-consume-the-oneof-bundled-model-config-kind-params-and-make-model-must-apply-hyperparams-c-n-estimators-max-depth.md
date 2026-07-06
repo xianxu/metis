@@ -1,11 +1,12 @@
 ---
 id: 000012
-status: open
+status: working
 deps: []
 github_issue:
 created: 2026-07-05
 updated: 2026-07-05
 estimate_hours:
+started: 2026-07-05T23:33:31-07:00
 ---
 
 # metis/train must consume the $oneof-bundled model config {kind:{params}} and make_model must apply hyperparams (C, n_estimators, max_depth)
