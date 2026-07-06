@@ -251,3 +251,66 @@ confidence: high
 `workshop/plans/000007-sweep-runner-plan.md` has **no `## Revisions` section**, and two claims still over-state the code (AGENTS.md §1 requires appending a `## Revisions` entry, not leaving the over-claim):
 - **(recommended in all three prior rounds, still not folded in)** M2 bullet / plan line 101 claims the `repoSHAs` "come from the **same `gitProbe` read** the detect-and-abort already does — one read, shared." The code does **not** share one read — there's a setup probe (`sweep.go:44`), a per-point detect probe (`sweep.go:89`), and `assembleRecord`'s own probe (`record.go:65`): three reads that agree only on a *stable* HEAD. Add: *"M2: repoSHAs and the detect-and-abort sha are separate `gitProbe` reads that agree by value on a stable HEAD, not one shared read; the identity guarantee rests on sha-stability, not read-sharing."*
 - **(new)** Add a `## Revisions` entry documenting the failed-point address divergence: *"Done-when 'Run-id = the point's `record.PointAddress`' holds for OK points only — a failed point's `record.point_address` is minted from the partial executed config (`Runner.Run` returns only pre-failure steps), so it diverges from the full-`p.With` manifest run_id and collides across distinct first-step failures. The identity of record for a point is `manifest.run_id`/the run-dir; #8 keys off that, not `record.point_address`."*
+
+---
+
+## Re-review — 2026-07-05T18:38:41-07:00 (FIX-THEN-SHIP)
+
+| field | value |
+|-------|-------|
+| issue | 7 — Sweep runner + grid sampler (propose_next / should_stop abstraction) |
+| repo | metis |
+| issue file | workshop/issues/000007-sweep-runner-grid-sampler.md |
+| boundary | whole-issue close |
+| milestone | — |
+| window | 4dd6f118b65fa5475aae2d684d21ab1ec9c4f46b..HEAD |
+| command | sdlc close --issue 7 |
+| reviewer | claude |
+| timestamp | 2026-07-05T18:38:41-07:00 |
+| verdict | FIX-THEN-SHIP |
+
+## Review
+
+Ignoring 6 permissions.allow entries from .claude/settings.json: this workspace has not been trusted. Run Claude Code interactively here once and accept the trust dialog, or set projects["/Users/xianxu/workspace/metis"].hasTrustDialogAccepted: true in /Users/xianxu/.claude.json.
+I have everything I need. Build/vet/test green, and I've independently verified the load-bearing identity property and the final "failed-point collision" fix — the newest change, which the four prior rounds reviewed only in its *pre-fix* (buggy) state. Here is the fresh-context boundary review.
+
+```verdict
+verdict: FIX-THEN-SHIP
+confidence: high
+```
+
+**Summary.** metis#7 delivers its stated purpose end-to-end: `metis run` on a multi-point shape now sweeps — Ask→run→Tell over the shared cached runner (`runResolvedExperiment`), content-addressed per-point run dirs, a shape-run manifest, `--max-points`/`--dry-run`, cache reuse across points, per-point-failure-continues, and HEAD-sha detect-and-abort with the dirty-tree false-abort regression pinned. I independently traced the load-bearing correctness property — `manifest.run_id == runs/<id>/record.json.point_address` — and confirmed the final commit `829a278` genuinely fixes it for **failed points too**: `buildRecord` now mints `resolvedWith` from `exp.Steps` (the full intended config, `record.go:96-99`), so `PointAddress(resolvedWith) == PointAddress(p.With) == runID` whether or not a step failed, and the two new regression tests (`TestSweep_FailingPointRecordedAndContinues` reading the failed record, `TestSweep_DistinctFailedConfigsHaveDistinctAddresses`) fail under a revert. All five findings from the four prior rounds are resolved. `pkg/sweep` is genuinely pure; the IO is confined to the `cmd/metis` shell. **No Critical or Important code findings; nothing blocks the boundary.** The one carryover worth doing is the plan `## Revisions` entry the four prior rounds each recommended and which is *still* absent — a durable-doc over-claim, not a code defect. FIX-THEN-SHIP encodes: fold that in (plus a one-word test-comment fix), then ship — the gate passes regardless.
+
+**1. Strengths**
+- **The failed-point fix is real and regression-proofed.** `resolvedWith` is now built from the full intended `exp.Steps` (`record.go:88-99`), not the executed `steps`. I verified `exp = shapePointToExperiment(sh, p)` sets `step.With = p.With[s.ID]` (`run.go:70`), so `resolvedWith == p.With`; `run.Seed = exp.Seed = sh.Seed`; `repoSHAs` via the shared `repoSHAsOf`. The identity holds by construction for ok *and* failed points, and `TestSweep_DistinctFailedConfigsHaveDistinctAddresses` (`model=xx`/`model=yy`, both first-step failures) pins that two distinct failed configs get distinct addresses — the exact collision the old partial-config code shipped. This is the property #8's ledger rests on.
+- **Identity assertion, not just tracing.** `TestSweep_RunsAllPointsAndWritesManifest` reads each `record.json` and asserts `rec.PointAddress == pr.RunID` (`sweep_e2e_test.go`), closing the "verified-by-tracing-but-unasserted" gap the prior rounds flagged.
+- **ARCH-PURE, exemplary.** `pkg/sweep` imports only `pkg/shape`; ask/tell + stop predicates are pure over tell-history, unit-tested with zero IO. The continue-vs-abort decision was extracted into the pure `isPointOutcome` (`sweep.go:128`) with a 4-case unit test that fails on a revert to the old `run.Started=="" && runErr!=nil` swallow — logic moved *out* of the IO loop.
+- **ARCH-DRY.** `runResolvedExperiment` (`run.go:132`) is the single per-point runner both the 1-point path and the sweep loop call; `repoSHAsOf` (`sweep.go:177`) is shared by `buildRecord` and `runSweep`, structurally eliminating the runID↔record-address drift.
+- **Detect-and-abort + dirty-tree regression.** Freeze `codeID` at start, re-probe per point, abort before running on HEAD-sha drift → no manifest for a mixed-code sweep. `TestSweep_DirtyTreeDoesNotFalseAbort` (constant `dirty=true`) pins the real-CLI bug the Log describes; the `lessons.md` entry generalizes it well.
+- **Docs gates satisfied.** `atlas/index.md` accurately describes the new surface (sweeps dir, manifest, `--max-points`/`--dry-run`, detect-and-abort + the dirty caveat). No user-facing README exists (confirmed — only vendored `.venv`/`.pytest_cache`), so the README gate is genuinely N/A.
+
+**2. Critical findings** — none.
+
+**3. Important findings** — none. (All four prior rounds' Important findings — failure-test-can't-prove-continuation, swallowed internal errors, DRY repoSHAs, untested identity, and the failed-point collision — are resolved in `e7cb523`/`3a0ca18`/`8e81ea3`/`829a278`, each verified above.)
+
+**4. Minor findings**
+- `cmd/metis/shape_e2e_test.go:87` — the "superseded … in `caching_sweep_test.go`" comment names a file that doesn't exist; the tests live in `sweep_e2e_test.go`. (Flagged in prior rounds; still unfixed — a trivial one-word edit.)
+- `sweep.go:164` — `probeRepo` degrades *any* git error to `"","",false`, so a transient mid-sweep git failure (when the sweep started in a real repo, `codeID != ""`) yields `s=="" != codeID` → false-abort `"code changed (sha → )"`. Low likelihood; consider distinguishing "no repo" (expected) from "probe errored" (don't treat as drift).
+- `sweep.go:44-64` — `--dry-run` computes `probeRepo`/`repoSHAs`/`codeID` (all unused on that path) *before* the early return, and lists the full grid ignoring `--max-points`. Both harmless/defensible; the wasted git probe on a dry-run is a micro-nit.
+- `sweep.go:99-105` — double-fault edge: if a step *fails* (`status=="failed"`) AND a persistence write also errors, `isPointOutcome` returns true (keys on `status`), so the persistence error is swallowed and the row records `"failed"` with a possibly-absent `record.json`. Two simultaneous faults; #8 must tolerate a failed row with a partial record anyway. Note only.
+- `pkg/sweep/sweep.go` (`TargetReached`/`AnyStop`) are built + unit-tested but have no production caller — only `--max-points` is wired (`sweep.go:67`). Consistent with the plan's decision #2 (`--target` deferred/opportunistic); dead in the CLI path until wired.
+
+**5. Test coverage notes**
+- e2e coverage is strong and integration-real (process-level `test/echo`, injected clock + gitProbe): N-runs+manifest, cache-reuse-across-points, failure-continues (now fail-first), max-points, dry-run, abort-on-drift, dirty-no-false-abort, plus the new run_id↔record.point_address assertion (ok points) and the failed-point distinctness/identity tests. `pkg/sweep` unit tests pin real logic (enumeration order, both stop directions, missing-metric skip, compose, empty grid, exhaustion-stays-done); `isPointOutcome` is unit-tested directly. The prior rounds' two holes (continuation-past-failure discrimination; failed-point identity+collision) are now both closed. No remaining meaningful gap.
+
+**6. Architectural notes for upcoming work (#8)**
+- **Identity now holds for failed points too** — #8 may key point-identity off either `manifest.run_id` or `record.point_address`; they agree on both ok and failed points as of `829a278`. (This reverses the round-4 note that told #8 to avoid `record.point_address`; that advice is obsolete now that the record mints from the full intended config.)
+- **Abort/internal-error leaves orphan `runs/` with no manifest.** `sweep.go:89` (abort) and `sweep.go:104` (surfaced internal error) both `return` before `writeManifest` (`sweep.go:115`), so a partial sweep produces ungrouped run dirs. #8 may want #7 to emit a partial/aborted manifest.
+- **`shapeRunIdentity` folds `--max-points` into the identity** (`sweep.go:138-147`), so a capped and a full sweep of the same shape write different `sweeps/<id>/` dirs while sharing (cache-hit) point-run dirs — one point-run can belong to >1 shape-run. #8's stamping must map a point-address to potentially multiple shape-run-ids.
+- **`Ask() (Point, bool)` can't distinguish exhaustion from early-stop**, and the manifest has no top-level status (complete/capped/aborted). Decide before #8's ledger calcifies on the manifest shape whether a stop-*reason* is needed for the "stopped at k/N — budget vs code-changed" UX.
+
+**7. Plan revision recommendations**
+`workshop/plans/000007-sweep-runner-plan.md` has **no `## Revisions` section**, yet the plan was revised mid-stream (the issue's Done-when was "Updated 2026-07-05") and one mechanism claim still over-states the code — AGENTS.md §1 requires appending a `## Revisions` entry rather than leaving an over-claim. This was recommended in **all four** prior rounds and never folded in:
+- M2 bullet (plan lines 79-82 and 101-103) claims the `repoSHAs` "come from the **same `gitProbe` read** the detect-and-abort already does — one read, shared." The code does **not** share one read — there is a setup probe (`sweep.go:44`), a per-point detect probe (`sweep.go:89`), and `assembleRecord`'s own probe (`record.go:65`): three reads that agree only on a *stable* HEAD (the drift test even exposes their divergence when the sha isn't stable). Add: *"M2: repoSHAs and the detect-and-abort sha are separate `gitProbe` reads that agree by value on a stable HEAD, not one shared read; the identity guarantee rests on sha-stability across the reads, not on read-sharing. (No behavior change; the claim over-stated the implementation.)"*
+
+No other plan/code contradiction remains — the failed-point Done-when ("Run-id = the point's `record.PointAddress`") now holds as written.
