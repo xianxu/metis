@@ -1,6 +1,6 @@
 ---
 id: 000008
-status: codecomplete
+status: done
 deps: [metis#6, metis#7, metis#3]
 github_issue:
 created: 2026-07-03
