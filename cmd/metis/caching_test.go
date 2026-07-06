@@ -240,8 +240,9 @@ func TestCachingExecutor_RealDMissesOnSourceEdit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c := &cachingExecutor{projectRoot: root}
-	entry := cache.Entry{Kpre: "k", D: []record.CodeRef{{Path: "src.py", BlobHash: hashes["src.py"]}}}
+	c := &cachingExecutor{}
+	// metis#11: D is repo-qualified — the ref carries its repo root so isHit re-hashes it there.
+	entry := cache.Entry{Kpre: "k", D: []record.CodeRef{{Repo: root, Path: "src.py", BlobHash: hashes["src.py"]}}}
 	step := experiment.Step{ID: "s"} // NOT a leaf → D revalidation applies
 
 	if !c.isHit(step, entry) {
@@ -253,6 +254,50 @@ func TestCachingExecutor_RealDMissesOnSourceEdit(t *testing.T) {
 	}
 	if c.isHit(step, entry) {
 		t.Error("a byte-changed file in D must MISS (D revalidation is the cache's core soundness)")
+	}
+}
+
+// metis#11 — THE guarantee this issue exists for: a D spanning TWO repos (metis + a
+// consumer like kbench) HITs while both are unchanged, and MISSes when the CONSUMER repo's
+// file is edited. Before metis#11 the consumer's code never entered D, so editing it was a
+// silent false-HIT (a sweep serving output computed by old consumer code).
+func TestCachingExecutor_MultiRepoDMissesOnConsumerEdit(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH (D re-hash uses git hash-object)")
+	}
+	metisRepo := t.TempDir()
+	consumerRepo := t.TempDir()
+	mustRun(t, metisRepo, "git", "init", "-q")
+	mustRun(t, consumerRepo, "git", "init", "-q")
+	if err := os.MkdirAll(filepath.Join(consumerRepo, "titanic"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(metisRepo, "io.py"), []byte("m = 1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	feat := filepath.Join(consumerRepo, "titanic", "features.py")
+	if err := os.WriteFile(feat, []byte("def group_title(): return 1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mh, _ := gitBlobHashes(metisRepo, []string{"io.py"})
+	ch, _ := gitBlobHashes(consumerRepo, []string{"titanic/features.py"})
+
+	c := &cachingExecutor{}
+	entry := cache.Entry{Kpre: "k", D: []record.CodeRef{
+		{Repo: metisRepo, Path: "io.py", BlobHash: mh["io.py"]},
+		{Repo: consumerRepo, Path: "titanic/features.py", BlobHash: ch["titanic/features.py"]},
+	}}
+	step := experiment.Step{ID: "s"}
+
+	if !c.isHit(step, entry) {
+		t.Fatal("a two-repo D with both files unchanged must HIT")
+	}
+	// Edit ONLY the consumer repo's file → its blob-hash moves → the step must MISS.
+	if err := os.WriteFile(feat, []byte("def group_title(): return 2  # edited\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if c.isHit(step, entry) {
+		t.Error("editing the CONSUMER repo's code must MISS — the metis#11 cross-repo guarantee")
 	}
 }
 
@@ -304,8 +349,9 @@ steps:
 // an entry whose D would MISS (a file that won't re-hash) still HITs for a leaf, but
 // MISSes for a normal step. Pins the runner-level bypass, not just the marker predicate.
 func TestCachingExecutor_ImmutableLeafBypassesDValidation(t *testing.T) {
-	c := &cachingExecutor{projectRoot: t.TempDir()} // no git repo / no D file here
-	badEntry := cache.Entry{Kpre: "k", D: []record.CodeRef{{Path: "nope.py", BlobHash: "stale"}}}
+	c := &cachingExecutor{}
+	tmp := t.TempDir() // no git repo / no D file here → the ref can't re-hash → MISS (for a normal step)
+	badEntry := cache.Entry{Kpre: "k", D: []record.CodeRef{{Repo: tmp, Path: "nope.py", BlobHash: "stale"}}}
 
 	leaf := experiment.Step{ID: "get", With: map[string]any{"cache": map[string]any{"leaf": "immutable"}}}
 	if !c.isHit(leaf, badEntry) {
@@ -314,5 +360,14 @@ func TestCachingExecutor_ImmutableLeafBypassesDValidation(t *testing.T) {
 	plain := experiment.Step{ID: "train"}
 	if c.isHit(plain, badEntry) {
 		t.Error("a normal step must MISS when its D cannot re-hash clean")
+	}
+}
+
+// A legacy (pre-#11) D ref with an empty repo root must be rejected (→ MISS), NOT hashed:
+// `git -C "" hash-object` is a no-op that resolves against cwd (returns a hash), so relying
+// on "git fails" would make HIT/MISS cwd-dependent. The explicit guard keeps it sound (#11).
+func TestHashDByRepo_RejectsLegacyEmptyRepo(t *testing.T) {
+	if _, err := hashDByRepo([]record.CodeRef{{Repo: "", Path: "metis/io.py", BlobHash: "h"}}); err == nil {
+		t.Error("a D ref with an empty repo root must error (→ cwd-independent MISS), not hash against cwd")
 	}
 }

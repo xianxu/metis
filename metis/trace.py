@@ -35,17 +35,66 @@ import json
 import os
 import runpy
 import sys
+import sysconfig
 
-# project root = parent of the metis package (…/metis/trace.py → …/)
-_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _EXCLUDE_PARTS = (".venv", "site-packages", "__pycache__", ".git")
 
-_reads: set[str] = set()
+
+def _stdlib_prefixes() -> tuple[str, ...]:
+    """Absolute dir prefixes of the Python install / stdlib. Reads under these are NOT
+    first-party even when they happen to sit under a git-tracked HOME (e.g. a uv-managed
+    interpreter at ~/.local/share/uv/python/…, when ~ is a repo) — the multi-root walk
+    would otherwise mis-root the whole stdlib. site-packages/.venv are handled separately
+    (they set the deps flag); this is the stdlib/install itself."""
+    cands = {sys.base_prefix, sys.prefix, os.path.dirname(os.__file__)}
+    for key in ("stdlib", "platstdlib"):
+        p = sysconfig.get_paths().get(key)
+        if p:
+            cands.add(p)
+    return tuple(sorted(os.path.abspath(p) + os.sep for p in cands if p))
+
+
+_STDLIB_PREFIXES = _stdlib_prefixes()
+
+# _roots maps a first-party repo root → the set of repo-relative code paths read from it
+# (metis#11: multi-root — a step's closure can span the metis repo AND a consumer repo like
+# kbench). _root_cache memoizes the walk-up from a dir to its containing repo root.
+_roots: dict[str, set[str]] = {}
+_root_cache: dict[str, "str | None"] = {}
 _used_site_packages = False
 
 
+def _repo_root(path: str) -> "str | None":
+    """The nearest ancestor dir of `path` containing a `.git` marker — a DIR (normal repo)
+    OR a FILE (a linked worktree / submodule uses a `.git` file). None if under
+    site-packages/.venv or no repo is found (stdlib / temp). Cached per-directory."""
+    ap = os.path.abspath(path)
+    if "site-packages" in ap or ".venv" in ap:
+        return None
+    chain: list[str] = []
+    cur = os.path.dirname(ap)
+    root: "str | None" = None
+    while True:
+        if cur in _root_cache:
+            root = _root_cache[cur]
+            break
+        chain.append(cur)
+        if os.path.exists(os.path.join(cur, ".git")):
+            root = cur
+            break
+        parent = os.path.dirname(cur)
+        if parent == cur:  # filesystem root, no repo
+            root = None
+            break
+        cur = parent
+    for c in chain:  # every dir between `path` and its root shares that root
+        _root_cache[c] = root
+    return root
+
+
 def _classify(path: str) -> None:
-    """Record a read path: first-party → into D; site-packages → the deps flag."""
+    """Record a read path: first-party → into D under its repo root; site-packages → the
+    deps flag; stdlib/temp/another-non-repo → dropped."""
     global _used_site_packages
     if not isinstance(path, str) or not path:
         return
@@ -53,16 +102,19 @@ def _classify(path: str) -> None:
     if "site-packages" in ap or ".venv" in ap:
         _used_site_packages = True
         return
-    if not ap.startswith(_PROJECT_ROOT + os.sep):
-        return  # stdlib / system / temp / another repo → not first-party
-    rel = os.path.relpath(ap, _PROJECT_ROOT)
+    if ap.startswith(_STDLIB_PREFIXES):
+        return  # stdlib / Python install — not first-party (even under a git-repo HOME)
+    root = _repo_root(ap)
+    if root is None:
+        return  # stdlib / system / temp / not under any repo → not first-party
+    rel = os.path.relpath(ap, root)
     if any(part in _EXCLUDE_PARTS for part in rel.split(os.sep)):
         return
     # skip the run dir (a step's own outputs + upstream artifacts live under runs/)
     run_dir = os.environ.get("METIS_RUN_DIR")
     if run_dir and ap.startswith(os.path.abspath(run_dir) + os.sep):
         return
-    _reads.add(rel)
+    _roots.setdefault(root, set()).add(rel)
 
 
 def _audit(event: str, args) -> None:
@@ -93,8 +145,9 @@ def _write_reads() -> None:
     _snapshot_modules()
     step_dir = os.environ.get("METIS_STEP_DIR", os.getcwd())
     payload = {
-        "project_root": _PROJECT_ROOT,
-        "reads": sorted(_reads),
+        # v2 (metis#11): first-party code grouped by repo root, so a consumer repo's code
+        # is captured alongside metis's. The Go side hashes each root's paths in that repo.
+        "roots": {root: sorted(paths) for root, paths in sorted(_roots.items())},
         "used_site_packages": _used_site_packages,
     }
     with open(os.path.join(step_dir, "reads.json"), "w") as fh:

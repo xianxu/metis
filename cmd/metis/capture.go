@@ -33,7 +33,7 @@ func captureClosure(root string, closure []string, shapeRunID string) (commit st
 		if err != nil {
 			return "", nil, err
 		}
-		manifest = append(manifest, record.CodeRef{Path: p, BlobHash: record.Hash(h)})
+		manifest = append(manifest, record.CodeRef{Repo: root, Path: p, BlobHash: record.Hash(h)})
 		d, err := isPathDirty(root, p, h)
 		if err != nil {
 			return "", nil, err
@@ -82,34 +82,62 @@ func captureClosure(root string, closure []string, shapeRunID string) (commit st
 // commit SHA. Best-effort: with no git repo (or no closure) it's a no-op — the sweep's
 // point-records already ran and remain valid, just without the durable code SHA.
 func captureSweepCode(o runOpts, man sweepManifest) error {
-	root := cacheProjectRoot(o.stepPath, filepath.Dir(o.expPath))
-	closure := sweepClosure(o.expPath, man)
-	if len(closure) == 0 {
+	closureByRepo := sweepClosure(o.expPath, man)
+	if len(closureByRepo) == 0 {
 		return nil // no first-party code closure recorded (e.g. no-sensor test steps)
 	}
 	if _, err := exec.LookPath("git"); err != nil {
 		return nil
 	}
-	if _, err := gitOut(root, "rev-parse", "--is-inside-work-tree"); err != nil {
-		return nil // not a git repo — skip capture
+	// Capture EACH repo's dirty closure to its own side ref (metis#11: the closure can
+	// span metis + a consumer repo). The record's D is the repo-qualified union.
+	primary := cacheProjectRoot(o.stepPath, filepath.Dir(o.expPath))
+	repos := make([]string, 0, len(closureByRepo))
+	for r := range closureByRepo {
+		repos = append(repos, r)
 	}
-	commit, manifest, err := captureClosure(root, closure, man.ShapeRunID)
-	if err != nil {
-		return err
+	sort.Strings(repos)
+	var union []record.CodeRef
+	commits := map[string]string{}
+	for _, repo := range repos {
+		if _, err := gitOut(repo, "rev-parse", "--is-inside-work-tree"); err != nil {
+			continue // that root isn't a git work-tree — best-effort skip
+		}
+		commit, manifest, err := captureClosure(repo, closureByRepo[repo], man.ShapeRunID)
+		if err != nil {
+			return err
+		}
+		union = append(union, manifest...)
+		commits[repo] = commit
+	}
+	if len(union) == 0 {
+		return nil // no captured repo was a git work-tree
+	}
+	// The record's single Commit is the primary (expPath) repo's; per-repo commits in the
+	// record are a metis#14 refinement — the D here is already multi-root/repo-qualified.
+	commit := commits[primary]
+	if commit == "" {
+		for _, repo := range repos {
+			if c, ok := commits[repo]; ok {
+				commit = c
+				break
+			}
+		}
 	}
 	for _, p := range man.Points {
-		if err := backfillCodeManifest(o.expPath, p.RunID, manifest, commit); err != nil {
+		if err := backfillCodeManifest(o.expPath, p.RunID, union, commit); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// sweepClosure collects the union of first-party read paths across the sweep's points'
-// step reads.json (the sensor output) — the code files whose bytes decide the runs.
-func sweepClosure(expPath string, man sweepManifest) []string {
+// sweepClosure collects, PER REPO ROOT, the union of first-party read paths across the
+// sweep's points' step reads.json (metis#11 multi-root: the code files whose bytes decide
+// the runs, grouped by their repo so each is captured/hashed in the right repo).
+func sweepClosure(expPath string, man sweepManifest) map[string][]string {
 	dir := filepath.Dir(expPath)
-	set := map[string]bool{}
+	sets := map[string]map[string]bool{}
 	for _, p := range man.Points {
 		stepDirs, _ := filepath.Glob(filepath.Join(dir, "runs", p.RunID, "*"))
 		for _, sd := range stepDirs {
@@ -117,16 +145,25 @@ func sweepClosure(expPath string, man sweepManifest) []string {
 			if err != nil {
 				continue
 			}
-			for _, r := range rs.Reads {
-				set[r] = true
+			for repo, paths := range rs.Roots {
+				if sets[repo] == nil {
+					sets[repo] = map[string]bool{}
+				}
+				for _, r := range paths {
+					sets[repo][r] = true
+				}
 			}
 		}
 	}
-	out := make([]string, 0, len(set))
-	for p := range set {
-		out = append(out, p)
+	out := make(map[string][]string, len(sets))
+	for repo, set := range sets {
+		ps := make([]string, 0, len(set))
+		for p := range set {
+			ps = append(ps, p)
+		}
+		sort.Strings(ps)
+		out[repo] = ps
 	}
-	sort.Strings(out)
 	return out
 }
 

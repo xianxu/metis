@@ -81,6 +81,7 @@ _pipeline: {
 }
 
 #CodeRef: {       // one file of the read-set D, pinned by its git blob-hash
+	repo?:     string // repo root the path is relative to (metis#11: D can span repos)
 	path:      string
 	blob_hash: string
 }

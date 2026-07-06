@@ -38,7 +38,7 @@ func TestCaptureSweepCode_BackfillsCodeManifest(t *testing.T) {
 	if err := os.MkdirAll(stepDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	writeJSON(t, filepath.Join(stepDir, "reads.json"), readSet{ProjectRoot: root, Reads: []string{"model.py"}})
+	writeJSON(t, filepath.Join(stepDir, "reads.json"), readSet{Roots: map[string][]string{root: {"model.py"}}})
 	writeJSON(t, filepath.Join(root, "runs", runID, "record.json"), record.RunRecord{
 		RunID: runID, PointAddress: record.Hash(runID),
 		Steps: []record.StepRecord{{StepID: "train"}},

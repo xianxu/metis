@@ -150,7 +150,7 @@ func runResolvedExperiment(exp experiment.Experiment, o runOpts, runID string, n
 			return experiment.Run{}, err
 		}
 		store := cas.NewFSStore(filepath.Join(cacheDir, "cas"), 0, cas.Clock(now))
-		exec = newCachingExecutor(exec, store, cacheDir, cacheProjectRoot(o.stepPath, expDir), exp.Seed, out)
+		exec = newCachingExecutor(exec, store, cacheDir, exp.Seed, out)
 	}
 	runner := experiment.Runner{Exec: exec, Now: now}
 	fmt.Fprintf(out, "metis: run %s of experiment %q\n", runID, exp.ID)
