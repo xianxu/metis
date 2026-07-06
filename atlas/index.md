@@ -19,6 +19,18 @@ identical on a non-Kaggle platform?* — if yes, it lives here.
   via an injected `gitProbe`), write `record.json`, and render the knob→score `## Runs` line. Scope
   line: #3 owns the record + point-address; the trace/cache-key are #2, side-ref code capture #7/#8.
   See [experiment.md](experiment.md). [metis#3]
+- **`pkg/sweep`** (the sweep sampler) — metis#7, the pure ask/tell seam: `Sampler` (`Ask()`/`Tell()`),
+  `Grid` (enumerates `shape.Expand`'s points in order; adaptive samplers slot in with no loop change),
+  and `StopPredicate`s (`MaxPoints`, `TargetReached`, `AnyStop`). The **driver** is `cmd/metis`:
+  `metis run` on a multi-point shape **sweeps** (via `runSweep`) — loops Ask → run each point through the
+  shared `runResolvedExperiment` (cached runner) keyed by its `record.PointAddress` (so re-runs dedup +
+  resume-from-cache is free) → Tell; **per-point failure is recorded + the sweep continues**; a
+  **shape-run manifest** (`sweeps/<id>/manifest.json`) groups the N point-runs (the **metis#8** ledger
+  handoff). Flags: `--max-points` (budget stop), `--dry-run` (list points). **Detect-and-abort**: the
+  sweep freezes on the HEAD code sha (via `gitProbe`) and aborts on mid-sweep commit/branch drift (NOT
+  the dirty flag — the sweep's own outputs dirty the tree; precise code-dirty detection is metis#10).
+  Proven by e2e: N-runs+manifest, cache-reuse across points, failure-continues, max-points, dry-run,
+  abort-on-drift, no-false-abort-on-dirty. [metis#7]
 - **`pkg/shape`** (the experiment-shape lift) — metis#6, the pure config-space algebra over v0's
   untyped `with` bag. `Expand(steps, rangeSteps) → []Point` collapses a shape's reserved `$`-key
   descriptors (`$any` set / `$oneof` bundled labeled-sum that ADDs / `$linear-range`·`$log-range`

@@ -35,8 +35,10 @@ func run(args []string) error {
 
 func cmdRun(args []string) error {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
-	runID := fs.String("run", "", "run id (default: run-<UTC timestamp>)")
+	runID := fs.String("run", "", "run id (default: run-<UTC timestamp>; ignored for a multi-point sweep — each point keys off its content-address)")
 	cache := fs.Bool("cache", true, "use the metis#2 validating-trace step cache (<expDir>/.metis-cache); --cache=false to disable")
+	maxPoints := fs.Int("max-points", 0, "metis#7 sweep budget: stop after N points (0 = run the whole grid)")
+	dryRun := fs.Bool("dry-run", false, "metis#7 sweep: list the expanded points without running them")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -45,11 +47,13 @@ func cmdRun(args []string) error {
 		return fmt.Errorf("run: want exactly one <experiment.md>, got %d", len(rest))
 	}
 	_, err := runExperiment(runOpts{
-		expPath:  rest[0],
-		runID:    *runID,
-		stepPath: stepPath(),
-		cache:    *cache,
-		out:      os.Stdout,
+		expPath:   rest[0],
+		runID:     *runID,
+		stepPath:  stepPath(),
+		cache:     *cache,
+		maxPoints: *maxPoints,
+		dryRun:    *dryRun,
+		out:       os.Stdout,
 	})
 	return err
 }

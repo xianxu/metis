@@ -48,43 +48,15 @@ func ensureCacheGitignore(cacheDir string) error {
 // runOpts are the inputs to one `metis run`. now/git/out are injected so the e2e
 // test gets a deterministic clock, a fake git probe, and can discard progress output.
 type runOpts struct {
-	expPath  string
-	runID    string
-	stepPath []string
-	now      func() time.Time
-	git      gitProbe
-	cache    bool // enable the metis#2 validating-trace cache (<expDir>/.metis-cache)
-	out      io.Writer
-}
-
-// resolveExperiment turns raw markdown into a runnable Experiment, transparently
-// handling both `type: experiment` and `type: experiment-shape`. A shape is expanded
-// (metis#6); an all-singleton shape resolves to its one experiment (so `metis run` on a
-// fully-pinned shape works like a v0 experiment); a multi-point shape is a sweep — the
-// sweep driver is metis#7, so it's refused here with a pointer, not run inline.
-func resolveExperiment(raw string) (experiment.Experiment, error) {
-	// ParseShape handles both types (Shape embeds Experiment; a plain experiment just
-	// has an empty sweep) — one parse, then dispatch on the type.
-	sh, err := experiment.ParseShape(raw)
-	if err != nil {
-		return experiment.Experiment{}, err
-	}
-	if sh.Type != "experiment-shape" {
-		return sh.Experiment, nil // a plain experiment
-	}
-	if err := experiment.ValidateShape(sh); err != nil {
-		return experiment.Experiment{}, err
-	}
-	points, err := shape.Expand(sh.Steps, sh.Sweep.RangeSteps)
-	if err != nil {
-		return experiment.Experiment{}, err
-	}
-	if len(points) != 1 {
-		return experiment.Experiment{}, fmt.Errorf(
-			"experiment-shape %q expands to %d points — the sweep driver is metis#7 (not yet built); pin it to a single point or run a plain experiment",
-			sh.ID, len(points))
-	}
-	return shapePointToExperiment(sh, points[0]), nil
+	expPath   string
+	runID     string
+	stepPath  []string
+	now       func() time.Time
+	git       gitProbe
+	cache     bool // enable the metis#2 validating-trace cache (<expDir>/.metis-cache)
+	maxPoints int  // metis#7 sweep budget cap (0 = run to exhaustion)
+	dryRun    bool // metis#7: list the expanded points without running them
+	out       io.Writer
 }
 
 // shapePointToExperiment overlays an expanded point's resolved `with` onto the shape's
@@ -122,15 +94,42 @@ func runExperiment(o runOpts) (experiment.Run, error) {
 	if err != nil {
 		return experiment.Run{}, err
 	}
-	exp, err := resolveExperiment(string(raw))
+	// Dispatch: a multi-point experiment-shape sweeps (metis#7); a plain experiment or
+	// an all-singleton shape is the one-point path.
+	sh, err := experiment.ParseShape(string(raw))
 	if err != nil {
 		return experiment.Run{}, fmt.Errorf("%s: %w", o.expPath, err)
 	}
-
-	runID := o.runID
-	if runID == "" {
-		runID = "run-" + now().UTC().Format("20060102T150405Z")
+	if sh.Type == "experiment-shape" {
+		if err := experiment.ValidateShape(sh); err != nil {
+			return experiment.Run{}, fmt.Errorf("%s: %w", o.expPath, err)
+		}
+		points, err := shape.Expand(sh.Steps, sh.Sweep.RangeSteps)
+		if err != nil {
+			return experiment.Run{}, fmt.Errorf("%s: %w", o.expPath, err)
+		}
+		if len(points) != 1 {
+			// A sweep — no single Run to return; the manifest + per-point records are
+			// the output. runSweep drives the ask/tell loop over the shared run path.
+			return experiment.Run{}, runSweep(o, sh, points, now, out)
+		}
+		return runResolvedExperiment(shapePointToExperiment(sh, points[0]), o, defaultRunID(o.runID, now), now, out)
 	}
+	return runResolvedExperiment(sh.Experiment, o, defaultRunID(o.runID, now), now, out)
+}
+
+func defaultRunID(runID string, now func() time.Time) string {
+	if runID != "" {
+		return runID
+	}
+	return "run-" + now().UTC().Format("20060102T150405Z")
+}
+
+// runResolvedExperiment runs one already-resolved experiment (a single point) under
+// runID, through the cached runner, and writes its run.json + provenance record +
+// ## Runs line. The shared per-point runner both the 1-point path and the sweep loop
+// (metis#7) call — so the run/cache/record wiring lives in ONE place (ARCH-DRY).
+func runResolvedExperiment(exp experiment.Experiment, o runOpts, runID string, now func() time.Time, out io.Writer) (experiment.Run, error) {
 	baseDir := filepath.Dir(o.expPath)
 	// Absolutize at the runner boundary: execStep injects runDir/stepDir/expDir into
 	// the child's env, and the child's cwd IS the step dir — a relative path would
