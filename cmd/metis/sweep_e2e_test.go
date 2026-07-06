@@ -116,6 +116,9 @@ steps:
 func TestSweep_FailingPointRecordedAndContinues(t *testing.T) {
 	root := repoRoot(t)
 	ws := t.TempDir()
+	// fail FIRST ($any list order: true then false) so a "record-then-stop" bug would
+	// drop the sweep to 1 row — the test only proves "continues past a failure" if the
+	// later ok point still runs (the metis#6 lesson: exercise the dimension the bug lives in).
 	expPath := writeShape(t, ws, `---
 type: experiment-shape
 id: hasfail
@@ -125,7 +128,7 @@ sweep: {sampler: grid, objective: {metric: echoed, direction: maximize}}
 steps:
   - id: train
     uses: test/echo
-    with: {fail: {$any: [false, true]}}
+    with: {fail: {$any: [true, false]}}
 ---
 `)
 	err := runSweepViaRun(t, expPath, root, runOpts{cache: false})
@@ -134,15 +137,14 @@ steps:
 	}
 	man := readManifest(t, ws)
 	if len(man.Points) != 2 {
-		t.Fatalf("both points (ok + failed) should be recorded, got %d", len(man.Points))
+		t.Fatalf("both points must be recorded — the sweep must CONTINUE past the (first) failure, got %d", len(man.Points))
 	}
-	var statuses []string
-	for _, pr := range man.Points {
-		statuses = append(statuses, pr.Status)
+	// The first-Ask'd point ($any[0] = fail:true) is failed; the later one is ok.
+	if man.Points[0].Status != "failed" {
+		t.Errorf("point 0 (fail:true) status = %q; want failed", man.Points[0].Status)
 	}
-	got := strings.Join(statuses, ",")
-	if !strings.Contains(got, "ok") || !strings.Contains(got, "failed") {
-		t.Errorf("manifest should have one ok + one failed point; got %v", statuses)
+	if man.Points[1].Status != "ok" {
+		t.Errorf("point 1 (fail:false) status = %q; want ok — the sweep must run it AFTER the failure", man.Points[1].Status)
 	}
 }
 

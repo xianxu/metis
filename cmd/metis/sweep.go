@@ -96,9 +96,13 @@ func runSweep(o runOpts, sh experiment.Shape, points []shape.Point, now func() t
 		}
 		exp := shapePointToExperiment(sh, p)
 		run, runErr := runResolvedExperiment(exp, o, string(runID), now, out)
-		// Per-point failure → recorded, sweep continues. A run that never started
-		// (run.Started == "") is an infra/validation error → abort the sweep.
-		if run.Started == "" && runErr != nil {
+		// A per-point STEP failure (run.Status == "failed") is recorded and the sweep
+		// continues — the design's "one bad config can't kill the sweep." But any OTHER
+		// error (validation never-started, OR a metis-internal persistence error like a
+		// failed writeRecordJSON/assembleRecord that returns with run.Started != "") is
+		// NOT a point outcome — surface it, so a real persistence failure isn't silently
+		// recorded as `ok` and left to break #8's per-point aggregation.
+		if runErr != nil && run.Status != "failed" {
 			return fmt.Errorf("point %d (%s): %w", n, freeParamStr(p), runErr)
 		}
 		man.Points = append(man.Points, pointRun{

@@ -103,10 +103,9 @@ func buildRecord(run experiment.Run, steps []experiment.StepRun, outputHashes ma
 			Metrics:    sr.Result.Metrics,
 		})
 	}
-	repoSHAs := map[string]string{}
-	if repoName != "" {
-		repoSHAs[repoName] = sha
-	}
+	// Single-source the {repoName: sha} construction (repoSHAsOf) so the sweep driver's
+	// pre-computed point-address runID can't drift from this record's internal address.
+	repoSHAs := repoSHAsOf(repoName, sha)
 	addr, err := record.PointAddress(resolvedWith, repoSHAs, run.Seed)
 	if err != nil {
 		return record.RunRecord{}, err

@@ -1,12 +1,13 @@
 ---
 id: 000007
-status: working
+status: codecomplete
 deps: [metis#6, metis#3, metis#2]
 github_issue:
 created: 2026-07-03
 updated: 2026-07-05
 estimate_hours: 1.9
 started: 2026-07-05T17:31:17-07:00
+actual_hours: 0.63
 ---
 
 # Sweep runner + grid sampler (propose_next / should_stop abstraction)
@@ -171,6 +172,7 @@ detect-and-abort + 2 e2es — the integration breadth is where the hours land). 
 - Filed from the metis-v1 design brainstorm. Grid now; the `should_stop` seam is what leaves room for Optuna/Ax/Hyperband later with no loop change. Deps: metis#6 (expand). Interacts with metis#2 (cache reuse makes sweeps cheap) + metis#8 (records each point).
 
 ### 2026-07-05
+- 2026-07-05: closed — metis#7 sweep runner COMPLETE (M1 sampler SHIP + M2 driver). go build+vet+test ./... green. pkg/sweep (ask/tell Grid + MaxPoints/TargetReached/AnyStop, 6 unit tests). metis run multi-point → SWEEPS: runSweep loops Ask → runResolvedExperiment (shared per-point runner extracted, ARCH-DRY; runID = record.PointAddress reusing #3 minter) → Tell; per-point-failure-continues; shape-run manifest (the #8 handoff); --max-points/--dry-run; detect-and-abort on HEAD-sha drift. 7 sweep e2es (N-runs+manifest, cache-reuse-across-points, failure-continues, max-points, dry-run, abort-on-drift, dirty-no-false-abort regression). VERIFIED IN REAL CLI: 3-point sweep runs, shared prep HITs the cache on points 2+3 (cheap-sweeps payoff), manifest lists all 3. Real-CLI caught + fixed a freeze bug (whole-repo dirty flag tripped by the sweeps own outputs → HEAD-sha-only). --no-verdict: M2 final milestone reviewed by this close; M1 already SHIP. --no-project: brain tracker by hand (est 1.9/actual 0.63).; review verdict: FIX-THEN-SHIP
 - 2026-07-05: closed M1 — M1 pure sampler: go build+vet+test ./... green. pkg/sweep — 6 tests: ask/tell Grid enumerates shape.Expand points in order then done, empty→immediately-done, MaxPoints(k) budget stop, TargetReached maximize(>=)+minimize(<=), missing-metric/failed point does NOT trip target, AnyStop composition. Pure over tell-history, no IO. BYPASS --no-atlas + --no-project: M1 is the pure core; atlas (sweep-driver flow) + project tracker land at M2/final-close per the plan; milestone progress in the issue Plan/Log.; review verdict: SHIP
 - **Design settled** (driver/sampler discussion). One driver: `metis run` handles experiment (1 point) and shape (N) uniformly — experiment is the degenerate all-singleton case; `run_one_point` = v0's per-point runner + cache(#2) + record(#3). Sampler refined to a **stateful ask/tell** object (seeded-deterministic), superseding the Spec's pure `propose_next(state)` — matches the Optuna/Nevergrad ecosystem seam (grid: ask=next, tell=noop). Run id = the point's **content-address** (auto, dedup'd), not a timestamp. New: the **experiment-shape-run** has a content identity `hash(shape, code-content, sampler-config, seed)` grouping + stamping its N point-runs (ledger filterable by invocation/code-version). Mid-sweep code mutation → **(C) detect-and-abort** for v1; hermetic+perf upgrade arc (B snapshot-via-CAS → A resident worker) filed as **metis#10**. Per-point failure → recorded `failed` ledger row, sweep continues; resume free via cache; sequential in v1. #8 owns pick-best/promote. Full spec in `## Design`.
 - **M1 built — the pure sampler `pkg/sweep`** (TDD, all green; build+vet+full-suite clean). `Sampler` ask/tell interface (`Ask() (Point, bool)` + `Tell(Point, Result)`); `Grid` (enumerates `shape.Expand`'s pre-expanded points in order, Tell no-op, done on exhaustion or stop-predicate); `Result{Metrics, Status}`, `TellRecord`. `StopPredicate` (pure over tell-history): `MaxPoints(n)` (budget), `TargetReached(metric, direction, threshold)` (both directions; a missing-metric/failed point never trips it), `AnyStop(...)` (compose). Seeded slot documented (grid ignores). Tests: grid enumerates-N-then-done, empty→immediately-done, MaxPoints stops at k, TargetReached maximize+minimize, missing-metric-ignored, AnyStop. Next: M2 (extract `runResolvedExperiment`; flip multi-point `metis run` → sweep loop + manifest + detect-and-abort).
