@@ -1,12 +1,13 @@
 ---
 id: 000017
-status: working
+status: codecomplete
 deps: []
 github_issue:
 created: 2026-07-07
 updated: 2026-07-07
 estimate_hours: 0.93
 started: 2026-07-07T00:46:24-07:00
+actual_hours: 0.71
 ---
 
 # unify $oneof into $any — list=untagged / map=tagged sum, both recursive; delete $oneof
@@ -101,6 +102,7 @@ Single-boundary (plain checkboxes, one `sdlc close`).
 ## Log
 
 ### 2026-07-07
+- 2026-07-07: closed — $any subsumes $oneof: expandDescriptor dispatches on arg shape (list=untagged bare / map=tagged bundled), both recursive; $oneof deleted. Map form golden-identical to $oneof (migrated 36-point ADD + ragged tests pass unchanged); list form gains recursion (TestExpandAnyList_RecursesIntoElements, no coord dup); TestOneofRemoved guards deletion. Swept every consumer: testdata shape (cmd/metis e2e 21pts identical), shape.go doc comments, datatype template, atlas x2, cue, ledger test, python data-plane. go test ./... + pytest(13) green; vet clean. CROSS-REPO Done-when: kbench sweep-smoke e2e PASSED against this branch (features $any list + model $any map). Both change-code judges INFO.; review verdict: SHIP
 - Filed from a design conversation (operator): `$any`/`$oneof` are the untagged/tagged forms of one
   "pick one" primitive; the list-vs-map argument shape already signals which, so the second keyword
   is redundant. Operator's proposal: `$any` dispatches on list (bare) vs map (tagged), both recursive.

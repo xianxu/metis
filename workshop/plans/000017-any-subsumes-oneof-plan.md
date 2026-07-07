@@ -200,11 +200,11 @@ Delete the entire `case "$oneof":` block. Keep `$linear-range`/`$log-range` and 
 
 ## Task 3: Cross-repo rollout + close
 
-- [ ] **Step 1: Verify kbench against this branch BEFORE merging.** kbench's e2e builds metis from `../metis` source. With `$oneof` removed here, kbench's `$oneof` shapes would break — so implement **kbench#7** (the migration, `$oneof:`→`$any:` in `titanic-sweep.md` + `titanic-sweep-smoke.md`) and run `pytest kbench/e2e/thread_test.py::test_sweep_smoke_composes_and_trains` against **this** metis checkout. It must pass (the both-forms anchor: `features` list + `model` map). This proves the integrated state before either repo merges — no broken window.
+- [x] **Step 1: Verified kbench against this branch BEFORE merging.** Implemented **kbench#7** (migrated `$oneof:`→`$any:` in `titanic-sweep.md` + `titanic-sweep-smoke.md`) and ran `pytest e2e/thread_test.py::test_sweep_smoke_composes_and_trains` against this metis branch checkout → **1 passed** (both-forms anchor: `features` list + `model` map → metis/train). Integrated state proven before either merge — no broken window.
 
-- [ ] **Step 2: Close metis#17** — `sdlc close --issue 17 --verified '<pkg/shape both-forms tests + $oneof-removed + go test ./... + the kbench sweep-smoke green against this branch>'`. Then merge metis, then merge kbench#7 (back-to-back).
+- [x] **Step 2: Close metis#17** — closed (Review-Verdict SHIP, actual 0.71). Then merge metis, then merge kbench#7 (back-to-back).
 
-- [ ] **Step 3:** atlas already reconciled in Task 2; the kbench-side atlas/prose is kbench#7's scope.
+- [x] **Step 3:** atlas + index reconciled in Task 2; the kbench-side atlas/prose is kbench#7's scope (done in kbench#7).
 
 ---
 

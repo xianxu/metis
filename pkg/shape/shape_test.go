@@ -26,15 +26,25 @@ func TestExpandAnyList_RecursesIntoElements(t *testing.T) {
 	if len(pts) != 4 { // 3 from the range + 1 scalar
 		t.Fatalf("got %d points, want 4 (range(3)+scalar)", len(pts))
 	}
-	for _, p := range pts { // exactly one free-param coord at "s.lr", never duplicated
+	got := map[float64]bool{}
+	for _, p := range pts {
 		n := 0
 		for _, fp := range p.FreeParams {
-			if fp.Path == "s.lr" {
+			if fp.Path == "s.lr" { // exactly one coord at s.lr, never duplicated
 				n++
+				if v, ok := fp.Value.(float64); ok {
+					got[v] = true
+				}
 			}
 		}
 		if n != 1 {
 			t.Errorf("point %v has %d s.lr coords, want exactly 1", p.With, n)
+		}
+	}
+	// The nested $linear-range materialized THROUGH the list branch (0/0.5/1) + the scalar (9).
+	for _, want := range []float64{0.0, 0.5, 1.0, 9.0} {
+		if !got[want] {
+			t.Errorf("missing s.lr coord value %v; got %v", want, got)
 		}
 	}
 }
