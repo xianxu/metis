@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"io"
 	"os"
 	"path/filepath"
@@ -84,9 +85,11 @@ func TestStepPath_DiscoversLayersFromDepChain(t *testing.T) {
 			t.Fatalf("resolve %q via discovered path %v: %v", uses, sp, err)
 		}
 		// EvalSymlinks: sp entries are physical-canonicalized by layergraph.Walk.
+		// Separator-terminated /steps/ prefix so no layer root can prefix another.
 		wr, _ := filepath.EvalSymlinks(wantRoot)
-		if !strings.HasPrefix(exe, wr) {
-			t.Errorf("resolve %q = %s; want under %s", uses, exe, wr)
+		want := filepath.Join(wr, "steps") + string(os.PathSeparator)
+		if !strings.HasPrefix(exe, want) {
+			t.Errorf("resolve %q = %s; want under %s", uses, exe, want)
 		}
 	}
 }
@@ -110,8 +113,45 @@ func TestStepPath_NearestLayerWins(t *testing.T) {
 	}
 	kb, _ := filepath.EvalSymlinks(kbench)
 	mt, _ := filepath.EvalSymlinks(metis)
-	if !strings.HasPrefix(exe, kb) {
+	if !strings.HasPrefix(exe, filepath.Join(kb, "steps")+string(os.PathSeparator)) {
 		t.Errorf("shared/thing resolved to %s; want the nearest (kbench) copy under %s, not metis %s", exe, kb, mt)
+	}
+}
+
+// TestStepPath_BrokenGraphDegradesLoudly: when the anchor is found but the layer
+// graph is broken (a substrate target present on disk but missing base.manifest —
+// layergraph's loud #155 case), stepPath must NOT return a half-discovered path;
+// it surfaces the error to stderr and degrades to the fallback.
+func TestStepPath_BrokenGraphDegradesLoudly(t *testing.T) {
+	t.Setenv("METIS_STEP_PATH", "")
+	ws := t.TempDir()
+	// kbench: a real layer with steps, depending on ../kaggle …
+	kbench := mkLayer(t, ws, "kbench", "../kaggle", "titanic", "adapt")
+	// … but kaggle is PRESENT on disk without a construct/base.manifest → not a
+	// compilable layer → layergraph.Walk returns the actionable #155 error.
+	must(t, os.MkdirAll(filepath.Join(ws, "kaggle", "construct"), 0o755))
+
+	exp := filepath.Join(kbench, "p.md")
+	must(t, os.WriteFile(exp, []byte("# exp"), 0o644))
+
+	// Capture stderr to assert the loud note fires.
+	r, w, _ := os.Pipe()
+	orig := os.Stderr
+	os.Stderr = w
+	sp := stepPath(exp)
+	_ = w.Close()
+	os.Stderr = orig
+	var buf bytes.Buffer
+	_, _ = io.Copy(&buf, r)
+
+	kbSteps := filepath.Join(kbench, "steps")
+	for _, p := range sp {
+		if p == kbSteps {
+			t.Errorf("stepPath returned %s from a broken-graph discovery; want degrade to fallback (sp=%v)", kbSteps, sp)
+		}
+	}
+	if !strings.Contains(buf.String(), "step-layer discovery") {
+		t.Errorf("expected a loud stderr note on a broken layer graph; got %q", buf.String())
 	}
 }
 

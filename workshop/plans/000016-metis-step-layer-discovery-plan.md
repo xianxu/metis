@@ -419,3 +419,14 @@ Expected: exit 0, all seven steps run (no "no step-type executable for uses …"
 - **Anchor on `construct/base.manifest`, not `go.mod`.** kbench has no `go.mod`; `base.manifest` is the canonical construct-layer marker (what `layergraph`'s ancestor filter uses). Anchor on the **experiment file's** dir, not cwd — robust to running from anywhere.
 - **Reuse `layergraph`, don't re-parse `construct/deps`.** It's public, importable, already a metis dependency, and explicitly designed as the shared topology source (ARCH-DRY). No ariadne change; no second dep list.
 - **metis#16 is metis-only.** `krun`'s collapse is a kbench follow-up (Task 4 Step 4) — keeps this issue atomic and single-boundary (plain checkboxes, one `sdlc close`, no `Mx` split).
+
+## Revisions
+
+- **2026-07-07 — Walk error is surfaced (loud), not swallowed.** The change-code plan-quality
+  judge (INFO #1) flagged that silently swallowing a `layergraph.Walk` error re-introduces a
+  silent-degradation risk (a mis-wired `construct/deps` would collapse to a misleading
+  `no step-type executable ... on step path [steps]` instead of layergraph's actionable #155
+  message). As implemented, `stepPath` **prints the Walk error to stderr** (`metis: step-layer
+  discovery: …`) before degrading to the bare-repo fallback — so a broken layer graph is visible.
+  Covered by `TestStepPath_BrokenGraphDegradesLoudly` (added after the close-review's Important
+  test-coverage finding). Supersedes the Task 3 snippet's "deliberately swallowed" comment.

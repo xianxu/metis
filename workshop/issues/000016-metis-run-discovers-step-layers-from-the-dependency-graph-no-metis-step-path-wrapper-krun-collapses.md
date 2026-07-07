@@ -1,12 +1,13 @@
 ---
 id: 000016
-status: working
+status: codecomplete
 deps: []
 github_issue:
 created: 2026-07-06
 updated: 2026-07-06
 estimate_hours: 0.94
 started: 2026-07-06T22:32:07-07:00
+actual_hours: 0.56
 ---
 
 # metis run discovers step layers from the dependency graph — no METIS_STEP_PATH wrapper (krun collapses)
@@ -77,6 +78,7 @@ Single-boundary (plain checkboxes, one `sdlc close`).
 ## Log
 
 ### 2026-07-06
+- 2026-07-06: closed — metis run discovers the step-path from the construct/deps dep-graph (ariadne/pkg/layergraph, weave's source), leaf-first nearest-wins, METIS_STEP_PATH override. PROOF: cold hermetic titanic-baseline in real kbench, METIS_STEP_PATH unset + no krun → exit 0, all 7 steps resolved across all 3 layers (kaggle/download+submit, titanic/adapt+submission, metis/cv-split|train|predict). go test ./... all green (repo.FindUp hit/miss; stepPathFromLayers leaf-first; real stepPath→resolve 3-layer fixture; nearest-wins clash; env-override). Both change-code judges INFO. actual 0.56 = impl window (57c31e0→HEAD); design attention (exploration+plan+review forks) largely pre-first-commit/background, so this mildly under-counts design.; review verdict: SHIP
 - Filed from the layering discussion (operator): run is metis's; kaggle contributes steps; kbench is
   a workspace. The `krun` wrapper's only real job — assembling METIS_STEP_PATH — is dependency
   resolution metis should do itself (the weave layer-walk), so any workspace just runs `metis run`.
