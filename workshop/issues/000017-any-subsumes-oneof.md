@@ -102,6 +102,7 @@ Single-boundary (plain checkboxes, one `sdlc close`).
 ## Log
 
 ### 2026-07-07
+- 2026-07-07: closed — Re-close after SHIP review: strengthened TestExpandAnyList to assert coord values (0/0.5/1/9 materialize through the list branch); reconciled plan Task 3 checkboxes with the kbench sweep-smoke evidence. No production behavior change (test + docs only). go test ./pkg/shape green.; review verdict: SHIP
 - 2026-07-07: closed — $any subsumes $oneof: expandDescriptor dispatches on arg shape (list=untagged bare / map=tagged bundled), both recursive; $oneof deleted. Map form golden-identical to $oneof (migrated 36-point ADD + ragged tests pass unchanged); list form gains recursion (TestExpandAnyList_RecursesIntoElements, no coord dup); TestOneofRemoved guards deletion. Swept every consumer: testdata shape (cmd/metis e2e 21pts identical), shape.go doc comments, datatype template, atlas x2, cue, ledger test, python data-plane. go test ./... + pytest(13) green; vet clean. CROSS-REPO Done-when: kbench sweep-smoke e2e PASSED against this branch (features $any list + model $any map). Both change-code judges INFO.; review verdict: SHIP
 - Filed from a design conversation (operator): `$any`/`$oneof` are the untagged/tagged forms of one
   "pick one" primitive; the list-vs-map argument shape already signals which, so the second keyword
