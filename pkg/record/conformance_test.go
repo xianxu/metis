@@ -56,10 +56,11 @@ func TestRunRecordConformsToCUE(t *testing.T) {
 			With:     map[string]any{"k": 5, "shuffle": true},
 			Upstream: []Hash{"u1", "u2"},
 			Code: CodeManifest{
-				Commit: "deadbeef",
-				Dirty:  false,
-				D:      []CodeRef{{Path: "steps/metis/cv-split", BlobHash: "b1"}},
-				Deps:   "uvlock-digest",
+				Commit:        "deadbeef",
+				Dirty:         false,
+				D:             []CodeRef{{Repo: "metis", Path: "steps/metis/cv-split", BlobHash: "b1"}},
+				Deps:          "uvlock-digest",
+				CaptureStatus: "captured", // #14: vet the closed disjunction, not omitempty-skip it
 			},
 			OutputHash: "oh1",
 			Metrics:    map[string]float64{"cv_score": 0.81},

@@ -54,7 +54,9 @@ type runOpts struct {
 	cache     bool // enable the metis#2 validating-trace cache (<expDir>/.metis-cache)
 	maxPoints int  // metis#7 sweep budget cap (0 = run to exhaustion)
 	dryRun    bool // metis#7: list the expanded points without running them
-	out       io.Writer
+	inSweep   bool // metis#14: this run is a sweep point — suppress per-point single-run
+	//               capture (the sweep captures once per shape-run in captureSweepCode)
+	out io.Writer
 }
 
 // shapePointToExperiment overlays an expanded point's resolved `with` onto the shape's
@@ -179,6 +181,16 @@ func runResolvedExperiment(exp experiment.Experiment, o runOpts, runID string, n
 	}
 	if err := writeRecordJSON(runDir, rec); err != nil {
 		return run, err
+	}
+	// Capture this run's code closure + run-spec to a git side-ref (metis#14), backfilling
+	// the record with the durable SHA + capture status — so a dirty single run is
+	// reproducible (git checkout the SHA). The sweep loop sets inSweep to capture ONCE
+	// per shape-run instead (captureSweepCode), avoiding redundant per-point capture.
+	// Best-effort (like the sweep path): a backfill hiccup warns, never aborts a finished run.
+	if !o.inSweep {
+		if err := captureSingleRun(o, runID); err != nil {
+			fmt.Fprintf(out, "metis: warning: code-capture backfill failed for run %s: %v\n", runID, err)
+		}
 	}
 	// The experiment .md is IMMUTABLE input (#13): a run writes its output to
 	// runs/<id>/{run,record}.json (+ the .ledger.csv sidecar for sweeps), NEVER to the

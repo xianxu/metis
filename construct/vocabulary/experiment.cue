@@ -91,6 +91,7 @@ _pipeline: {
 	dirty:  bool            // was the repo dirty at run time
 	d?: [...#CodeRef]       // read-set; metis#2's validating trace populates
 	deps?: string           // uv.lock digest; metis#2 populates
+	capture_status?: "captured" | "degraded" | "none" // metis#14: durable-snapshot status
 }
 
 #StepRecord: {

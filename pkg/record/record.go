@@ -42,6 +42,11 @@ type CodeManifest struct {
 	Dirty  bool      `json:"dirty"`
 	D      []CodeRef `json:"d,omitempty"`    // read-set closure — populated by metis#8's capture
 	Deps   string    `json:"deps,omitempty"` // uv.lock digest — post-v1 provenance follow-up
+	// CaptureStatus (metis#14): whether the code+spec closure was durably snapshotted to
+	// git — "captured" (a recoverable SHA), "degraded" (ran but couldn't fully capture,
+	// e.g. no git work-tree), or "none" (no first-party closure to capture). A non-"captured"
+	// run is not reproducible from a code SHA — surfaced loudly, never silent.
+	CaptureStatus string `json:"capture_status,omitempty"`
 }
 
 // StepRecord is one step's raw provenance record. Fields split by role:
