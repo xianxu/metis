@@ -75,10 +75,10 @@ total: 1.79
 
 ## Plan
 
-- [ ] RED/GREEN: single-run capture — factor capture into `runResolvedExperiment`; a dirty single run captures its closure + records the manifest/commit.
-- [ ] RED/GREEN: capture the experiment `.md` blob (the second hook) into the manifest + side-ref.
-- [ ] RED/GREEN: loud failure — degraded/absent capture is surfaced in output + record.
-- [ ] atlas: two-hook capture + capture-status.
+- [x] RED/GREEN: single-run capture — factor capture into `runResolvedExperiment`; a dirty single run captures its closure + records the manifest/commit.
+- [x] RED/GREEN: capture the experiment `.md` blob (the second hook) into the manifest + side-ref.
+- [x] RED/GREEN: loud failure — degraded/absent capture is surfaced in output + record.
+- [x] atlas: two-hook capture + capture-status.
 
 ## Log
 
@@ -86,3 +86,4 @@ total: 1.79
 - Filed from the reproducible-dirty-run design pass (pensive). Deps #13 + #11. Completes metis#8's
   capture: the run-spec hook, single-run wiring, and loud failure — so a dirty iteration loop is
   actually reproducible, not aspirationally so.
+- **Implemented via a full-context fork (TDD).** All Plan items done: shared `captureRunCode` + single-run wiring (`runResolvedExperiment`, guarded by `o.inSweep` so the sweep doesn't double-capture per point), the run-spec `.md` hook (`addSpecToClosure`, symlink-resolved + existence-guarded), loud `CodeManifest.CaptureStatus` (captured|degraded|none) + stderr note + CUE `#CodeManifest`. Heart tests green + regression-proofed; sweep regression green. Fork caught+fixed 2 real bugs (Abs-vs-git-toplevel symlink `Rel` trap; `addSpecToClosure` zeroing a repo D on an absent fixture spec). go build+vet+test ./... 9/9 + uv pytest 37 green. Completes the reproducible-dirty-run effort.
