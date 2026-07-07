@@ -7,9 +7,17 @@ file `open`s, runs the step module as `__main__`, and on exit snapshots
 `(path, git-blob-hash)` pairs for the cache key; re-hashing them on a later run is
 what decides HIT vs MISS (an edited code file → its hash moves → MISS).
 
-D is **first-party code + config under the project root only**:
-  - keep: project files that are not under the venv / site-packages / __pycache__
-    / .git / the run dir (step outputs);
+D is **first-party CODE, grouped by repo root** — precisely `.py` files + `uv.lock` (#15):
+  - keep: first-party reads that are `.py` OR whose basename is `uv.lock`, and are not under
+    the venv / site-packages / __pycache__ / .git / the run dir (step outputs). Grouped by the
+    read's git repo root (metis#11 multi-root — a consumer repo's code is captured too);
+  - **the `.py`+`uv.lock` allowlist is the exact contract (#15):** any OTHER first-party file
+    — data (`.parquet`, `schema.json`, `.csv`) OR a non-lock config (`.yaml`/`.toml`/`.json`) —
+    is dropped. Data is class-1 (keyed via upstream output-hashes in K_pre, never D); a consumer
+    repo's exp-relative Dataset would otherwise leak in under multi-root. (If a step ever needs a
+    non-`.py`/`uv.lock` config in D, widen the allowlist deliberately.)
+  - the target module's OWN file is captured explicitly (`_capture_target`, #15) — runpy runs it
+    as `__main__`, so the sys.modules snapshot alone misses it;
   - collapse any site-packages read → a single `used_site_packages` flag (the Go
     side folds the uv.lock digest into Code.Deps, not D);
   - upstream artifacts + the dataset are NOT in D — they are class-1 keyed via the
@@ -31,6 +39,7 @@ a syscall-trace sensor swap; D's definition is unchanged.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import runpy
@@ -114,6 +123,12 @@ def _classify(path: str) -> None:
     run_dir = os.environ.get("METIS_RUN_DIR")
     if run_dir and ap.startswith(os.path.abspath(run_dir) + os.sep):
         return
+    # D is first-party CODE + the dep lock — NOT data (#15). Without this gate, metis#11's
+    # multi-root capture pulls a consumer repo's exp-relative Dataset (`.parquet`, `schema.json`)
+    # into D as "first-party", since it sits under the repo root (not METIS_RUN_DIR). Data is
+    # class-1 (keyed via the upstream output-hashes in K_pre), never in D.
+    if not (rel.endswith(".py") or os.path.basename(rel) == "uv.lock"):
+        return
     _roots.setdefault(root, set()).add(rel)
 
 
@@ -154,6 +169,20 @@ def _write_reads() -> None:
         json.dump(payload, fh, indent=2)
 
 
+def _capture_target(target: str) -> None:
+    """Capture the traced module's OWN file (#15). `runpy.run_module(target,
+    run_name="__main__")` runs the target as `__main__` and does NOT leave it under its
+    qualified name in `sys.modules`, so `_snapshot_modules` captures its parent packages but
+    not the module itself (it lands in metis's own D only by bytecode-cache luck). Resolve its
+    file explicitly so an edit to the target step's own code always invalidates its cache."""
+    try:
+        spec = importlib.util.find_spec(target)  # imports parents to locate, does NOT run target
+    except (ImportError, AttributeError, ValueError, ModuleNotFoundError):
+        return
+    if spec is not None and isinstance(spec.origin, str):
+        _classify(spec.origin)
+
+
 def main() -> None:
     if len(sys.argv) < 2:
         print("usage: python -m metis.trace <module> [args...]", file=sys.stderr)
@@ -161,6 +190,7 @@ def main() -> None:
     target = sys.argv[1]
     sys.argv = sys.argv[1:]  # present the target's own argv to it
     sys.addaudithook(_audit)
+    _capture_target(target)  # #15: the target's own file (runpy runs it as __main__)
     try:
         runpy.run_module(target, run_name="__main__", alter_sys=True)
     finally:

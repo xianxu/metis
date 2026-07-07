@@ -111,3 +111,26 @@ def test_write_reads_emits_roots_map(tmp_path, monkeypatch):
     assert "roots" in payload and "reads" not in payload and "project_root" not in payload
     assert payload["roots"].get(str(repo)) == ["pkg/m.py"], payload["roots"]
     assert payload["used_site_packages"] in (True, False)
+
+
+def test_classify_excludes_data_keeps_code(tmp_path):
+    """D is first-party CODE + uv.lock — NOT data. metis#11's multi-root would otherwise pull a
+    consumer repo's exp-relative Dataset (.parquet/schema.json) into D as 'first-party' (#15)."""
+    r = tmp_path / "repo"
+    (r / "data").mkdir(parents=True)
+    _git_init(str(r))
+    (r / "features.py").write_text("# code\n")
+    (r / "uv.lock").write_text("# lock\n")
+    (r / "data" / "train.parquet").write_bytes(b"PAR1")
+    (r / "data" / "schema.json").write_text("{}\n")
+    for name in ("features.py", "uv.lock", "data/train.parquet", "data/schema.json"):
+        trace._classify(str(r / name))
+    # Only code + the dep lock survive; the parquet + schema.json data are dropped.
+    assert trace._roots[str(r)] == {"features.py", "uv.lock"}, trace._roots
+
+
+def test_capture_target_records_own_module_file():
+    """_capture_target resolves the traced module's OWN file — runpy runs the target as __main__,
+    so the sys.modules snapshot misses it; an edit to the target step's code must still land in D (#15)."""
+    trace._capture_target("metis.io")
+    assert any("metis/io.py" in paths for paths in trace._roots.values()), trace._roots
