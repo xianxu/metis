@@ -1,12 +1,13 @@
 ---
 id: 000015
-status: working
+status: codecomplete
 deps: []
 github_issue:
 created: 2026-07-06
 updated: 2026-07-06
 estimate_hours: 1.3
 started: 2026-07-06T17:51:11-07:00
+actual_hours: N/A
 ---
 
 # Trace sensor misses the traced target module's own code + misclassifies exp-relative data as first-party (surfaced by the kbench#5 wrapper flip)
@@ -83,6 +84,7 @@ total: 1.3
 ## Log
 
 ### 2026-07-06
+- 2026-07-06: closed — metis#15 done via TDD (inline; verified in main: go build+vet+test 9/9 ok, uv pytest 39 passed). Fix A: _capture_target(target) in main() resolves the traced module OWN file (importlib.util.find_spec → _classify) since runpy runs it as __main__ and the sys.modules snapshot misses it (bytecode-cache luck for metis steps). Fix B: enforce D = .py + uv.lock in _classify — data (.parquet/schema.json) dropped (metis#11 multi-root had leaked kbench exp-relative Dataset as first-party). Tests: test_capture_target_records_own_module_file + test_classify_excludes_data_keeps_code; existing 6 trace tests + metis#11 cross-repo/HIT-MISS green (reads.json shape unchanged → no Go change). VERIFIED VIA THE REAL SENSOR: python -m metis.trace metis.steps.predict → metis/steps/predict.py captured + no data leaked. Unblocks kbench#5 (the wrapper flip). --no-actual: the analysis interleaved with the kbench#5 flip verification (cross-repo detour) so the metis window (0.23h) undercounts — interleaved active-time practice.; review verdict: FIX-THEN-SHIP
 - Filed from the kbench#5 flip verification: the flip proved the wrappers CAN route through
   `metis.trace` (kbench code roots appear) but (A) the swept module's own code is missing and (B)
   data leaks in — so the flip was reverted (broken cache key) and blocked on this. Both are metis
@@ -90,3 +92,4 @@ total: 1.3
 
 ### 2026-07-06 (implemented)
 - **DONE via TDD.** Fix A: `_capture_target(target)` (importlib.util.find_spec → _classify the origin) in main() — the traced module's OWN .py is always in D (runpy runs it as __main__ → snapshot misses it). Fix B: `.py`/`uv.lock` allowlist gate in `_classify` — data (.parquet/schema.json) dropped (metis#11's multi-root had leaked kbench's exp-relative Dataset). Tests: test_capture_target_records_own_module_file, test_classify_excludes_data_keeps_code. **Verified via the REAL sensor:** `python -m metis.trace metis.steps.predict` → `metis/steps/predict.py` captured + no data leaked. Full suite: 39 py passed + go 9/9 ok. Unblocks kbench#5 (the wrapper flip).
+- **Close-review round-1 (FIX-THEN-SHIP, 0 Critical / 1 Important — fixed).** Reconciled the  module docstring (the in-code definition of D): it still said "first-party code + config under the project root" but Fix B made D exactly  +  (a non-lock config is now dropped). Updated the docstring to state the allowlist + the target-capture (#15) + that data is class-1. Doc-only.

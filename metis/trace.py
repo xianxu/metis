@@ -7,9 +7,17 @@ file `open`s, runs the step module as `__main__`, and on exit snapshots
 `(path, git-blob-hash)` pairs for the cache key; re-hashing them on a later run is
 what decides HIT vs MISS (an edited code file → its hash moves → MISS).
 
-D is **first-party code + config under the project root only**:
-  - keep: project files that are not under the venv / site-packages / __pycache__
-    / .git / the run dir (step outputs);
+D is **first-party CODE, grouped by repo root** — precisely `.py` files + `uv.lock` (#15):
+  - keep: first-party reads that are `.py` OR whose basename is `uv.lock`, and are not under
+    the venv / site-packages / __pycache__ / .git / the run dir (step outputs). Grouped by the
+    read's git repo root (metis#11 multi-root — a consumer repo's code is captured too);
+  - **the `.py`+`uv.lock` allowlist is the exact contract (#15):** any OTHER first-party file
+    — data (`.parquet`, `schema.json`, `.csv`) OR a non-lock config (`.yaml`/`.toml`/`.json`) —
+    is dropped. Data is class-1 (keyed via upstream output-hashes in K_pre, never D); a consumer
+    repo's exp-relative Dataset would otherwise leak in under multi-root. (If a step ever needs a
+    non-`.py`/`uv.lock` config in D, widen the allowlist deliberately.)
+  - the target module's OWN file is captured explicitly (`_capture_target`, #15) — runpy runs it
+    as `__main__`, so the sys.modules snapshot alone misses it;
   - collapse any site-packages read → a single `used_site_packages` flag (the Go
     side folds the uv.lock digest into Code.Deps, not D);
   - upstream artifacts + the dataset are NOT in D — they are class-1 keyed via the
