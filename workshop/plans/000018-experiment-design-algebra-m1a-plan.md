@@ -181,15 +181,16 @@ The soundness-critical boundary. Swap the interior to input-addressed keying, ma
 Make the pipeline per-fold, materialize the partition once above the sweeper, persist raw fold rows, and wire the nested loop. **Boundary close:** a config × 5-fold run persists 5 raw rows + an aggregated `(mean,SE)`; the `data` steps + partition run once; adding one config recomputes only its folds.
 
 ### Task 14: fold-aware Python pipeline (`features`, `train`, `fold_score`)
-**Files:** Modify `metis/model.py`, `metis/steps/train.py`, `kbench/steps/titanic/features` (+ its py); Test `metis/model_test.py` + step fixtures
+**Files:** Modify `metis/model.py`, `metis/steps/train.py`, `kbench/steps/titanic/features` (+ its py); Test `tests/test_model.py` + step fixtures
 > **Fix (review):** `features` must emit BOTH the analysis rows AND the assessment rows transformed by the **analysis-fitted** transform (else `train` has no assessment set to score). Thread the fold-context.
+> **Fix (change-code judge):** the fold loop + `np.mean` live in `metis/model.py:cv_score`, NOT `train.py` (which delegates to `cv_score`). Extract `fold_score` from `model.py`; `train.py`'s change is to call `fold_score` (one fold) instead of `cv_score` (loop→mean).
 - [ ] **Step 1 — failing tests:** `fold_score(X_ana,y_ana,X_ass,y_ass,kind,seed,params)` fits on analysis, scores on assessment → one accuracy; `train` given fold-context `{partition,idx}` emits `metrics{fold_score}` + the per-fold model; `features` given `{partition,idx}` fits its transforms on analysis rows, emits analysis+assessment both transformed by the analysis fit.
 - [ ] **Step 2 — FAIL.**
-- [ ] **Step 3 — implement:** add `model.fold_score` (extract the single-fold body of `cv_score`); rewrite `train.py` to read the fold-context, subset analysis/assessment, emit ONE `fold_score` (drop the internal loop + `np.mean`); make `features` fold-aware (fit-on-analysis, transform-both). Keep the fit-on-all path for ship (M1a-5).
+- [ ] **Step 3 — implement:** add `model.fold_score` (extract the single-fold body from `model.py:cv_score` — the loop + `np.mean` live there); rewrite `train.py` to read the fold-context, subset analysis/assessment, and call `fold_score` for that one split (replacing the `cv_score` call) → emit ONE `fold_score`; make `features` fold-aware (fit-on-analysis, transform-both). Keep the fit-on-all path for ship (M1a-5).
 - [ ] **Step 4 — PASS** (`uv run pytest`). **Step 5 — commit:** `#18 M1a-4: per-fold features/train + fold_score (analysis-fit, assessment-transform)`
 
 ### Task 15: engine-synthesized partition (once above the sweeper)
-**Files:** Modify `cmd/metis` (partition materialization), `metis/steps/cv_split.py`; Test reuse `metis/split_test.py` + `cmd/metis`
+**Files:** Modify `cmd/metis` (partition materialization), `metis/steps/cv_split.py`; Test reuse `tests/test_split.py` (`cv_folds` lives in `metis/split.py`) + `cmd/metis`
 > **Fix (review):** the Partition is config-invariant → synthesize a `cv-split` step from `sweeper.resample.cv` (single-source) and run it ONCE above the sweeper; cache + share; hand it to `FixedKFolds.Init` via `ctx`.
 - [ ] **Step 1 — failing test:** the engine, given `sweeper.resample.cv:{k:5,stratify:true}`, materializes the partition once (after `data`, before the config loop) via the `cv-split` step-type; content = which-rows; k folds disjoint+covering; deterministic under seed; NOT re-run per config. (M1a: one assignment artifact + fold-index; k-separate-partition granularity is a later optimization — note in `## Log`.)
 - [ ] **Step 2 — FAIL.**
@@ -243,6 +244,10 @@ Close the loop. **Boundary close:** the reshaped `titanic-sweep.md` runs end-to-
 - [ ] **Step 3 — close:** `sdlc close --issue 18` (measured `--actual`, `--verified` with e2e + soundness-gate evidence).
 
 ---
+
+## Cross-repo boundary (change-code judge)
+
+Several tasks mutate the **kbench peer repo**, not metis: **T5** (`titanic-sweep.md`), **T14** (`kbench/steps/titanic/features`), **T18** (`kbench/steps/titanic/submission`), **T20** (manual run). metis's `sdlc milestone-close`/`close` mandatory fresh-eyes review diffs the **metis** tree (`BASE_SHA..HEAD`), so kbench-side changes **escape the automated boundary review**. Before touching kbench: read its `AGENTS.local.md` + `MEMORY.md` (per AGENTS.md peer-repo rule). Commit the kbench edits in kbench's tree, and **run a separate fresh-eyes review over the kbench diff** at the M1a-4/M1a-5 boundaries (the metis milestone-close won't cover it). The metis engine changes stay reviewable under metis's own gates.
 
 ## Notes / open seams (not M1a)
 
