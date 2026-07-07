@@ -65,8 +65,24 @@ a Run. `--cache` (default on) enables the metis#2 validating-trace cache (see `a
 ### Step-executable contract (what M3 step-types must honor)
 
 The runner invokes one executable per step, resolved from `uses: <layer>/<steptype>` to
-`<stepdir>/<layer>/<steptype>` on the **step path** — `$METIS_STEP_PATH` (colon-separated)
-if set, else `<repo-root>/steps`; first existing file wins.
+`<stepdir>/<layer>/<steptype>` on the **step path**; first existing file wins
+(`cmd/metis/exec.go:resolve`). The step path (`cmd/metis/steppath.go:stepPath`) is:
+1. `$METIS_STEP_PATH` (OS-list-separated) if set — the explicit override; else
+2. **discovered from the workspace's dependency graph** (metis#16): anchor on the
+   experiment's nearest `construct/base.manifest` ancestor, walk that repo's
+   `construct/deps` chain with **`ariadne/pkg/layergraph`** — *the same topology source
+   `weave` reads for skills* (ARCH-DRY, one dep-graph walk, not a second parser) — and
+   take each layer's `steps/` dir, **nearest (leaf) first**. So `metis run` in kbench
+   discovers `kbench/steps` → `kaggle/steps` → `metis/steps` with no wrapper (the old
+   `kbench/bin/krun` collapses — a kbench follow-up); else
+3. `<repo.Root(cwd)>/steps` (a bare repo with no construct marker).
+
+Because `resolve` is first-match-wins, **leaf-first ordering = nearest-layer-wins**: a
+workspace step shadows a base-layer step of the same name (the correct layer-override
+semantics). This **inverts** the retired `krun` wrapper's base-first order — harmless
+today (the `metis`/`kaggle`/`titanic` namespaces are disjoint, so no clash), but the
+krun-collapse follow-up must not assume byte-identical resolution. A found-anchor-but-
+broken-graph surfaces layergraph's actionable error rather than degrading silently.
 
 - **Working dir:** `runs/<run-id>/<step-id>/`, created by the runner; the child runs with
   its **cwd set to this dir**.
