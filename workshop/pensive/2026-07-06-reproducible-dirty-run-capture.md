@@ -6,7 +6,7 @@ created: 2026-07-06
 
 # Reproducible dirty-run capture — the workbench reproducibility spine
 
-> **DONE 2026-07-06** — all three issues merged: metis#13 (config immutability), #11 (trace multi-root), #14 (capture run-spec + single-run + loud status). A dirty krun (single or sweep) now reproducibly snapshots code + spec to refs/metis/*, loud when it cant. **Remaining connector:** flip the kbench wrappers (adapt/features/submission) to route through metis.trace so kbench code actually produces a reads.json that feeds the closure — a kbench-side follow-up.
+> **DONE 2026-07-06** — all three issues merged: metis#13 (config immutability), #11 (trace multi-root), #14 (capture run-spec + single-run + loud status). A dirty krun (single or sweep) now reproducibly snapshots code + spec to refs/metis/*, loud when it cant. **Connector DONE:** kbench#5 flipped the wrappers through metis.trace; metis#15 (surfaced by the flip) fixed the sensor to capture the traced module OWN file + keep D to .py+uv.lock (data excluded). Verified end-to-end: editing features.py now busts the cache (HIT→MISS) + is captured. The substrate fires for kbench.
 
 Settled with the operator 2026-07-06 (walking-through the dirty-iteration scenario). This note
 is the source-of-truth for the follow-on metis issues (#11 + #13/#14/#15 below); the issues cite it.
