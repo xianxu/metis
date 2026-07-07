@@ -19,10 +19,12 @@ proposal). Source-of-truth for **metis#16** (step-discovery) + **kaggle#5** (sub
 > - **kaggle#5** (merged, PR #4): thin `kaggle submit --run <id>` — extracted `internal/submit`
 >   (`SubmitAndPoll`+`pollScore`, shared by the step + the CLI, "not a copy"), slug from `record.json`
 >   (local parse, zero metis dep) or `-c`. Built-binary smoke → `public_score: 0.775`, no pipeline edit.
-> - **Remaining thread:** **kbench#6** (open) — collapse `bin/krun` → `metis run` now that discovery is
->   dependency-driven (repoint `e2e/thread_test.py` + docs, delete `krun`). NB the discovery is
->   leaf-first, which *inverts* krun's base-first precedence — harmless today (disjoint namespaces),
->   but the collapse must not assume byte-identical resolution.
+> - **kbench#6** (merged, PR #5): `bin/krun` collapsed → `metis run`. The e2e `_krun` helper execs the
+>   built metis binary directly (no `METIS_STEP_PATH`/`METIS_BIN`); docs swept to plain `metis run`
+>   (operator has metis on PATH); atlas reconciled; `bin/krun` deleted; e2e 3-passed driving `metis run`
+>   directly. Side-quest: RUNBOOK §4 now uses `kaggle submit --run` (kaggle#5). **All three layering
+>   refinements done — the layer model is fully realized: metis owns run+discovery, kaggle owns
+>   steps+submit, kbench is a pure workspace with no wrapper.**
 
 ## The corrected model (operator's words)
 
