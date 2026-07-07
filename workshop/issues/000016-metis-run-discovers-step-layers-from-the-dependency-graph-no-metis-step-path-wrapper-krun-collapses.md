@@ -78,6 +78,7 @@ Single-boundary (plain checkboxes, one `sdlc close`).
 ## Log
 
 ### 2026-07-06
+- 2026-07-06: closed — Re-close to re-review the post-review delta (ec57e56): added TestStepPath_BrokenGraphDegradesLoudly for the error/degrade branch (the close-review Important finding), tightened resolve-prefix assertions to separator-terminated /steps/ (Minor), plan ## Revisions noting Walk error is surfaced not swallowed. go test ./... all green (6 steppath tests incl broken-graph). No production-code behavior change since the SHIP review — test + docs only.; review verdict: SHIP
 - 2026-07-06: closed — metis run discovers the step-path from the construct/deps dep-graph (ariadne/pkg/layergraph, weave's source), leaf-first nearest-wins, METIS_STEP_PATH override. PROOF: cold hermetic titanic-baseline in real kbench, METIS_STEP_PATH unset + no krun → exit 0, all 7 steps resolved across all 3 layers (kaggle/download+submit, titanic/adapt+submission, metis/cv-split|train|predict). go test ./... all green (repo.FindUp hit/miss; stepPathFromLayers leaf-first; real stepPath→resolve 3-layer fixture; nearest-wins clash; env-override). Both change-code judges INFO. actual 0.56 = impl window (57c31e0→HEAD); design attention (exploration+plan+review forks) largely pre-first-commit/background, so this mildly under-counts design.; review verdict: SHIP
 - Filed from the layering discussion (operator): run is metis's; kaggle contributes steps; kbench is
   a workspace. The `krun` wrapper's only real job — assembling METIS_STEP_PATH — is dependency
