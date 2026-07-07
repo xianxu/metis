@@ -9,50 +9,62 @@ estimate_hours:
 started: 2026-07-07T11:08:31-07:00
 ---
 
-# experiment-design algebra + nested CV — resample axis ($fold/$cv), per-axis reducers, fold as a first-class value
+# experiment-design algebra M1a — three-phase shape + black-box sweeper (inner-CV, read-time reduction, fold-as-artifact)
 
 ## Problem
 
-The sweep treats data-splitting (CV) as an internal detail of `train`, and selects by raw cv-max on a
-single fold split → selection-overfitting (the metis-v1 overfit gap: ~0.81 cv → 0.78 public). The
-workbench can't express **nested CV** (an honest estimate of the sweep procedure) or a **resample
-axis** at all. Deeper: `$any` (metis#17) unified config *choice*, but data-splits are a second kind
-of axis the algebra doesn't model.
+The sweep treats data-splitting (CV) as an internal detail of `train` and selects by raw cv-max on a
+single split → selection-overfitting (the metis-v1 gap: ~0.81 cv → 0.78 public). Resampling and
+selection aren't first-class; the workbench can't produce an honest per-config mean/std, and the
+structure that nested-CV (#23) and leakage-safe features (#20) need doesn't exist.
 
 ## Spec
 
-The **core** of metis-v2 (`brain/data/project/metis-v2-experiment-algebra.md`, M1). Full design +
-open questions: **`workshop/pensive/2026-07-07-experiment-design-algebra.md`** (read first).
-Direction:
-- **Axis kinds + reducers:** config axes (`$any`, ranges) reduce by **selection** (argmax objective);
-  a new **resample axis** (`$fold`/`$cv(k)`, `$repeat`, `$bootstrap`) reduces by **aggregation**
-  (mean/std). One config → many fold-runs → one aggregated score.
-- **Nested CV** = an outer resample axis wrapping (config-selection over an inner resample axis),
-  expressed declaratively (not three hand-written loops). Reports the honest procedure estimate.
-- **Fold becomes a first-class threaded value** (visible to `features`/`cv-split`/`train`), not a
-  `train` internal — the same restructuring fold-aware features (metis#20) needs.
-- **Ledger reduces per-axis:** config→rows, resample→mean/std columns, nested-outer→one estimate.
-- Prior art to mirror: **tidymodels** `rsample`/`nested_cv`/`workflow_set`/`collect_metrics`; sklearn
-  `Pipeline`+`GridSearchCV(cv=)`.
+metis-v2 **M1a** — the substrate everything else depends on. Full design:
+**`workshop/pensive/2026-07-07-experiment-design-algebra.md`** (read first). The converged model
+(supersedes the earlier `fold: {$cv: cv-split}` resample-axis framing):
 
-**DESIGN-FIRST:** brainstorm → durable plan before code (resolve the pensive's 5 open questions).
-Everything else in metis-v2 depends on this (esp. the fold-as-first-class value).
+- **Three-phase shape:** `data` (get-data/adapt — run ONCE, above the resample) │ `pipeline` (the swept
+  algorithm×hyperparameter atom — always per-fold) │ `ship` (predict/submission — winner only). The
+  `data│pipeline` boundary is the ONE structural cut → cross-fold leakage-safety with no per-step markers.
+- **Black-box sweeper:** `training data → winner`. Owns its **inner resampling** (`resample: {cv:k}`),
+  objective, and select rule; hands the driver the winner's **reconstructable run-keys** (config + keys
+  that pin the run + provenance), not just abstract hyperparameters. Reuses the metis#7 Ask/Tell Sampler
+  seam (grid = the degenerate sampler; adaptive later). = mlr3 `AutoTuner`.
+- **Read-time reduction → `(mean, SE)`:** the ledger keeps raw per-fold rows; a pure `Aggregate` groups
+  by config and reduces over folds → mean/SE (so #19's select rule is a free re-reduction — no re-run).
+- **Fold-as-artifact + fan-in reducer:** the sweeper materializes k partition artifacts (content-hash =
+  which-rows); downstream re-keys via the existing upstream chain; the reducer is a gather node keyed on
+  the sorted set of manifested fold-content hashes. Invariant/per-fold boundary emergent from the DAG.
+- **`driver: single`** for M1a (fit sweeper on all → ship winner). The outer `driver:cv` (nested-CV) is
+  **metis#23**.
+
+Keeps metis's two-phase key (`K_pre` → validate); folds AND code read-set are runtime-manifested.
+Prior art: mlr3 (`AutoTuner` = our sweeper), tidymodels (three-phase), sklearn (Pipeline per-fold).
+**DESIGN-FIRST:** durable plan (superpowers-writing-plans → `workshop/plans/`) before code.
 
 ## Done when
 
-- A shape can declare a `$fold`/`$cv` resample axis; the engine expands `(config × fold)` runs and the
-  ledger aggregates fold-runs → mean/std per config (not one lucky split).
-- **Nested CV** expressible: an outer resample around the sweep yields an honest procedure-level
-  estimate distinct from the (inflated) inner cv-max.
-- `fold` is a first-class value the pipeline threads (unblocks metis#20).
-- atlas: the experiment-design algebra (axis kinds + reducers) documented.
+- A shape declares `data│pipeline│ship` + a `sweeper` with `resample: {cv:k}`; the engine runs
+  `(config × fold)`, the ledger keeps raw fold rows and `Aggregate` reduces → per-config `(mean, SE)`
+  (not one lucky split); the sweeper selects a winner and ships it via `driver: single`.
+- Fold enters the cache key as a partition artifact; get-data/adapt cache once, features/train per fold
+  (emergent from the DAG); the fan-in reducer's CV score is content-addressed + order-independent.
+- Titanic runs through the new shape and reproduces (or beats) v1's promoted winner honestly.
+- atlas: the driver/sweeper/pipeline algebra + three-phase shape documented.
 
 ## Plan
 
-- [ ] Brainstorm the algebra + resolve the pensive's open design questions (where folds live; ledger per-axis reduction; nested×cache cost; sampler orthogonality) → durable plan.
+- [ ] (spec → durable plan) three-phase shape parse + validate; black-box sweeper owning inner-CV; read-time `Aggregate` → (mean,SE); fold-as-artifact scatter + fan-in reducer; driver:single ship path; Titanic e2e.
 
 ## Log
 
 ### 2026-07-07
 - Filed as metis-v2 M1 (the core). Design in the pensive + project (`sources`). The operator's frame:
   resampling & selection are first-class, declarative axes with per-axis reducers — one algebra, not loops.
+
+### 2026-07-07 (design converged)
+- Reframed from "M1 + nested CV" to **M1a** (the sweeper substrate); nested-CV split to **metis#23**.
+  Converged model: driver/sweeper/pipeline + three-phase shape + no fit_scope marker + input-addressed
+  cache leaning (metis#24). Superseded the `fold: {$cv: cv-split}` axis framing after a 3-front prior-art
+  survey (mlr3 is the structural twin). Design + reshaped titanic-sweep.md in the pensive.
