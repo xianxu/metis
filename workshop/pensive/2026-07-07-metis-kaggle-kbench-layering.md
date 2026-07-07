@@ -1,5 +1,5 @@
 ---
-status: active
+status: done
 type: pensive
 created: 2026-07-07
 ---
@@ -8,6 +8,21 @@ created: 2026-07-07
 
 Clarified with the operator 2026-07-07 (after I mis-layered a `krun submit` / `krun in kaggle`
 proposal). Source-of-truth for **metis#16** (step-discovery) + **kaggle#5** (submit CLI).
+
+> **DONE 2026-07-07** — both refinements landed + merged, each through the full SDLC (SHIP verdicts):
+> - **metis#16** (merged, PR #13): `metis run` discovers its step-path by walking the workspace's
+>   `construct/deps` chain via the already-public `ariadne/pkg/layergraph.Walk` — the SAME topology
+>   source weave reads (no second dep parser, no ariadne change). Anchors on `construct/base.manifest`
+>   (kbench has no go.mod), leaf-first = nearest-layer-wins for free (resolve is first-match-wins).
+>   Proven in real kbench: cold hermetic titanic thread, `METIS_STEP_PATH` unset + no `krun` → all 3
+>   layers resolved.
+> - **kaggle#5** (merged, PR #4): thin `kaggle submit --run <id>` — extracted `internal/submit`
+>   (`SubmitAndPoll`+`pollScore`, shared by the step + the CLI, "not a copy"), slug from `record.json`
+>   (local parse, zero metis dep) or `-c`. Built-binary smoke → `public_score: 0.775`, no pipeline edit.
+> - **Remaining thread:** **kbench#6** (open) — collapse `bin/krun` → `metis run` now that discovery is
+>   dependency-driven (repoint `e2e/thread_test.py` + docs, delete `krun`). NB the discovery is
+>   leaf-first, which *inverts* krun's base-first precedence — harmless today (disjoint namespaces),
+>   but the collapse must not assume byte-identical resolution.
 
 ## The corrected model (operator's words)
 
