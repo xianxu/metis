@@ -93,10 +93,10 @@ the titanic shapes (verify its sweep-smoke e2e against this branch before merge)
 
 Single-boundary (plain checkboxes, one `sdlc close`).
 
-- [ ] RED: `$any:{map}` expands to bundled `{label: sub}` points (golden-equal to the old `$oneof`); `$any:[list]` recurses into a nested-descriptor element.
-- [ ] GREEN: fold `$oneof`'s map logic into `$any`'s map branch (shared helper); make the `$any` list branch call `expandValue` per element (recursion); delete the `$oneof` case + grammar.
-- [ ] Migrate metis's own `$oneof` test fixtures/cases → `$any` map form; full `pkg/shape` + cmd/metis green.
-- [ ] atlas `experiment.md` shape section reconciled; file/track the kbench shape-migration follow-up.
+- [x] RED: `$any:{map}` expands to bundled `{label: sub}` points (golden-equal to the old `$oneof`); `$any:[list]` recurses into a nested-descriptor element.
+- [x] GREEN: fold `$oneof`'s map logic into `$any`'s map branch; make the `$any` list branch call `expandValue` per element (recursion); delete the `$oneof` case + grammar.
+- [x] Migrate metis's own `$oneof` test fixtures/cases → `$any` map form; full `pkg/shape` + cmd/metis green (+ shape.go doc comments, cue, ledger test, python data-plane).
+- [x] atlas `experiment.md`/`index.md` + datatype template reconciled; kbench#7 filed + migrated + sweep-smoke verified.
 
 ## Log
 
