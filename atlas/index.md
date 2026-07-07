@@ -39,7 +39,9 @@ identical on a non-Kaggle platform?* — if yes, it lives here.
   side ref (parented on HEAD, GC-protected) — a real code SHA even for a dirty run — then backfills the
   record's `CodeManifest.D` (the `(path, blob-hash)` pointer-manifest) + `Commit`. **Two capture hooks
   (metis#14):** (a) *code a step runs* → the multi-root read-set trace (metis#11 — spans every repo,
-  metis + a consumer); (b) *the run-spec `.md` itself* → `git hash-object`'d explicitly (the trace never
+  metis + a consumer; **metis#15**: captures the traced module's OWN file explicitly since runpy runs
+  it as `__main__`, and keeps only `.py` + `uv.lock` — data like `.parquet`/`schema.json` is class-1,
+  never in `D`); (b) *the run-spec `.md` itself* → `git hash-object`'d explicitly (the trace never
   sees it — the Go runner parses it). It runs for **single runs** (`refs/metis/runs/<run-id>`, from
   `runResolvedExperiment`) and **sweeps** (`refs/metis/sweeps/<shape-run-id>`, once per shape-run — the
   `runOpts.inSweep` guard suppresses redundant per-point capture). **Loud** (metis#14): a

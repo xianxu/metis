@@ -31,6 +31,7 @@ a syscall-trace sensor swap; D's definition is unchanged.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import runpy
@@ -114,6 +115,12 @@ def _classify(path: str) -> None:
     run_dir = os.environ.get("METIS_RUN_DIR")
     if run_dir and ap.startswith(os.path.abspath(run_dir) + os.sep):
         return
+    # D is first-party CODE + the dep lock — NOT data (#15). Without this gate, metis#11's
+    # multi-root capture pulls a consumer repo's exp-relative Dataset (`.parquet`, `schema.json`)
+    # into D as "first-party", since it sits under the repo root (not METIS_RUN_DIR). Data is
+    # class-1 (keyed via the upstream output-hashes in K_pre), never in D.
+    if not (rel.endswith(".py") or os.path.basename(rel) == "uv.lock"):
+        return
     _roots.setdefault(root, set()).add(rel)
 
 
@@ -154,6 +161,20 @@ def _write_reads() -> None:
         json.dump(payload, fh, indent=2)
 
 
+def _capture_target(target: str) -> None:
+    """Capture the traced module's OWN file (#15). `runpy.run_module(target,
+    run_name="__main__")` runs the target as `__main__` and does NOT leave it under its
+    qualified name in `sys.modules`, so `_snapshot_modules` captures its parent packages but
+    not the module itself (it lands in metis's own D only by bytecode-cache luck). Resolve its
+    file explicitly so an edit to the target step's own code always invalidates its cache."""
+    try:
+        spec = importlib.util.find_spec(target)  # imports parents to locate, does NOT run target
+    except (ImportError, AttributeError, ValueError, ModuleNotFoundError):
+        return
+    if spec is not None and isinstance(spec.origin, str):
+        _classify(spec.origin)
+
+
 def main() -> None:
     if len(sys.argv) < 2:
         print("usage: python -m metis.trace <module> [args...]", file=sys.stderr)
@@ -161,6 +182,7 @@ def main() -> None:
     target = sys.argv[1]
     sys.argv = sys.argv[1:]  # present the target's own argv to it
     sys.addaudithook(_audit)
+    _capture_target(target)  # #15: the target's own file (runpy runs it as __main__)
     try:
         runpy.run_module(target, run_name="__main__", alter_sys=True)
     finally:
