@@ -1,11 +1,12 @@
 ---
 id: 000016
-status: open
+status: working
 deps: []
 github_issue:
 created: 2026-07-06
 updated: 2026-07-06
 estimate_hours:
+started: 2026-07-06T22:32:07-07:00
 ---
 
 # metis run discovers step layers from the dependency graph — no METIS_STEP_PATH wrapper (krun collapses)
