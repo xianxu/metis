@@ -7,11 +7,12 @@
 //
 // The algebra:
 //   - product   — a plain map {a:…, b:…}: cartesian of its fields (counts MULTIPLY).
-//   - $any:[…]  — a set; each value taken VERBATIM (nested $-descriptors inside a $any
-//     alternative are NOT expanded — unlike $oneof, which recurses into its branches).
-//     Counts = len. Sugar for the flat sum.
-//   - $oneof:{L:sub,…} — a labeled sum; counts ADD; resolves by BUNDLING (the chosen
-//     branch collapses to {label: resolved-sub}, not flat siblings).
+//   - $any      — the one choice primitive; dispatches on argument shape (the syntax
+//     carries the type). Both forms recurse into their sub-values and counts ADD:
+//       · $any:[…]        — UNTAGGED sum: each alternative recursively expanded, value
+//         placed BARE at the leaf.
+//       · $any:{L:sub,…}  — TAGGED sum: each branch recursively expanded, resolved by
+//         BUNDLING as {label: resolved-sub} (conditional/hierarchical params).
 //   - $linear-range/$log-range: [lo,hi,steps?] — a domain+metric; the grid sampler
 //     materializes it (linspace/logspace); steps defaults to range_steps.
 //
@@ -30,7 +31,7 @@ import (
 
 // FreeParam is one swept coordinate of a point: the dotted path to the space-
 // descriptor leaf (e.g. "train.model", "train.model.rf.n_estimators") and the value
-// chosen there (a scalar, a $any alternative, or a $oneof branch label). Fixed leaves
+// chosen there (a scalar, a $any-list alternative, or a $any-map branch label). Fixed leaves
 // and dataflow-refs never appear — only free (descriptor) leaves.
 type FreeParam struct {
 	Path  string
@@ -133,40 +134,55 @@ func expandProduct(path string, m map[string]any, rangeSteps int) ([]resolved, e
 func expandDescriptor(path, key string, arg any, rangeSteps int) ([]resolved, error) {
 	switch key {
 	case "$any":
-		alts, ok := arg.([]any)
-		if !ok {
-			return nil, fmt.Errorf("%s: $any takes a list of alternatives", path)
-		}
-		if len(alts) == 0 {
-			return nil, fmt.Errorf("%s: $any is empty — an empty set would collapse the whole sweep to zero points", path)
-		}
-		out := make([]resolved, 0, len(alts))
-		for _, a := range alts {
-			out = append(out, resolved{value: a, free: []FreeParam{{Path: path, Value: a}}})
-		}
-		return out, nil
+		// $any dispatches on its argument shape — the syntax carries the type:
+		//   list literal → UNTAGGED sum (bare value); map literal → TAGGED sum
+		//   (bundled {label: sub}). Both recurse; counts ADD; coords decompose.
+		switch a := arg.(type) {
+		case []any: // untagged sum — recurse per element, value placed bare
+			if len(a) == 0 {
+				return nil, fmt.Errorf("%s: $any list is empty — an empty set would collapse the whole sweep to zero points", path)
+			}
+			var out []resolved
+			for _, alt := range a {
+				subs, err := expandValue(path, alt, rangeSteps)
+				if err != nil {
+					return nil, err
+				}
+				for _, s := range subs {
+					// A list element resolves AT path (no path segment added). If the
+					// element produced its own coords (a nested descriptor), those ARE
+					// the coords — don't add a duplicate {path, value}. A leaf element
+					// (no sub-free) records its value as the coord (as verbatim $any did).
+					free := s.free
+					if len(free) == 0 {
+						free = []FreeParam{{Path: path, Value: s.value}}
+					}
+					out = append(out, resolved{value: s.value, free: free})
+				}
+			}
+			return out, nil
 
-	case "$oneof":
-		branches, ok := arg.(map[string]any)
-		if !ok {
-			return nil, fmt.Errorf("%s: $oneof takes a map of labeled branches", path)
-		}
-		if len(branches) == 0 {
-			return nil, fmt.Errorf("%s: $oneof has no branches — would collapse the whole sweep to zero points", path)
-		}
-		var out []resolved
-		for _, label := range sortedKeys(branches) {
-			sub, err := expandValue(join(path, label), branches[label], rangeSteps)
-			if err != nil {
-				return nil, err
+		case map[string]any: // tagged sum — recurse per branch, bundle {label: sub}
+			if len(a) == 0 {
+				return nil, fmt.Errorf("%s: $any map has no branches — would collapse the whole sweep to zero points", path)
 			}
-			for _, r := range sub {
-				bundled := map[string]any{label: r.value} // bundling: {label: resolved-sub}
-				free := concat([]FreeParam{{Path: path, Value: label}}, r.free)
-				out = append(out, resolved{value: bundled, free: free})
+			var out []resolved
+			for _, label := range sortedKeys(a) {
+				sub, err := expandValue(join(path, label), a[label], rangeSteps)
+				if err != nil {
+					return nil, err
+				}
+				for _, r := range sub {
+					bundled := map[string]any{label: r.value} // bundling: {label: resolved-sub}
+					free := concat([]FreeParam{{Path: path, Value: label}}, r.free)
+					out = append(out, resolved{value: bundled, free: free})
+				}
 			}
+			return out, nil
+
+		default:
+			return nil, fmt.Errorf("%s: $any takes a list of alternatives or a map of labeled branches", path)
 		}
-		return out, nil
 
 	case "$linear-range", "$log-range":
 		vals, err := materializeRange(path, key, arg, rangeSteps)

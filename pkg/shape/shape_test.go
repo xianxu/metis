@@ -3,10 +3,61 @@ package shape
 import (
 	"math"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/xianxu/metis/pkg/experiment"
 )
+
+// $any over a LIST recurses into each alternative (the new uniform recursion): a
+// nested descriptor inside an element expands, and coords decompose without a
+// duplicate at the element's own path.
+func TestExpandAnyList_RecursesIntoElements(t *testing.T) {
+	steps := []experiment.Step{step("s", map[string]any{
+		"lr": map[string]any{"$any": []any{
+			map[string]any{"$linear-range": []any{0.0, 1.0, 3}}, // → 0, 0.5, 1
+			9.0,
+		}},
+	})}
+	pts, err := Expand(steps, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pts) != 4 { // 3 from the range + 1 scalar
+		t.Fatalf("got %d points, want 4 (range(3)+scalar)", len(pts))
+	}
+	for _, p := range pts { // exactly one free-param coord at "s.lr", never duplicated
+		n := 0
+		for _, fp := range p.FreeParams {
+			if fp.Path == "s.lr" {
+				n++
+			}
+		}
+		if n != 1 {
+			t.Errorf("point %v has %d s.lr coords, want exactly 1", p.With, n)
+		}
+	}
+}
+
+// $any rejects a non-list, non-map argument.
+func TestExpandAny_BadArg(t *testing.T) {
+	_, err := Expand([]experiment.Step{step("s", map[string]any{
+		"x": map[string]any{"$any": 5},
+	})}, 5)
+	if err == nil {
+		t.Fatal("$any with a scalar arg must error (want: list or map)")
+	}
+}
+
+// A stale $oneof is a clear error after the merge (the migration signal).
+func TestOneofRemoved(t *testing.T) {
+	_, err := Expand([]experiment.Step{step("s", map[string]any{
+		"x": map[string]any{"$oneof": map[string]any{"a": 1}},
+	})}, 5)
+	if err == nil || !strings.Contains(err.Error(), "$oneof") {
+		t.Fatalf("stale $oneof should error as unknown descriptor; got %v", err)
+	}
+}
 
 // step is a terse constructor for a shape step in tests.
 func step(id string, with map[string]any, needs ...string) experiment.Step {
@@ -14,8 +65,8 @@ func step(id string, with map[string]any, needs ...string) experiment.Step {
 }
 
 // The keystone: the worked titanic-sweep example. features(4) × [ logreg:C(3) +
-// rf:n_estimators(3)×max_depth(2)=6 ] = 4 × 9 = 36. Proves $oneof ADDs (not
-// multiplies) — a flat product would give features(4) × C(3) × n_est(3) × depth(2).
+// rf:n_estimators(3)×max_depth(2)=6 ] = 4 × 9 = 36. Proves the $any-MAP (tagged) form
+// ADDs (not multiplies) — a flat product would give features(4) × C(3) × n_est(3) × depth(2).
 func TestExpand_TitanicSweep36Points(t *testing.T) {
 	steps := []experiment.Step{
 		step("adapt", map[string]any{
@@ -24,7 +75,7 @@ func TestExpand_TitanicSweep36Points(t *testing.T) {
 			}},
 		}),
 		step("train", map[string]any{
-			"model": map[string]any{"$oneof": map[string]any{
+			"model": map[string]any{"$any": map[string]any{
 				"logreg": map[string]any{"C": map[string]any{"$any": []any{0.1, 1.0, 10.0}}},
 				"rf": map[string]any{
 					"n_estimators": map[string]any{"$any": []any{100, 300, 500}},
@@ -104,7 +155,7 @@ func TestExpand_AllSingletonIsOnePoint(t *testing.T) {
 // Free-param paths: only space-descriptor leaves contribute; ragged across branches.
 func TestExpand_FreeParamPathsRagged(t *testing.T) {
 	steps := []experiment.Step{step("train", map[string]any{
-		"model": map[string]any{"$oneof": map[string]any{
+		"model": map[string]any{"$any": map[string]any{
 			"logreg": map[string]any{"C": map[string]any{"$any": []any{0.1, 1.0}}},
 			"rf":     map[string]any{"n_estimators": map[string]any{"$any": []any{100, 300}}},
 		}},
@@ -222,17 +273,17 @@ func TestExpand_RangeSingleAndZeroSteps(t *testing.T) {
 	}
 }
 
-// An empty $any/$oneof must error, not silently collapse the whole sweep to zero.
+// An empty $any (list OR map) must error, not silently collapse the sweep to zero.
 func TestExpand_EmptyDescriptorErrors(t *testing.T) {
 	if _, err := Expand([]experiment.Step{step("s", map[string]any{
 		"x": map[string]any{"$any": []any{}},
 	})}, 6); err == nil {
-		t.Error("empty $any must error")
+		t.Error("empty $any list must error")
 	}
 	if _, err := Expand([]experiment.Step{step("s", map[string]any{
-		"x": map[string]any{"$oneof": map[string]any{}},
+		"x": map[string]any{"$any": map[string]any{}},
 	})}, 6); err == nil {
-		t.Error("empty $oneof must error")
+		t.Error("empty $any map must error")
 	}
 }
 
