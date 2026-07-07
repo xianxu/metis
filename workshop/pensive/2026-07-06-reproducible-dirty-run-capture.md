@@ -1,10 +1,12 @@
 ---
-status: active
+status: done
 type: pensive
 created: 2026-07-06
 ---
 
 # Reproducible dirty-run capture — the workbench reproducibility spine
+
+> **DONE 2026-07-06** — all three issues merged: metis#13 (config immutability), #11 (trace multi-root), #14 (capture run-spec + single-run + loud status). A dirty krun (single or sweep) now reproducibly snapshots code + spec to refs/metis/*, loud when it cant. **Remaining connector:** flip the kbench wrappers (adapt/features/submission) to route through metis.trace so kbench code actually produces a reads.json that feeds the closure — a kbench-side follow-up.
 
 Settled with the operator 2026-07-06 (walking-through the dirty-iteration scenario). This note
 is the source-of-truth for the follow-on metis issues (#11 + #13/#14/#15 below); the issues cite it.
