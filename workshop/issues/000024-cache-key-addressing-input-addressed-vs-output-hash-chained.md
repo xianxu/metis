@@ -51,3 +51,22 @@ Related: metis#25 (root gap — get-data path-hash) is the complementary soundne
 ### 2026-07-07
 - Surfaced in the metis-v2 design conversation (pensive). The operator's framing: key = input identity
   (recipe + code + rows), not upstream output bytes. Touches existing cache architecture → isolated here.
+
+### 2026-07-07 (folded into metis#18 M1a + soundness fix)
+- **Decision: input-addressed, FOLDED INTO M1a** as its own `cache identity` review boundary (M1a-3) —
+  it shares the reducer-`Done`-key surface M1a builds anyway, so one coherent cache-identity design beats
+  build-on-output-hashing-then-rewrite.
+- **Soundness fix (M1a plan review):** the naive swap (delete `Kpre`'s upstream *output-hash* term, use
+  upstream `Kpre`) is **unsound** — metis's read-set `D` deliberately EXCLUDES data/upstream artifacts
+  (`trace.py`), so the output-hash-chain is the *only* carrier of upstream-**code-edit** propagation
+  downstream. Deleting it → an edit to `features.py` re-runs `features` (its own `D`) but NOT `train`
+  (whose `Kpre` uses `features`' code-invariant `Kpre`, and whose `D` excludes `features`' output) →
+  `train` serves a stale output. **Required pairing:** a **transitive-`D` snapshot stored in each step's
+  OWN `Entry`** — a topo-fold `transitiveD[id] = ownD ∪ ⋃_{d∈needs} transitiveD[d]`, validated against
+  the current tree. (A re-review round-2 rejected the naive "walk upstreams' live entries at hit-check":
+  the topo executor *heals* an edited upstream's `Entry.D` before the downstream is validated → the walk
+  re-hashes clean → stale HIT. The downstream must carry its own snapshot; store & validate then key on
+  the same bytes — symmetric — and it's eviction-robust + diamond-correct.) Distinguishes a code change
+  (MISS) from output nondeterminism (HIT — the win we want). Needs an `Entry`-schema field (`TransitiveD`).
+  Plan + real-executor soundness-gate test in `workshop/plans/000018-*-plan.md` (M1a-3, Tasks 11-13).
+  Lessons in `workshop/lessons.md`.
