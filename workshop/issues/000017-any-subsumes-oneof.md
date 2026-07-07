@@ -1,11 +1,12 @@
 ---
 id: 000017
-status: open
+status: working
 deps: []
 github_issue:
 created: 2026-07-07
 updated: 2026-07-07
 estimate_hours:
+started: 2026-07-07T00:46:24-07:00
 ---
 
 # unify $oneof into $any — list=untagged / map=tagged sum, both recursive; delete $oneof
