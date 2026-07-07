@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,6 +12,57 @@ import (
 
 	"github.com/xianxu/metis/pkg/record"
 )
+
+// The single-run capture WIRING (not just the captureSingleRun helper): a dirty single
+// `metis run` driven through the REAL runExperiment entrypoint must capture — exercising
+// the `if !o.inSweep { captureSingleRun }` seam in runResolvedExperiment. Deleting that
+// call site leaves the direct-helper tests green but must fail THIS one (the Done-when is
+// about `metis run`, not the helper).
+func TestRunExperiment_SingleRunCapturesViaWiring(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	root := gitInit(t)
+	// An initial commit so HEAD exists (a real repo always has one; capture parents on HEAD).
+	if err := os.WriteFile(filepath.Join(root, "README"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitCommitAll(t, root, "init")
+	// A test/echo experiment at the repo root, untracked (dirty) — so even with an empty
+	// Python read-set its spec .md is captured to a side ref (#14's spec hook).
+	expPath := filepath.Join(root, "exp.md")
+	expMD := "---\ntype: experiment\nid: e\nseed: 1\nstatus: active\nsteps:\n  - id: only\n    uses: test/echo\n    with: {a: 1}\n---\n"
+	if err := os.WriteFile(expPath, []byte(expMD), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runID := "single-wire"
+	run, err := runExperiment(runOpts{
+		expPath:  expPath,
+		runID:    runID,
+		stepPath: []string{filepath.Join(repoRoot(t), "testdata", "steps")},
+		now:      fixedNow(),
+		git:      gitCLI{},
+		out:      io.Discard,
+	})
+	if err != nil {
+		t.Fatalf("runExperiment: %v", err)
+	}
+	if run.Status != "ok" {
+		t.Fatalf("status = %q; want ok", run.Status)
+	}
+	rb, _ := os.ReadFile(filepath.Join(root, "runs", runID, "record.json"))
+	var rec record.RunRecord
+	if err := json.Unmarshal(rb, &rec); err != nil {
+		t.Fatal(err)
+	}
+	c := rec.Steps[0].Code
+	if c.CaptureStatus != "captured" {
+		t.Errorf("single run via runExperiment must capture (the wiring); status=%q", c.CaptureStatus)
+	}
+	if c.Commit == "" || gitRev(t, root, "refs/metis/runs/"+runID) != c.Commit {
+		t.Errorf("refs/metis/runs/<id> must point at the captured commit; commit=%q", c.Commit)
+	}
+}
 
 // captureSweepCode, given a sweep whose points' reads.json name a DIRTY first-party
 // file, captures it to a side ref and backfills each point-record's CodeManifest with

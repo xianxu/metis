@@ -1,12 +1,13 @@
 ---
 id: 000014
-status: working
+status: codecomplete
 deps: [metis#11, metis#13]
 github_issue:
 created: 2026-07-06
 updated: 2026-07-06
 estimate_hours: 1.79
 started: 2026-07-06T16:33:59-07:00
+actual_hours: N/A
 ---
 
 # Complete + harden code capture — snapshot the run-spec .md, wire single-run capture, make capture failures loud
@@ -83,7 +84,9 @@ total: 1.79
 ## Log
 
 ### 2026-07-06
+- 2026-07-06: closed — metis#14 complete+harden capture (fork impl via TDD; verified in main: go build+vet+test ./... 9/9 ok, uv run pytest 37 passed incl. CUE #CodeManifest capture_status conformance). Three additions on #11 multi-root capture: (1) run-spec .md hook (addSpecToClosure — git-hash-objects the exp .md into its repo closure, symlink-resolved + existence-guarded); (2) single-run capture — shared captureRunCode from runResolvedExperiment (refs/metis/runs/<id>), captureSweepCode delegates (refs/metis/sweeps once per shape-run, not per point, guarded by o.inSweep); (3) loud CodeManifest.CaptureStatus (captured|degraded|none) + stderr note (warnOnUncaptured) + CUE. Heart tests green+regression-proofed (TestCaptureSingleRun_CapturesCodeAndSpec, TestCaptureSingleRun_LoudWhenUncaptured, sweep regression); regression-proofed by disabling addSpecToClosure/warnOnUncaptured (both fail cleanly). Fork caught+fixed 2 real bugs: Abs-vs-git-toplevel symlink Rel trap (EvalSymlinks-before-Rel) + addSpecToClosure zeroing a repo D on an absent fixture spec (existence guard). --no-actual: fork-compressed window (1 commit). Completes the reproducible-dirty-run effort: a dirty krun (single or sweep) reproducibly snapshots code + spec to refs/metis/*, loud when it cant.; review verdict: FIX-THEN-SHIP
 - Filed from the reproducible-dirty-run design pass (pensive). Deps #13 + #11. Completes metis#8's
   capture: the run-spec hook, single-run wiring, and loud failure — so a dirty iteration loop is
   actually reproducible, not aspirationally so.
 - **Implemented via a full-context fork (TDD).** All Plan items done: shared `captureRunCode` + single-run wiring (`runResolvedExperiment`, guarded by `o.inSweep` so the sweep doesn't double-capture per point), the run-spec `.md` hook (`addSpecToClosure`, symlink-resolved + existence-guarded), loud `CodeManifest.CaptureStatus` (captured|degraded|none) + stderr note + CUE `#CodeManifest`. Heart tests green + regression-proofed; sweep regression green. Fork caught+fixed 2 real bugs (Abs-vs-git-toplevel symlink `Rel` trap; `addSpecToClosure` zeroing a repo D on an absent fixture spec). go build+vet+test ./... 9/9 + uv pytest 37 green. Completes the reproducible-dirty-run effort.
+- **Close-review round-1 (FIX-THEN-SHIP, 0 Critical / 2 Important — both fixed).** (1) The single-run capture WIRING was untested (the direct `captureSingleRun` tests bypass `runResolvedExperiment`'s `if !o.inSweep` seam) — added `TestRunExperiment_SingleRunCapturesViaWiring` driving the REAL `runExperiment` in a git repo (asserts CaptureStatus=captured + refs/metis/runs/<id> = the commit), **regression-proofed** (disabling the run.go call site → fail; restore → pass). The invocation-path-test lesson, applied. (2) The CUE conformance test built a `CodeManifest` without `CaptureStatus` (omitempty skipped it) → added `CaptureStatus: "captured"` (+ `Repo`) so `cue vet` actually vets the closed disjunction. go+py suites green.
