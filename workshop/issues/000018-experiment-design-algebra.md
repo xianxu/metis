@@ -1,11 +1,12 @@
 ---
 id: 000018
-status: open
+status: working
 deps: []
 github_issue:
 created: 2026-07-07
 updated: 2026-07-07
 estimate_hours:
+started: 2026-07-07T11:08:31-07:00
 ---
 
 # experiment-design algebra + nested CV — resample axis ($fold/$cv), per-axis reducers, fold as a first-class value
