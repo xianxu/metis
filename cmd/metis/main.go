@@ -9,9 +9,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"path/filepath"
-
-	"github.com/xianxu/metis/internal/repo"
 )
 
 func main() {
@@ -53,26 +50,11 @@ func cmdRun(args []string) error {
 	_, err := runExperiment(runOpts{
 		expPath:   rest[0],
 		runID:     *runID,
-		stepPath:  stepPath(),
+		stepPath:  stepPath(rest[0]),
 		cache:     *cache,
 		maxPoints: *maxPoints,
 		dryRun:    *dryRun,
 		out:       os.Stdout,
 	})
 	return err
-}
-
-// stepPath is the ordered list of directories searched for a step-type executable
-// (<layer>/<steptype>): $METIS_STEP_PATH (colon-separated) when set, else
-// <repo-root>/steps. Real metis/* step-types land under steps/ in M3.
-func stepPath() []string {
-	if v := os.Getenv("METIS_STEP_PATH"); v != "" {
-		return filepath.SplitList(v)
-	}
-	if wd, err := os.Getwd(); err == nil {
-		if root, err := repo.Root(wd); err == nil {
-			return []string{filepath.Join(root, "steps")}
-		}
-	}
-	return []string{"steps"}
 }
