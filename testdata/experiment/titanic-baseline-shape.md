@@ -24,7 +24,7 @@ steps:
       dataset: adapt
       folds: split
       model:
-        $oneof:
+        $any:
           logreg: {C: {$any: [0.1, 1, 10]}}
           rf: {n_estimators: {$any: [100, 300]}, max_depth: {$any: [4, 8]}}
 ---

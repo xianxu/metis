@@ -58,10 +58,10 @@ def test_train_then_predict_chain(tmp_path, monkeypatch):
     assert len(preds) == 20  # the toy test split
 
 
-def test_train_step_accepts_oneof_model_config(tmp_path, monkeypatch):
-    """The train step must consume metis#6's $oneof bundle `{kind: {params}}` — the EXACT
+def test_train_step_accepts_any_map_model_config(tmp_path, monkeypatch):
+    """The train step must consume the $any-map (ex-$oneof) bundle `{kind: {params}}` — the EXACT
     shape a hyperparam sweep (kbench#4) emits (was: `kind = w["model"]` failed on the dict)."""
-    run = tmp_path / "runs" / "r-oneof"
+    run = tmp_path / "runs" / "r-any-map"
     _run_step(monkeypatch, run, "split", {"dataset": "toy", "k": 3, "stratify": True}, cv_split.main)
     ts = _run_step(monkeypatch, run, "train",
                    {"dataset": "toy", "folds": "split",

@@ -44,7 +44,7 @@ _pipeline: {
 
 // #Experiment is the SINGLETON case: the shared pipeline narrowed to `type:
 // "experiment"` with no sweep block. Closed (no stray fields) for sharp diagnostics.
-// An all-singleton #ExperimentShape (every $any/$oneof/$*-range collapsed) expands to
+// An all-singleton #ExperimentShape (every $any/$*-range collapsed) expands to
 // exactly one of these.
 #Experiment: {
 	_pipeline
@@ -53,7 +53,7 @@ _pipeline: {
 
 // #ExperimentShape (metis#6) is the experiment lifted into a config-space: the same
 // shared pipeline, plus `type: "experiment-shape"` and a `sweep:` block. The `$`-key
-// value-algebra ($any/$oneof/$*-range) lives in the untyped `with` bag (value-level,
+// value-algebra ($any [list=untagged / map=tagged] + $*-range) lives in the untyped `with` bag (value-level,
 // NOT CUE-typed — pkg/shape expands it), so structurally a shape is a pipeline + sweep.
 #ExperimentShape: {
 	_pipeline

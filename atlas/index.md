@@ -64,7 +64,7 @@ identical on a non-Kaggle platform?* — if yes, it lives here.
   abort-on-drift, no-false-abort-on-dirty. [metis#7]
 - **`pkg/shape`** (the experiment-shape lift) — metis#6, the pure config-space algebra over v0's
   untyped `with` bag. `Expand(steps, rangeSteps) → []Point` collapses a shape's reserved `$`-key
-  descriptors (`$any` set / `$oneof` bundled labeled-sum that ADDs / `$linear-range`·`$log-range`
+  descriptors (`$any` — one choice primitive dispatching on shape: list=untagged set / map=tagged bundled labeled-sum, both recursive + ADD / `$linear-range`·`$log-range`
   grid) into concrete v0-shaped points, each carrying its **free-param path** (the swept coordinates →
   #8 ledger key / #3 point-address). `experiment.Shape`/`Sweep` parse `type: experiment-shape` + the
   `sweep:` block; CUE `#ExperimentShape` (with `#Experiment` = the singleton refinement, single-sourced

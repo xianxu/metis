@@ -1,7 +1,7 @@
 ---
 type: type
 name: experiment-shape
-description: Use when creating or editing an experiment-shape — an experiment lifted into a config-space that a sweep explores. Triggers on "create a sweep", "author an experiment-shape", "sweep these hyperparameters", editing markdown with `type: experiment-shape`, "/xx-datatype experiment-shape". The metis#6 datatype above `experiment`: same pipeline, but `with` leaves may declare a space ($any/$oneof/$*-range) that `expand()` collapses into many concrete experiment points. The sweep driver (metis#7) runs them; the ledger (metis#8) records them.
+description: Use when creating or editing an experiment-shape — an experiment lifted into a config-space that a sweep explores. Triggers on "create a sweep", "author an experiment-shape", "sweep these hyperparameters", editing markdown with `type: experiment-shape`, "/xx-datatype experiment-shape". The metis#6 datatype above `experiment`: same pipeline, but `with` leaves may declare a space ($any [list=untagged / map=tagged] or $*-range) that `expand()` collapses into many concrete experiment points. The sweep driver (metis#7) runs them; the ledger (metis#8) records them.
 ---
 
 # experiment-shape
@@ -54,15 +54,20 @@ resolution, `uses` format, sweep block) are enforced by `ValidateShape` at read 
 A `with` leaf is a **literal** (fixed), a **dataflow-ref** (a string naming an upstream step,
 fixed), or a **space-descriptor** (a reserved `$`-key map). Only descriptor leaves are swept:
 
-- **`$any: [v1, v2, …]`** — a set; each value taken verbatim. `features: {$any: [[], [title]]}`.
-- **`$oneof: {label: sub, …}`** — a labeled sum; counts **ADD** (conditional params); resolves by
-  **bundling** — `model: {$oneof: {logreg: {C: …}, rf: {n_estimators: …}}}` → a point carries
-  `model: {rf: {n_estimators: 300}}`, not flat siblings.
+- **`$any`** — the one choice primitive; **dispatches on its argument shape** (the syntax carries the
+  type). Both forms **recurse** into their sub-values and counts **ADD**:
+  - **`$any: [v1, v2, …]` (list) → untagged sum.** Each alternative is recursively expanded and the
+    value is placed **bare** at the leaf. `features: {$any: [[], [title]]}` → `features: [title]`.
+  - **`$any: {label: sub, …}` (map) → tagged sum** (conditional/hierarchical params). Each branch is
+    recursively expanded and resolved by **bundling** — `model: {$any: {logreg: {C: …}, rf: {n_estimators: …}}}`
+    → a point carries `model: {rf: {n_estimators: 300}}` (the `rf` tag preserved), not flat siblings.
+    Use the map when alternatives are structured sub-spaces (the label is a clean coordinate + reads
+    well); use the list for simple values.
 - **`$linear-range: [lo, hi, steps?]` / `$log-range: [lo, hi, steps?]`** — a domain + metric; the
   grid sampler materializes it (`linspace`/`logspace`). `steps` defaults to `sweep.range_steps`.
 
 A plain map `{a: …, b: …}` is a **product** (counts multiply). So
-`features(4) × [logreg:C(3) + rf:(3×2)=6] = 36` points — `$oneof` adds, product multiplies.
+`features(4) × [logreg:C(3) + rf:(3×2)=6] = 36` points — the `$any` **map** adds, product multiplies.
 
 ## Body
 

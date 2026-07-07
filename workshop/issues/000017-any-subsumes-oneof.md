@@ -1,12 +1,13 @@
 ---
 id: 000017
-status: working
+status: codecomplete
 deps: []
 github_issue:
 created: 2026-07-07
 updated: 2026-07-07
-estimate_hours:
+estimate_hours: 0.93
 started: 2026-07-07T00:46:24-07:00
+actual_hours: 0.71
 ---
 
 # unify $oneof into $any — list=untagged / map=tagged sum, both recursive; delete $oneof
@@ -69,16 +70,40 @@ syntax carries the type. Both are **recursive** and their counts **add**; free-p
 - atlas (`experiment.md` shape section): `$any` = the one choice primitive; list=untagged/bare,
   map=tagged/bundled; both recursive. `$oneof` removed from the docs.
 
+## Estimate
+
+*Produced via `brain/data/life/42shots/velocity/estimate-logic-v3.1.md` against `baseline-v3.1.md`. Method A only.*
+
+```estimate
+model: estimate-logic-v3.1
+familiarity: 1.0
+item: smaller-go-module      design=0.15  impl=0.35
+item: atlas-docs             design=0.05  impl=0.15
+item: milestone-review       design=0.0   impl=0.2
+design-buffer: 0.15
+total: 0.93
+```
+
+The engine change is localized to `expandDescriptor`'s `$any` case (a type-switch + list recursion,
+the map branch is `$oneof`'s code moved). Bulk is the `$oneof`→`$any` sweep across tests, testdata,
+the datatype template, atlas ×2, and CUE comments (value-algebra is untyped — no schema enum change).
+Durable plan: `workshop/plans/000017-any-subsumes-oneof-plan.md` (reviewed). Cross-repo: kbench#7 migrates
+the titanic shapes (verify its sweep-smoke e2e against this branch before merge).
+
 ## Plan
 
-- [ ] RED: `$any:{map}` expands to bundled `{label: sub}` points (golden-equal to the old `$oneof`); `$any:[list]` recurses into a nested-descriptor element.
-- [ ] GREEN: fold `$oneof`'s map logic into `$any`'s map branch (shared helper); make the `$any` list branch call `expandValue` per element (recursion); delete the `$oneof` case + grammar.
-- [ ] Migrate metis's own `$oneof` test fixtures/cases → `$any` map form; full `pkg/shape` + cmd/metis green.
-- [ ] atlas `experiment.md` shape section reconciled; file/track the kbench shape-migration follow-up.
+Single-boundary (plain checkboxes, one `sdlc close`).
+
+- [x] RED: `$any:{map}` expands to bundled `{label: sub}` points (golden-equal to the old `$oneof`); `$any:[list]` recurses into a nested-descriptor element.
+- [x] GREEN: fold `$oneof`'s map logic into `$any`'s map branch; make the `$any` list branch call `expandValue` per element (recursion); delete the `$oneof` case + grammar.
+- [x] Migrate metis's own `$oneof` test fixtures/cases → `$any` map form; full `pkg/shape` + cmd/metis green (+ shape.go doc comments, cue, ledger test, python data-plane).
+- [x] atlas `experiment.md`/`index.md` + datatype template reconciled; kbench#7 filed + migrated + sweep-smoke verified.
 
 ## Log
 
 ### 2026-07-07
+- 2026-07-07: closed — Re-close after SHIP review: strengthened TestExpandAnyList to assert coord values (0/0.5/1/9 materialize through the list branch); reconciled plan Task 3 checkboxes with the kbench sweep-smoke evidence. No production behavior change (test + docs only). go test ./pkg/shape green.; review verdict: SHIP
+- 2026-07-07: closed — $any subsumes $oneof: expandDescriptor dispatches on arg shape (list=untagged bare / map=tagged bundled), both recursive; $oneof deleted. Map form golden-identical to $oneof (migrated 36-point ADD + ragged tests pass unchanged); list form gains recursion (TestExpandAnyList_RecursesIntoElements, no coord dup); TestOneofRemoved guards deletion. Swept every consumer: testdata shape (cmd/metis e2e 21pts identical), shape.go doc comments, datatype template, atlas x2, cue, ledger test, python data-plane. go test ./... + pytest(13) green; vet clean. CROSS-REPO Done-when: kbench sweep-smoke e2e PASSED against this branch (features $any list + model $any map). Both change-code judges INFO.; review verdict: SHIP
 - Filed from a design conversation (operator): `$any`/`$oneof` are the untagged/tagged forms of one
   "pick one" primitive; the list-vs-map argument shape already signals which, so the second keyword
   is redundant. Operator's proposal: `$any` dispatches on list (bare) vs map (tagged), both recursive.

@@ -7,8 +7,8 @@ cv-split step, records the CV score, and persists the model fit on all rows.
 with:
   dataset: experiment-relative path to a serialized Dataset dir   (required)
   folds:   id of the upstream cv-split step (reads its folds.json) (required)
-  model:   a kind string ("logreg" | "rf"), OR metis#6's $oneof    (required)
-           bundle carrying the swept hyperparams
+  model:   a kind string ("logreg" | "rf"), OR the $any-map     (required)
+           (tagged, ex-$oneof) bundle carrying the swept hyperparams
            ({"rf": {"n_estimators": 200, "max_depth": 4}}). Parsed by
            metis.model.parse_model_config → (kind, params).
 Outputs: model.pkl (artifact) + metrics.json{cv_score}.
@@ -31,7 +31,7 @@ def main() -> None:
         folds = json.load(f)
 
     X, y = ds.X(ds.train), ds.y(ds.train)
-    # `model` is a kind string ("logreg") OR metis#6's $oneof bundle ({"rf": {n_estimators…}}).
+    # `model` is a kind string ("logreg") OR the $any-map (ex-$oneof) bundle ({"rf": {n_estimators…}}).
     kind, params = parse_model_config(w["model"])
     score = cv_score(X, y, folds, kind, ctx.seed, params)
     model = train(X, y, kind, ctx.seed, params)  # final model: fit on ALL training rows
