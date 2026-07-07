@@ -5,7 +5,7 @@ deps: []
 github_issue:
 created: 2026-07-07
 updated: 2026-07-07
-estimate_hours:
+estimate_hours: 0.93
 started: 2026-07-07T00:46:24-07:00
 ---
 
@@ -69,7 +69,29 @@ syntax carries the type. Both are **recursive** and their counts **add**; free-p
 - atlas (`experiment.md` shape section): `$any` = the one choice primitive; list=untagged/bare,
   map=tagged/bundled; both recursive. `$oneof` removed from the docs.
 
+## Estimate
+
+*Produced via `brain/data/life/42shots/velocity/estimate-logic-v3.1.md` against `baseline-v3.1.md`. Method A only.*
+
+```estimate
+model: estimate-logic-v3.1
+familiarity: 1.0
+item: smaller-go-module      design=0.15  impl=0.35
+item: atlas-docs             design=0.05  impl=0.15
+item: milestone-review       design=0.0   impl=0.2
+design-buffer: 0.15
+total: 0.93
+```
+
+The engine change is localized to `expandDescriptor`'s `$any` case (a type-switch + list recursion,
+the map branch is `$oneof`'s code moved). Bulk is the `$oneof`→`$any` sweep across tests, testdata,
+the datatype template, atlas ×2, and CUE comments (value-algebra is untyped — no schema enum change).
+Durable plan: `workshop/plans/000017-any-subsumes-oneof-plan.md` (reviewed). Cross-repo: kbench#7 migrates
+the titanic shapes (verify its sweep-smoke e2e against this branch before merge).
+
 ## Plan
+
+Single-boundary (plain checkboxes, one `sdlc close`).
 
 - [ ] RED: `$any:{map}` expands to bundled `{label: sub}` points (golden-equal to the old `$oneof`); `$any:[list]` recurses into a nested-descriptor element.
 - [ ] GREEN: fold `$oneof`'s map logic into `$any`'s map branch (shared helper); make the `$any` list branch call `expandValue` per element (recursion); delete the `$oneof` case + grammar.

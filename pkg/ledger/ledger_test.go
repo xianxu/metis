@@ -33,7 +33,7 @@ func TestAppend_DedupByPointAddress(t *testing.T) {
 }
 
 // The CSV is ragged: columns = the union of all rows' free-params + metrics, blank
-// where a row lacks a key ($oneof: logreg rows blank n_estimators, rf rows blank C).
+// where a row lacks a key ($any-map: logreg rows blank n_estimators, rf rows blank C).
 func TestCSV_RaggedRoundTrip(t *testing.T) {
 	var l Ledger
 	l.Append(

@@ -66,7 +66,7 @@ def test_hyperparams_change_the_fit():
 
 
 def test_parse_model_config():
-    """with['model'] normalizes to (kind, params): a bare string OR the $oneof single-key bundle."""
+    """with['model'] normalizes to (kind, params): a bare string OR the $any-map single-key bundle."""
     assert parse_model_config("logreg") == ("logreg", {})
     assert parse_model_config({"rf": {"n_estimators": 200, "max_depth": 4}}) == (
         "rf", {"n_estimators": 200, "max_depth": 4})

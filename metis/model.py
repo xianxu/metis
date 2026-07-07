@@ -21,8 +21,8 @@ def parse_model_config(raw) -> tuple[str, dict]:
 
     Accepts BOTH forms the pipeline produces:
     - a bare string (`"logreg"`) — the v0 form → `(kind, {})`.
-    - a single-key dict (`{"rf": {"n_estimators": 200, "max_depth": 4}}`) — metis#6's `$oneof`
-      labeled-sum bundle → `(kind, params)`.
+    - a single-key dict (`{"rf": {"n_estimators": 200, "max_depth": 4}}`) — metis#6's `$any`-map
+      (tagged, ex-`$oneof`) labeled-sum bundle → `(kind, params)`.
     Anything else (multi-key dict, empty, non-str kind, non-dict/str) is a loud error — a
     malformed model knob must fail, not silently pick a branch.
     """
@@ -34,14 +34,14 @@ def parse_model_config(raw) -> tuple[str, dict]:
             return kind, dict(params or {})
     raise ValueError(
         f"malformed model config {raw!r}; want a kind string (\"logreg\") or a single-key "
-        f'$oneof bundle ({{"rf": {{...}}}})'
+        f'$any-map bundle ({{"rf": {{...}}}})'
     )
 
 
 def make_model(kind: str, seed: int, params: dict | None = None):
     """Construct an unfitted estimator of the given kind, seeded for determinism.
 
-    `params` are the swept hyperparams (from the `$oneof` branch); known keys are applied,
+    `params` are the swept hyperparams (from the `$any`-map branch); known keys are applied,
     unknown keys ignored (forward-compatible with shapes carrying extra knobs).
     """
     p = params or {}
