@@ -151,3 +151,27 @@ Durable plan: `workshop/plans/000018-experiment-design-algebra-m1a-plan.md` (5 r
   the analysis fit, and the ship all-rows signal. **#24 folded in** as its own `cache identity` boundary.
   Plan restructured into **5 review boundaries**: M1a-1 schema · M1a-2 pure Sampler core · M1a-3 cache
   identity (#24) · M1a-4 IO integration · M1a-5 ship+e2e. Lessons → `workshop/lessons.md`.
+
+### 2026-07-08 (M1a-3a Go rewire — SHIPPED, whole module green)
+- **M1a-3a IO rewire DONE + committed (`1bb1783`).** `cmd/metis` rewired onto the nested-Sampler fold
+  loop — `go build/vet/test ./...` + both `experiment` merge-checks all green (the all-or-nothing-compile
+  boundary that bounced 3 forks is passed). Changes: `run.go` dispatch (tolerant Parse peeks type →
+  experiment-shape is ALWAYS the nested sweep; +`runOpts.exec` test seam); `sweep.go` the nested loop
+  (`sampler.Run(GridConfigs) ⊃ sampler.Run(FixedKFolds)`, per-fold experiment = data ++ synthesized
+  cv-split ++ pipeline with config+`_fold` overlaid → Kpre fold-distinct; **failing fold is FATAL**,
+  replacing v1 record-and-continue; preserves manifest/#14-capture/#8-ledger/detect-abort); ledger (pkg +
+  cmd) Row+`Fold` coordinate + `AggregateView` (raw per-fold rows → per-config (mean,SE), #19 re-reduces
+  free); `promotedExperiment` from phases; **retired `pkg/sweep`**; dropped `--max-points`. Replaced the
+  v1 flat-sweep e2e suite with `shapesweep_test.go` (fake-exec fold-model integration: winner + N×k ledger
+  + per-config (mean,SE); fold-distinct cache; warm re-run HITs; one-knob change recomputes only affected;
+  dry-run; failing-fold-fatal; detect-abort). **Wired onto the EXISTING output-hash cache** (NOT #24).
+- **Discovery — the data-handoff soundness ripple (map under-specified this).** The map framed kbench
+  `features` fold-awareness as "the last Python piece"; it is actually a **cross-pipeline data-plane
+  change**. `collectArtifacts` only walks the step dir, so `features`' exp-relative output
+  (`../data/titanic-feat`) is INVISIBLE to the cache → a per-fold `features` HIT + `train` MISS reads
+  stale shared data (fails the "one-hyperparam change recomputes only affected folds" bar). Fix: `features`
+  must write its enriched dataset to its STEP dir (captured artifact) and `train` must read it via
+  `upstream_path`. That ripples into the **plain experiments** `titanic-baseline.md` / `titanic-features.md`
+  (train reads the exp-relative dataset) → `train.py` needs dual-mode reads OR those pipelines migrate too.
+  Phase B (features fold-aware + captured output, train dual-read, shape migrations, kbench smoke e2e) is a
+  distinct dedicated effort — checkpointed to a fresh session (see the superseding continuation).
