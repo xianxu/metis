@@ -94,11 +94,11 @@ func TestRun_NestedComposition(t *testing.T) {
 		return Run(ctx, FixedKFolds{K: 3}, func(FoldPoint) float64 { return scoreOf(p) })
 	}
 	// driver's runPoint = run the whole sweeper.
-	driverRun := func(singlePoint) Winner { return Run(ctx, sweeper, sweeperRun) }
+	driverRun := func(SinglePoint) Winner { return Run(ctx, sweeper, sweeperRun) }
 
 	winner := Run(ctx, SingleDriver{}, driverRun)
 
-	if got := winner.FreeParams[0].Value; got != "rf" {
+	if got := winner.Point.FreeParams[0].Value; got != "rf" {
 		t.Fatalf("winner model = %v, want rf", got)
 	}
 	if winner.Score.Mean != 0.85 {

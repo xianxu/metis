@@ -59,10 +59,10 @@ func (g GridConfigs) Done(s configState) Winner {
 	}
 	w := s.results[best]
 	return Winner{
-		FreeParams: w.point.FreeParams,
-		Seed:       s.seed,
-		FoldKeys:   w.meanSE.ToldSet,
-		Score:      w.meanSE,
+		Point:    w.point,
+		Seed:     s.seed,
+		FoldKeys: w.meanSE.ToldSet,
+		Score:    w.meanSE,
 	}
 }
 

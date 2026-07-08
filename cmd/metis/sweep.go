@@ -106,17 +106,20 @@ func runShapeSweep(o runOpts, sh experiment.Shape, now func() time.Time, out io.
 	ctx := sampler.Ctx{Seed: sh.Seed, Partition: ss.partRef}
 	fmt.Fprintf(out, "metis: sweep %s (%s) — %d configs × %d folds\n", sh.ID, shapeRunID[:12], len(configPts), k)
 
-	// The nested fold: driver:single runs the sweeper once on all data (the degenerate
-	// outer Sampler — sampler.SingleDriver documents the seam metis#23's driver:cv replaces).
-	// The sweeper grids over configs; the inner FixedKFolds scores each over k folds.
-	winner := sampler.Run(ctx,
-		sampler.GridConfigs{Points: configPts, Direction: sh.Sweeper.Objective.Direction, Select: sh.Sweeper.Objective.Select},
-		func(c shape.Point) sampler.MeanSE {
-			ms := sampler.Run(ctx, sampler.FixedKFolds{K: k},
-				func(f sampler.FoldPoint) float64 { return ss.runPipelineFold(c, f) })
-			ss.configs = append(ss.configs, configScore{point: c, meanSE: ms})
-			return ms
-		})
+	// The three-level nested fold — driver ⊃ sweeper ⊃ resample, each the SAME Sampler node
+	// (metis#18). driver:single (SingleDriver) runs the sweeper once on all data and passes
+	// its Winner through; #23's driver:cv is a one-line swap of this outer Sampler. The
+	// sweeper (GridConfigs) grids over configs; the inner FixedKFolds scores each over k folds.
+	winner := sampler.Run(ctx, sampler.SingleDriver{}, func(sampler.SinglePoint) sampler.Winner {
+		return sampler.Run(ctx,
+			sampler.GridConfigs{Points: configPts, Direction: sh.Sweeper.Objective.Direction, Select: sh.Sweeper.Objective.Select},
+			func(c shape.Point) sampler.MeanSE {
+				ms := sampler.Run(ctx, sampler.FixedKFolds{K: k},
+					func(f sampler.FoldPoint) float64 { return ss.runPipelineFold(c, f) })
+				ss.configs = append(ss.configs, configScore{point: c, meanSE: ms})
+				return ms
+			})
+	})
 	if ss.err != nil {
 		return ss.err
 	}
@@ -288,7 +291,7 @@ func (ss *shapeSweep) reportWinner(w sampler.Winner) {
 		fmt.Fprintf(ss.out, "  %-30s  %.4f  %.4f\n", freeParamStr(cs.point), cs.meanSE.Mean, cs.meanSE.SE)
 	}
 	fmt.Fprintf(ss.out, "metis: winner %s — mean %.4f (SE %.4f) over %d folds\n",
-		freeParamStrFromParams(w.FreeParams), w.Score.Mean, w.Score.SE, len(w.FoldKeys))
+		freeParamStrFromParams(w.Point.FreeParams), w.Score.Mean, w.Score.SE, len(w.FoldKeys))
 }
 
 // betterFirst returns the configs sorted best-first by the objective direction (a stable
