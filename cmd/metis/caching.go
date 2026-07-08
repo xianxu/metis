@@ -20,6 +20,7 @@ import (
 // order). ONE collection primitive, two callers passing DIFFERENT maps by design (metis#24):
 //   - the record-provenance assembler (buildRecord) passes upstream OUTPUT-hashes;
 //   - the cachingExecutor's K_pre passes upstream K_pres (input identities).
+//
 // The wiring is identical; only the term's meaning differs — so after #24 the executor's
 // key and the record's Upstream deliberately DIVERGE (input-addressed vs output-addressed).
 func sortedUpstream(needs []string, terms map[string]record.Hash) []record.Hash {
@@ -68,8 +69,8 @@ type cachingExecutor struct {
 	seed     int
 	out      io.Writer
 
-	kpres       map[string]cache.Hash        // step-id → K_pre (input identity), for downstream keys
-	transitiveD map[string][]record.CodeRef  // step-id → transitive read-set closure snapshot
+	kpres       map[string]cache.Hash       // step-id → K_pre (input identity), for downstream keys
+	transitiveD map[string][]record.CodeRef // step-id → transitive read-set closure snapshot
 }
 
 // newCachingExecutor: D paths are now repo-qualified (metis#11) — each ref carries its own
