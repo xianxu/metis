@@ -16,7 +16,9 @@ with:
   dataset: a serialized Dataset dir — either an experiment-relative    (required)
            path (v1 shared) OR an upstream step-id whose captured
            `dataset/` artifact this step reads (metis#18 per-fold handoff).
-  folds:   id of the upstream cv-split step (reads its folds.json)     (required)
+  folds:   id of the upstream cv-split step (reads its folds.json) —   (per-fold)
+           REQUIRED per-fold (defines the split); OPTIONAL all-rows
+           (a v1 plain experiment → a reference cv_score; the ship omits it).
   model:   a kind string ("logreg" | "rf") OR the $any-map bundle      (required)
            ({"rf": {"n_estimators": 200, "max_depth": 4}}). Parsed by
            metis.model.parse_model_config → (kind, params).
@@ -41,26 +43,34 @@ def main() -> None:
     # upstream step-id whose captured `dataset/` artifact this step reads (the per-fold
     # features→train handoff). io.dataset_dir resolves both.
     ds = io.load_dataset(io.dataset_dir(ctx, w["dataset"]))
-    with open(io.upstream_path(ctx, w["folds"], "folds.json")) as f:
-        folds = json.load(f)
-
     X, y = ds.X(ds.train), ds.y(ds.train)
     # `model` is a kind string ("logreg") OR the $any-map bundle ({"rf": {n_estimators…}}).
     kind, params = parse_model_config(w["model"])
 
     fold = w.get("_fold")
     if isinstance(fold, dict) and "idx" in fold:
-        # per-fold: the engine drives the fold axis; score the one assessment fold.
-        score = fold_score(X, y, folds, int(fold["idx"]), kind, ctx.seed, params)
+        # per-fold: the engine drives the fold axis; score the one assessment fold. `folds`
+        # is REQUIRED here — the fold assignment is what defines the analysis/assessment split.
+        score = fold_score(X, y, _load_folds(ctx, w), int(fold["idx"]), kind, ctx.seed, params)
         io.write_metrics(ctx, {"fold_score": score})
         return
 
-    # all-rows (v1 / ship refit): whole-CV mean + a model fit on ALL rows for predict.
-    score = cv_score(X, y, folds, kind, ctx.seed, params)
+    # all-rows (v1 plain / the M1a-5 ship refit): fit a model on ALL rows for predict. The
+    # ship refit needs NO CV — the honest (mean, SE) is the sweep's job. `folds` is OPTIONAL:
+    # a v1 plain experiment supplies cv-split and gets a reference cv_score; the ship omits it.
     model = train(X, y, kind, ctx.seed, params)
     with open(io.out_path(ctx, "model.pkl"), "wb") as f:
         pickle.dump(model, f)
-    io.write_metrics(ctx, {"cv_score": score})
+    metrics: dict[str, float] = {}
+    if "folds" in w:
+        metrics["cv_score"] = cv_score(X, y, _load_folds(ctx, w), kind, ctx.seed, params)
+    io.write_metrics(ctx, metrics)
+
+
+def _load_folds(ctx: io.StepContext, w: dict) -> list:
+    """Read the upstream cv-split step's folds.json (the per-row fold assignment)."""
+    with open(io.upstream_path(ctx, w["folds"], "folds.json")) as f:
+        return json.load(f)
 
 
 if __name__ == "__main__":

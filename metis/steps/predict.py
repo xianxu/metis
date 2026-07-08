@@ -6,8 +6,11 @@ back to train rows if there is no test split), writing predictions.csv (id +
 prediction) — the submission-shaped output.
 
 with:
-  dataset: experiment-relative path to a serialized Dataset dir   (required)
-  model:   id of the upstream train step (reads its model.pkl)     (required)
+  dataset: a serialized Dataset dir — an upstream step-id whose      (required)
+           captured `dataset/` artifact this step reads (the ship
+           refit's all-rows `features` output) OR an exp-relative
+           path (v1). io.dataset_dir resolves both.
+  model:   id of the upstream train step (reads its model.pkl)       (required)
 Outputs: predictions.csv (artifact) + metrics.json{n_predictions}.
 """
 
@@ -24,7 +27,10 @@ from metis.model import predict
 def main() -> None:
     ctx = io.step_context()
     w = io.read_with(ctx)
-    ds = io.load_dataset(io.exp_path(ctx, w["dataset"]))
+    # `dataset` is polymorphic (metis#18), like train: an upstream step-id whose captured
+    # `dataset/` artifact this step reads (the driver:single ship's all-rows `features`
+    # output) OR an exp-relative path (v1 plain experiments). io.dataset_dir resolves both.
+    ds = io.load_dataset(io.dataset_dir(ctx, w["dataset"]))
     with open(io.upstream_path(ctx, w["model"], "model.pkl"), "rb") as f:
         model = pickle.load(f)
 
