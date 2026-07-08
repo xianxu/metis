@@ -81,3 +81,20 @@ re-run); group-by-family leaderboard; loud warning on an unmodeled knob.
 
 ARCH: pure `pkg/sampler` + CUE + manifests, no new IO in the hot path (ARCH-PURE); the schema is the
 single source, Go + Python + the merge-check derive from it (ARCH-DRY / single-source).
+
+## Revisions
+
+### 2026-07-08 — spec pass (metis#19 `## Spec` is now the record of truth)
+- **`C` complexity basis corrected: `linear·inverse` → `linear·value`.** The shorthand above was
+  wrong taken literally — sklearn `C` is *inverse* regularization strength, so small C = strong reg =
+  *simpler*; complexity must INCREASE with C (`basis: value`). `inverse` is kept in the vocabulary for
+  a true penalty-weight knob (`alpha`/`lambda`), not C.
+- **Two-level selection made explicit:** the `select` rule is the WITHIN-family policy; ACROSS families
+  is *always* `argmax-mean` over the robust per-family winners. This makes `argmax-mean` a true special
+  case (within=argmax, across=argmax ⇒ global argmax-mean, M1a unchanged), not a fourth branch of ad-hoc
+  logic.
+- **Rules consume only the monotone direction today:** Pareto + rank-tie-break are invariant to any
+  monotone transform, so `form: linear|log`/scale is declared-for-forward (a complexity-penalty rule),
+  NOT consumed by the current rules. Documented as declared-not-yet-consumed (the direction IS used).
+- **3 open knobs settled** (see the issue Log): tagged-union `select` mirroring `driver`; first
+  manifests = swept step-types only; select required-explicit with `pct-loss` canonical.
