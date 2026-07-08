@@ -66,8 +66,8 @@ identical on a non-Kaggle platform?* — if yes, it lives here.
   `--dry-run` lists configs. **Detect-and-abort** on mid-sweep HEAD-sha drift (not the dirty flag — the
   sweep's own outputs dirty the tree). Proven by `shapesweep_test.go` (fake exec on the real cache):
   nested loop → winner + N×k ledger + per-config `(mean,SE)`, fold-distinct cache, warm-HIT, incremental
-  recompute, dry-run, fatal-fold, abort-on-drift. (Full `pkg/sampler` surface + the input-addressed cache
-  land with metis#24/M1a-5.) [metis#18]
+  recompute, dry-run, fatal-fold, abort-on-drift. (The input-addressed cache identity **shipped M1a-3b** —
+  see `pkg/cache` below; the full `pkg/sampler` surface write-up lands with M1a-5/Task 21.) [metis#18]
 - **`pkg/shape`** (the experiment-shape lift) — metis#6, the pure config-space algebra over v0's
   untyped `with` bag. `Expand(steps, rangeSteps) → []Point` collapses a shape's reserved `$`-key
   descriptors (`$any` — one choice primitive dispatching on shape: list=untagged set / map=tagged bundled labeled-sum, both recursive + ADD / `$linear-range`·`$log-range`
@@ -83,7 +83,9 @@ identical on a non-Kaggle platform?* — if yes, it lives here.
 - **`pkg/cache`** (the validating-trace policy layer) — metis#2, the step cache over `pkg/cas`
   (bytes) + `pkg/record` (key-material). Pure core shipped M1: `Kpre(rec, seed)` (ex-ante key =
   hash of step-id + uses + resolved-with + seed + sorted-upstream), `Validate(D, hasher)` (re-hash
-  the read-set → HIT/MISS), `OutputKey(kpre, D)`, the `Entry` index codec. **M2 shipped** the
+  a read-set → HIT/MISS), the `Entry` index codec; **M1a-3b added** `MergeTransitiveD(ownD, upstream...)`
+  (the deduped, canonically-sorted transitive closure fold) + `Entry.TransitiveD` (the stored snapshot
+  `isHit` re-hashes — see the input-addressed identity below). **M2 shipped** the
   read-sensor + blob-hasher: `metis/trace.py` (a `python -m metis.trace <step>` launcher installing a
   `sys.addaudithook` + `sys.modules` snapshot → writes the first-party code closure to
   `runs/<id>/<step>/reads.json`; the step wrappers launch through it), and Go `loadReadSet` /
@@ -96,13 +98,22 @@ identical on a non-Kaggle platform?* — if yes, it lives here.
   `loadReadSet` rejects a legacy v1 `reads.json` LOUD rather than let it parse to an empty `D` → a
   vacuous K_pre-only false HIT.
   Honest limit: the audit hook is a *lower-bound* (a C-extension `fopen` bypasses it), but those are
-  class-1 data reads (keyed via upstream output-hashes), not first-party code. **M3 shipped** the
+  class-1 data reads, not first-party code. **M3 shipped** the
   runner integration: `cachingExecutor` (cmd/metis) decorates the step executor — per step it computes
-  `K_pre` (from config + seed + upstream output-hashes accumulated in topo order), looks up
-  `.metis-cache/index/<K_pre>.json`, and on a HIT (stored `D` re-hashes clean via `git hash-object`;
-  `uv.lock` folded into `D` so a dep upgrade invalidates) **materializes** the output manifest
+  `K_pre`, looks up `.metis-cache/index/<K_pre>.json`, and on a HIT **materializes** the output manifest
   (metrics + artifacts) from the CAS and **skips the subprocess**; a MISS runs, stores the output +
-  writes the index entry. `metis run --cache` (default on). The **leaf policy**
+  writes the index entry. `metis run --cache` (default on).
+  **Input-addressed identity (metis#24, M1a-3b):** the executor's `K_pre` upstream term is the upstream
+  steps' **`K_pres`** (input identities, accumulated in `c.kpres` in topo order), NOT their output-hashes —
+  so a key is computable pre-run and invariant to upstream output non-determinism. Upstream-**code** edits
+  (which the dropped output-hash chain used to propagate) are caught instead by a **transitive-`D` snapshot**:
+  each entry stores `TransitiveD` = this step's own `D` ∪ each upstream's stored closure (a topo-fold), and
+  `isHit` re-hashes THAT closure (`git hash-object`; `uv.lock` folded in so a dep upgrade invalidates), not
+  just own-`D`. Sound under the topo executor's heal-before-check ordering because store & validate key on
+  the SAME stored bytes (not a walk of upstream live entries — those heal first, inert). Migration guard: the
+  `K_pre`-term change orphans non-root entries, and a legacy entry (nil `TransitiveD`) MISSes. The record-
+  provenance path (`buildRecord`) is separate and still OUTPUT-addressed — post-#24 the two deliberately
+  diverge (input-addressed key vs output-addressed provenance). The **leaf policy**
   (`with: {cache: {leaf: immutable}}`) HITs on the K_pre match alone (pinned external fetch). Proven
   by two e2es: identical re-run HITs every step; a one-knob change HITs the shared upstream + re-runs
   only downstream ("cheap sweeps"). (The #3 record's `Code.D` provenance population is deferred to #8
