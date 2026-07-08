@@ -68,6 +68,8 @@
 
 Build the phase/Sampler vocabulary. Parse+validate ONLY. **Boundary close:** `cue vet` + parser round-trips the reshaped `titanic-sweep.md` + a strict-reject test.
 
+> **Implemented (impl discovery):** removing the flat `Shape.Steps/Sweep/Experiment` fields breaks the 4 `cmd/metis` files (`run.go`/`sweep.go`/`ledger.go`/`ledger_cmd.go`) — the v1 flat-sweep paths **M1a-4 rewires** into the nested Sampler loop. Dependency-forced (the rewire needs `pkg/sampler`+`pkg/cache` first), so **`cmd/metis` stays RED until M1a-4**: intermediate boundaries scope their green to their own packages (`go build/test ./pkg/...`) and confirm breakage stays confined to `cmd/metis` (`go build ./...` names only it). Whole-module green returns at M1a-4.
+
 ### Task 1: Phase/Sweeper/Driver Go structs
 **Files:** Modify `pkg/experiment/shape.go`; Test `pkg/experiment/shape_test.go`
 - [ ] **Step 1 — failing test** `TestParseShape_v2`: unmarshal a `data│pipeline│ship` + `sweeper` + `driver:single` fixture into `Shape{Data,Pipeline,Ship []Step; Sweeper; Driver}`; assert the pipeline `$any` `with` survives untyped, `Sweeper.Resample.CV.K==5`, `Driver.Single != nil`.

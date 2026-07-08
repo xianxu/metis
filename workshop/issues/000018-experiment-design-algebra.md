@@ -98,7 +98,13 @@ provisional.
 
 ## Plan
 
-- [ ] (spec → durable plan) three-phase shape parse+validate; the Sampler fold node (`Init/Ask/Tell/Done` + driver loop) with STATIC samplers (grid/fixed-k); Point/Partition artifacts + per-fold pipeline; resample `Done` → (mean,SE); input-addressed cache (#24); select + driver:single ship; Titanic e2e.
+Durable plan: `workshop/plans/000018-experiment-design-algebra-m1a-plan.md` (5 review boundaries).
+
+- [ ] M1a-1 — schema: phase-structured Shape + Sweeper/Driver structs, strict unknown-key parse, combined-DAG ValidateShape, closed `#ExperimentShape` CUE rewrite + drift guard, reshaped titanic-sweep.md. *(`cmd/metis` red until M1a-4 — dependency-forced; green scoped to `pkg/experiment`+CUE.)*
+- [ ] M1a-2 — pure Sampler core: Sampler interface + generic Run + FixedKFolds/GridConfigs/SingleDriver + Aggregate(mean,SE) + Winner (`pkg/sampler`; zero-IO).
+- [ ] M1a-3 — cache identity (#24): input-addressed Kpre + transitive-D snapshot in each Entry + real-executor soundness gate.
+- [ ] M1a-4 — IO integration: fold-aware Python (features/train/fold_score), engine-materialized partition, per-fold ledger, nested driver-loop wiring (`cmd/metis` build returns green here).
+- [ ] M1a-5 — ship + e2e: driver:single ship (all-rows refit→predict→submission), reconstructable winner run-keys, honest Titanic e2e, atlas.
 
 ## Log
 
