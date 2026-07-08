@@ -109,6 +109,22 @@ def upstream_path(ctx: StepContext, step_id: str, filename: str) -> str:
     return os.path.join(ctx.run_dir, step_id, filename)
 
 
+def dataset_dir(ctx: StepContext, ref: str) -> str:
+    """Resolve a `dataset` reference to a directory load_dataset can read (metis#18).
+
+    `dataset` is polymorphic: it may be an UPSTREAM STEP id whose CAPTURED `dataset/` artifact
+    this step reads (the per-fold features→train handoff — the enriched dataset must be a
+    run-dir artifact, not an exp-relative shared path, so a features HIT + train MISS can't
+    read a different fold's data), OR an EXPERIMENT-RELATIVE path to a committed/v1-shared
+    dataset dir. Detect by existence — a captured upstream `<run>/<ref>/dataset/` wins; else
+    fall back to the exp-relative path. (Existence, not a name heuristic, so a bare-token
+    exp-relative dataset like 'toy' still resolves against the exp dir.)"""
+    upstream = upstream_path(ctx, ref, "dataset")
+    if os.path.isdir(upstream):
+        return upstream
+    return exp_path(ctx, ref)
+
+
 def out_path(ctx: StepContext, filename: str) -> str:
     """Path for an output file this step writes into its own step dir."""
     return os.path.join(ctx.step_dir, filename)

@@ -13,7 +13,9 @@ out. Two modes, selected by the engine-injected fold-context:
   model.pkl for the downstream predict/submission (ship) steps.
 
 with:
-  dataset: experiment-relative path to a serialized Dataset dir       (required)
+  dataset: a serialized Dataset dir — either an experiment-relative    (required)
+           path (v1 shared) OR an upstream step-id whose captured
+           `dataset/` artifact this step reads (metis#18 per-fold handoff).
   folds:   id of the upstream cv-split step (reads its folds.json)     (required)
   model:   a kind string ("logreg" | "rf") OR the $any-map bundle      (required)
            ({"rf": {"n_estimators": 200, "max_depth": 4}}). Parsed by
@@ -35,7 +37,10 @@ from metis.model import cv_score, fold_score, parse_model_config, train
 def main() -> None:
     ctx = io.step_context()
     w = io.read_with(ctx)
-    ds = io.load_dataset(io.exp_path(ctx, w["dataset"]))
+    # `dataset` is polymorphic (metis#18): an exp-relative path (v1 shared dataset) OR an
+    # upstream step-id whose captured `dataset/` artifact this step reads (the per-fold
+    # features→train handoff). io.dataset_dir resolves both.
+    ds = io.load_dataset(io.dataset_dir(ctx, w["dataset"]))
     with open(io.upstream_path(ctx, w["folds"], "folds.json")) as f:
         folds = json.load(f)
 
