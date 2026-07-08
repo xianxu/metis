@@ -8,10 +8,11 @@ import "github.com/xianxu/metis/pkg/shape"
 // Done-selects the winner by the objective. metis#19's 1-SE robust select is a
 // DIFFERENT Done over the same per-config (mean,SE) — no re-run. Points are the
 // pre-expanded config space (shape.Expand over the pipeline phase); Direction is
-// the objective direction; Select is the rule (M1a: "argmax-mean" only).
+// the objective direction; Select is the rule (M1a: "argmax-mean" only). The seed
+// comes from Ctx (single source — Winner.Seed is sourced there, not duplicated on
+// the sampler), so M1a-4 wiring can't diverge.
 type GridConfigs struct {
 	Points    []shape.Point
-	Seed      int
 	Direction string // "maximize" | "minimize"
 	Select    string // M1a: "argmax-mean"
 }
@@ -24,9 +25,10 @@ type configResult struct {
 type configState struct {
 	points  []shape.Point
 	results []configResult
+	seed    int
 }
 
-func (g GridConfigs) Init(ctx Ctx) configState { return configState{points: g.Points} }
+func (g GridConfigs) Init(ctx Ctx) configState { return configState{points: g.Points, seed: ctx.Seed} }
 
 // Ask proposes the not-yet-told config-points as one batch; done once all told.
 func (g GridConfigs) Ask(s configState) ([]shape.Point, bool) {
@@ -53,12 +55,12 @@ func (g GridConfigs) Done(s configState) Winner {
 		}
 	}
 	if best < 0 {
-		return Winner{Seed: g.Seed}
+		return Winner{Seed: s.seed}
 	}
 	w := s.results[best]
 	return Winner{
 		FreeParams: w.point.FreeParams,
-		Seed:       g.Seed,
+		Seed:       s.seed,
 		FoldKeys:   w.meanSE.ToldSet,
 		Score:      w.meanSE,
 	}

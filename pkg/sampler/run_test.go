@@ -31,6 +31,24 @@ func (c *countSampler) Tell(s countState, _ int, out int) countState {
 }
 func (c *countSampler) Done(s countState) int { c.dones++; return s.sum }
 
+// stuckSampler violates the progress contract: Ask never reports done and never
+// proposes a point — Run must fail loud, not hang.
+type stuckSampler struct{}
+
+func (stuckSampler) Init(Ctx) int             { return 0 }
+func (stuckSampler) Ask(int) ([]int, bool)    { return nil, false } // empty batch, not done
+func (stuckSampler) Tell(s int, _, o int) int { return s + o }
+func (stuckSampler) Done(s int) int           { return s }
+
+func TestRun_PanicsOnNonProgressingAsk(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatal("Run did not panic on an empty-batch/not-done Ask (would hang forever)")
+		}
+	}()
+	Run(Ctx{}, stuckSampler{}, func(p int) int { return p })
+}
+
 func TestRun_DrivesAskTellDone(t *testing.T) {
 	c := &countSampler{}
 	got := Run(Ctx{}, c, func(p int) int { return p }) // runPoint = identity
@@ -63,7 +81,7 @@ func configPoint(model string) shape.Point {
 func TestRun_NestedComposition(t *testing.T) {
 	ctx := Ctx{Seed: 42, Partition: "part-abc"}
 	cfgRF, cfgLR := configPoint("rf"), configPoint("logreg")
-	sweeper := GridConfigs{Points: []shape.Point{cfgRF, cfgLR}, Seed: 42, Direction: "maximize", Select: "argmax-mean"}
+	sweeper := GridConfigs{Points: []shape.Point{cfgRF, cfgLR}, Direction: "maximize", Select: "argmax-mean"}
 
 	scoreOf := func(p shape.Point) float64 {
 		if p.FreeParams[0].Value == "rf" {

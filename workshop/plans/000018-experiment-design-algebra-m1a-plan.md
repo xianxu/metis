@@ -212,6 +212,8 @@ Make the pipeline per-fold, materialize the partition once above the sweeper, pe
 - [ ] **Step 2 — FAIL.**
 - [ ] **Step 3 — implement:** `runPipelineFold(c,f)` runs `{data steps (cache-HIT) + pipeline steps}` as its own point-run with a **fresh executor scope** (fresh `c.kpres`/`c.transitiveD`/`c.outputs` — matching today's per-point `newCachingExecutor`; shared `data`/partition steps HIT the on-disk cache and repopulate the in-memory accumulators from their entries, per M1a-3 T11/12). Overlay config `c` **and** the fold-context `{_fold:{partition:<partition-identity>, idx:i}}` into the pipeline steps' `with` (so `Kpre` sees the fold — B2); end at `train` → `fold_score`. Nest via `Run`; persist raw fold rows.
 - [ ] **Step 4 — PASS.** **Step 5 — commit:** `#18 M1a-4: nested loop — fold-context Kpre-visible + per-fold executor scope`
+- [ ] **Step 6 — retire `pkg/sweep`:** once `cmd/metis/sweep.go` is rewired onto `pkg/sampler`, DELETE `pkg/sweep` (its `Sampler`/`Grid`/stop-predicates are superseded by `pkg/sampler`) + fix the stale `atlas/index.md:53-54` lines that call `pkg/sweep` *the* sweep sampler. (M1a-2 built `pkg/sampler` **additively**, leaving `pkg/sweep` intact — deleting it before this rewire would only trade the field-undefined `cmd/metis` red for import-not-found red; the removal is coupled to the wiring, so it lands here.)
+- [ ] **Step 7 — commit:** `#18 M1a-4: retire pkg/sweep (superseded by pkg/sampler)`
 
 ---
 
@@ -241,11 +243,15 @@ Close the loop. **Boundary close:** the reshaped `titanic-sweep.md` runs end-to-
 
 ### Task 21: atlas + close
 **Files:** Modify `atlas/` (+ `atlas/index.md`)
-- [ ] **Step 1:** document the driver/sweeper/resample **Sampler fold node** algebra, the three-phase shape, the input-addressed + transitive-`D` cache identity, and the static-vs-adaptive plannability line; link every new file in `atlas/index.md`.
+- [ ] **Step 1:** document the driver/sweeper/resample **Sampler fold node** algebra — enumerate the `pkg/sampler` surface (`Sampler[S,P,O,R]` + the generic `Run` loop · `FixedKFolds` · `GridConfigs` · `SingleDriver` · `Aggregate`→`(mean,SE)` · `Winner` run-keys) + the **static-vs-adaptive** plannability line (grid/fixed-k are the feedback-free degenerate Samplers; #19/#23/racing/Bayesian are later impls against the same node) — plus the three-phase shape and the input-addressed + transitive-`D` cache identity; link every new file in `atlas/index.md`.
 - [ ] **Step 2 — commit:** `#18 M1a-5: atlas — Sampler algebra + three-phase shape + input-addressed cache`
 - [ ] **Step 3 — close:** `sdlc close --issue 18` (measured `--actual`, `--verified` with e2e + soundness-gate evidence).
 
 ---
+
+## Revisions
+
+- **2026-07-07 (M1a-2 review):** the Core-concepts "`GridConfigs` **moves** `sweep.Grid`" was realized as **fork-now / remove-at-M1a-4** — M1a-2 built `pkg/sampler` additively and left `pkg/sweep` intact (a transient duplication), because deleting `pkg/sweep` is coupled to the `cmd/metis/sweep.go` rewire (M1a-4 Task 17 Step 6): removing it earlier only trades one flavor of `cmd/metis` red for another. `pkg/sweep`'s stop-predicates were likewise NOT ported into `pkg/sampler` (they're an adaptive-sampler / early-stop feature; M1a wires only static samplers that exhaust naturally — YAGNI), and remain in `pkg/sweep` for reuse when the first adaptive sampler lands (#19+).
 
 ## Cross-repo boundary (change-code judge)
 

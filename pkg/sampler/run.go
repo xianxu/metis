@@ -17,6 +17,12 @@ func Run[S, P, O, R any](ctx Ctx, smp Sampler[S, P, O, R], runPoint func(P) O) R
 		if done {
 			break
 		}
+		if len(batch) == 0 {
+			// Contract violation: a non-done Ask that proposes nothing can't make
+			// progress → the loop would spin forever. Fail LOUD + diagnosable rather
+			// than hang (guards a future adaptive Sampler's bug).
+			panic("sampler: Ask returned an empty batch without done — a Sampler must make progress (emit a non-empty batch or report done)")
+		}
 		for _, p := range batch {
 			s = smp.Tell(s, p, runPoint(p))
 		}

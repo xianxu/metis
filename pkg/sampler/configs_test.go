@@ -15,7 +15,6 @@ func TestGridConfigs_SelectsArgmaxMean(t *testing.T) {
 	cfgA, cfgB, cfgC := configPoint("logreg"), configPoint("rf"), configPoint("gbm")
 	g := GridConfigs{
 		Points:    []shape.Point{cfgA, cfgB, cfgC},
-		Seed:      42,
 		Direction: "maximize",
 		Select:    "argmax-mean",
 	}
