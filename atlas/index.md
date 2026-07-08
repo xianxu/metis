@@ -28,12 +28,19 @@ identical on a non-Kaggle platform?* — if yes, it lives here.
   manifest + the per-point `record.json`s (namespaced per-step metrics — the collision fix) into rows,
   appended to `<shape>.ledger.csv` (idempotent); the shape `.md` is immutable input (#13) — the
   human top-N view is on-demand `metis ledger show`, not a summary written into the body.
-  **`metis ledger show <shape> [--sweep|--sort|--top]`** renders sorted/filtered views. **`metis
-  promote <shape> (--best|--point 'k=v') --name X`** reconstructs the winning point as an all-singleton
-  experiment (pure `promotedExperiment` — re-expands the shape + matches by free-params, reusing
-  `shapePointToExperiment`; id = the name) with a `promoted_from` back-link, committed at its code SHA
-  (warns if dirty). Round-trip: the promoted experiment re-runs + reproduces the row. Immutability is by
-  per-row snapshot (each row is self-contained, so a shape-space edit can't invalidate old rows).
+  **metis#18:** a `Row` is now a **raw per-fold** row (a `Fold` coordinate); `AggregateView(l, metric)`
+  reduces them read-time → per-config `(mean, SE)` (`<metric>{,.se,.n}`) — the leaderboard `ledger show
+  --sort` and `promote` sort over (metis#19's 1-SE select re-reduces the same rows, no re-run). A v1
+  non-fold row passes through untouched (idempotent). **`metis ledger show <shape> [--sweep|--sort|--top]`**
+  renders sorted/filtered views. **`metis promote <shape> (--best|--point 'k=v') --name X`** aggregates the
+  raw fold rows to per-config `(mean,SE)` FIRST (so both `--best` and `--point` promote a *config* by its
+  honest estimate, not one fold's row), then reconstructs the winner as a runnable experiment (pure
+  `promotedExperiment` — re-expands the shape + matches by free-params, reusing `shapeConfigToExperiment`:
+  `data ++ pipeline(config, all-rows) ++ ship`, **no cv-split** — the ship needs no CV) with a
+  `promoted_from` back-link + the honest `sweep_estimate: <metric> mean=… se=… n=…` (the inner-CV estimate
+  the winner was selected on, NOT a resubstitution number), committed at its code SHA (warns if dirty).
+  Round-trip: the promoted experiment parses + validates + re-runs. Immutability is by per-row snapshot
+  (each row is self-contained, so a shape-space edit can't invalidate old rows).
   **The side-ref dirty-code capture** (`cmd/metis/capture.go`): the shared `captureRunCode` collects a
   run's code closure (`git hash-object -w`s each file) and, if any is dirty/untracked, commits it to a
   side ref (parented on HEAD, GC-protected) — a real code SHA even for a dirty run — then backfills the
@@ -52,22 +59,36 @@ identical on a non-Kaggle platform?* — if yes, it lives here.
   is single-valued — the D is fully repo-qualified.) [metis#8/#11/#14]
 - **`pkg/sampler`** (the Sampler fold node) — metis#18, the pure ask/tell resample/sweep construct
   superseding metis#7's `pkg/sweep`: `Sampler[S,P,O,R]` (`Init`/`Ask`/`Tell`/`Done`) + a generic `Run`
-  loop, instantiated nested (driver ⊃ sweeper ⊃ resample). Static Samplers: `GridConfigs` (the sweeper —
-  every `shape.Expand` config at once), `FixedKFolds` (the inner resample — k folds over the materialized
-  partition), `SingleDriver` (the degenerate outer driver:single). `Aggregate` → `MeanSE` (the honest
-  per-config `(mean,SE)`); `Winner` (reconstructable run-keys). The **driver** is `cmd/metis`: `metis run`
-  on an experiment-shape drives the nested loop (`runShapeSweep`: `Run(GridConfigs) ⊃ Run(FixedKFolds)`),
-  running each `(config, fold)` through the shared `runResolvedExperiment` (cached runner) keyed by its
-  content-address. Each fold builds a per-fold experiment (`data ++ engine-synthesized cv-split ++
-  pipeline`, config + `_fold` overlaid so `Kpre` is fold-distinct); a **failing fold is FATAL** (a partial
-  resample is not an honest estimate — unlike a v1 flat point). A **shape-run manifest**
-  (`sweeps/<id>/manifest.json`) groups the runs; the ledger sidecar keeps the **raw per-fold rows** and
-  `ledger.AggregateView` reduces them read-time → the per-config `(mean,SE)` leaderboard (metis#8 handoff).
-  `--dry-run` lists configs. **Detect-and-abort** on mid-sweep HEAD-sha drift (not the dirty flag — the
-  sweep's own outputs dirty the tree). Proven by `shapesweep_test.go` (fake exec on the real cache):
-  nested loop → winner + N×k ledger + per-config `(mean,SE)`, fold-distinct cache, warm-HIT, incremental
-  recompute, dry-run, fatal-fold, abort-on-drift. (The input-addressed cache identity **shipped M1a-3b** —
-  see `pkg/cache` below; the full `pkg/sampler` surface write-up lands with M1a-5/Task 21.) [metis#18]
+  loop, instantiated **nested at three levels** (driver ⊃ sweeper ⊃ resample) that monomorphize by type —
+  the resample's `R=MeanSE` is the sweeper's `O`, the sweeper's `R=Winner` is the driver's `O`. **Static
+  vs adaptive is the plannability line:** M1a wires only the *static* (feedback-free) Samplers, whose `Ask`
+  emits the whole point-set at once and whose `Tell` ignores feedback — `GridConfigs` (the sweeper — every
+  `shape.Expand` config), `FixedKFolds` (the inner resample — k folds over the materialized partition),
+  `SingleDriver` (the degenerate outer driver:single). Adaptive Samplers use the feedback edge and are
+  later impls against the SAME node: metis#19 select = a different `Done` over the cached fold-scores,
+  metis#23 nested-CV = an outer resample Sampler swapping `SingleDriver`, racing/Bayesian = feedback-driven
+  `Ask`. `Aggregate` → `MeanSE` (the honest per-config `(mean,SE)`, keyed on the sorted told-set — an
+  adaptive `Done` re-reduces the same scores for free); `Winner` carries the **resolved config `Point`**
+  (its per-step `With` + free-params) as reconstructable run-keys → ship/promote rebuild the exact run
+  DIRECTLY, not by re-expanding the grid. The **driver** is `cmd/metis`: `metis run` on an experiment-shape
+  drives the real three-level loop (`runShapeSweep`: `Run(SingleDriver) ⊃ Run(GridConfigs) ⊃
+  Run(FixedKFolds)`), running each `(config, fold)` through the shared `runResolvedExperiment` (cached
+  runner) keyed by its content-address. Each fold builds a per-fold experiment (`data ++ engine-synthesized
+  cv-split ++ pipeline`, config + `_fold` overlaid so `Kpre` is fold-distinct); a **failing fold is FATAL**
+  (a partial resample is not an honest estimate — unlike a v1 flat point). **`driver:single` ships the
+  winner** (`shipWinner`): reconstruct the winner's runnable experiment from its `Point` (`data ++ pipeline
+  refit on ALL rows ++ ship` — NO cv-split; the ship needs no CV), run it as a distinct content-addressed
+  run → `predict` → `submission` (train's all-rows path, predict via `io.dataset_dir` on the captured
+  all-rows features). A **shape-run manifest** (`sweeps/<id>/manifest.json`) groups the fold runs (the ship
+  is not a manifest point); the ledger sidecar keeps the **raw per-fold rows** and `ledger.AggregateView`
+  reduces them read-time → the per-config `(mean,SE)` leaderboard (metis#8 handoff). `--dry-run` lists
+  configs. **Detect-and-abort** on mid-sweep HEAD-sha drift (not the dirty flag — the sweep's own outputs
+  dirty the tree). Proven by `shapesweep_test.go` (fake exec on the real cache): nested loop → winner + N×k
+  ledger + per-config `(mean,SE)`, ship, fold-distinct cache, warm-HIT, incremental recompute, dry-run,
+  fatal-fold, abort-on-drift — and `shipe2e_test.go` (`TestShapeSweep_HonestE2E`) ties the whole algebra
+  together on the real cache incl. the metis#24 soundness gate END-TO-END through the sweep (an upstream
+  code edit re-runs the downstream folds while the config/fold-invariant data + partition stay cached). The
+  input-addressed cache identity **shipped M1a-3b** — see `pkg/cache` below. [metis#18]
 - **`pkg/shape`** (the experiment-shape lift) — metis#6, the pure config-space algebra over v0's
   untyped `with` bag. `Expand(steps, rangeSteps) → []Point` collapses a shape's reserved `$`-key
   descriptors (`$any` — one choice primitive dispatching on shape: list=untagged set / map=tagged bundled labeled-sum, both recursive + ADD / `$linear-range`·`$log-range`
@@ -76,10 +97,11 @@ identical on a non-Kaggle platform?* — if yes, it lives here.
   into three phases (`data│pipeline│ship`) + a `sweeper` (config-level Sampler) + a `driver` (outer
   Sampler); CUE `#ExperimentShape` is closed, with `#Experiment` = the flat singleton (no sweeper/driver)
   — the shared identity header single-sourced via `_meta`, the per-phase step-list via `_phase`; the
-  `construct/datatype/experiment-shape.md` prototype. (Full three-phase / Sampler-fold-node write-up at
-  metis#18 M1a-5.) `metis run` on a
-  shape expands it — an all-singleton shape runs like a v0 experiment; a multi-point shape points to the
-  **sweep driver (metis#7)**. The ledger keyed off the free-param path is **metis#8**. [metis#6]
+  `construct/datatype/experiment-shape.md` prototype. The **three-phase cut** is the leakage boundary:
+  `data` runs ONCE (above the resample), `pipeline` runs per-fold (the swept atom), `ship` runs once on the
+  winner — the Sampler-fold-node algebra driving it is the `pkg/sampler` bullet. `metis run` on a shape
+  drives that nested sweep; an all-singleton flat `#Experiment` runs as a v0 experiment. The ledger keyed
+  off the free-param path is **metis#8**. [metis#6]
 - **`pkg/cache`** (the validating-trace policy layer) — metis#2, the step cache over `pkg/cas`
   (bytes) + `pkg/record` (key-material). Pure core shipped M1: `Kpre(rec, seed)` (ex-ante key =
   hash of step-id + uses + resolved-with + seed + sorted-upstream), `Validate(D, hasher)` (re-hash
