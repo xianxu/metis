@@ -98,14 +98,16 @@ func buildRecord(run experiment.Run, allSteps []experiment.Step, steps []experim
 	}
 	stepRecs := make([]record.StepRecord, 0, len(steps))
 	for _, sr := range steps {
-		// Populate Upstream (the metis#3 slot #2 fills): this step's needs → the
-		// upstream steps' output-hashes (sorted — shared upstreamHashes helper, so this
-		// and cachingExecutor.kpre derive K_pre's upstream term identically).
+		// Populate Upstream (the metis#3 slot #2 fills): this step's needs → the upstream
+		// steps' OUTPUT-hashes (sorted, via the shared sortedUpstream helper). NOTE (metis#24):
+		// the record's Upstream is OUTPUT-addressed — the provenance of what actually ran — and
+		// deliberately DIVERGES from the cachingExecutor's now input-addressed K_pre (which
+		// feeds sortedUpstream the upstream K_pres instead). Same helper, different maps.
 		stepRecs = append(stepRecs, record.StepRecord{
 			StepID:     sr.Step.ID,
 			Uses:       sr.Step.Uses,
 			With:       sr.Step.With,
-			Upstream:   upstreamHashes(sr.Step.Needs, outputHashes),
+			Upstream:   sortedUpstream(sr.Step.Needs, outputHashes),
 			Code:       record.CodeManifest{Commit: sha, Dirty: dirty},
 			OutputHash: outputHashes[sr.Step.ID],
 			Metrics:    sr.Result.Metrics,

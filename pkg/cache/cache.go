@@ -90,8 +90,11 @@ type Entry struct {
 	// transitively-upstream code file invalidates this step (restoring the code-propagation
 	// the input-addressed Kpre drops). Stored + validated on the SAME bytes (symmetric),
 	// needs no upstream-entry lookup at validate (eviction-robust), and folds a diamond once.
-	// Absent on a legacy (pre-#24) non-leaf entry → treat as a MISS (see cmd/metis isHit).
-	TransitiveD []record.CodeRef `json:"transitive_d,omitempty"`
+	// NOT `omitempty`: a #24 entry ALWAYS serializes TransitiveD (as `[]` when the closure is
+	// empty — MergeTransitiveD returns a non-nil slice), so an empty-closure step round-trips
+	// to a non-nil slice and still HITs vacuously; only a LEGACY (pre-#24) entry decodes to a
+	// nil TransitiveD, which isHit treats as a MISS (cmd/metis isHit migration guard).
+	TransitiveD []record.CodeRef `json:"transitive_d"`
 	Output      Hash             `json:"output"`
 }
 
