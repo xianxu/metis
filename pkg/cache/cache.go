@@ -3,17 +3,27 @@
 // per-step record (key-material). It is the "validating trace": a step's output is
 // keyed by two hashes computed at different times —
 //
-//   - K_pre (ex-ante): hash(step-id, uses, resolved-with, seed, upstream-output-hashes)
-//     — everything determining the output that is known BEFORE the step runs.
+//   - K_pre (ex-ante): hash(step-id, uses, resolved-with, seed, sorted upstream **K_pres**)
+//     — the INPUT RECIPE (metis#24), everything determining the output that is known BEFORE
+//     the step runs, computable pre-run from the DAG (no upstream *output* needed) and
+//     invariant to upstream output non-determinism.
 //   - D (ex-post): the recorded read-set of first-party code+config files, each an
 //     (path, git-blob-hash) pair, captured by the metis#2 read-sensor after a run.
+//   - TransitiveD (ex-post, metis#24): the closure of this step's D unioned with every
+//     upstream step's D, stored in this step's OWN Entry — the soundness snapshot below.
 //
-// A run is a HIT iff a stored entry for its K_pre exists AND re-hashing every path in
-// its D still matches (an edited code file is a path in D whose hash moved → MISS).
-// Code-version invalidation thus falls out of the trace — no git-SHA / import-closure
-// term. The pure core lives here (Kpre / Validate / the Entry codec); the
-// read-sensor and the git blob-hasher (metis#2 M2) and the runner skip/materialize
-// integration (M3) are the thin IO shell in cmd/metis.
+// A run is a HIT iff a stored entry for its K_pre exists AND re-hashing every path in its
+// stored **TransitiveD** still matches (an edited code file anywhere in the transitive
+// closure is a path whose hash moved → MISS). The transitive closure is what carries
+// upstream-**code** invalidation: input-addressing deliberately drops the upstream
+// output-hash term (so output non-determinism can't spuriously re-key), and since D
+// excludes upstream artifacts, the snapshot is the sole replacement propagator. Storing it
+// in the DOWNSTREAM's own entry (not walking upstream *live* entries) is what makes it sound
+// under the topo executor's heal-before-check ordering. Code-version invalidation still falls
+// out of the trace — no git-SHA / import-closure term. The pure core lives here (Kpre /
+// Validate / MergeTransitiveD / the Entry codec); the read-sensor and git blob-hasher (M2)
+// and the runner skip/materialize + K_pre/TransitiveD accumulation (M3 + #24) are the thin
+// IO shell in cmd/metis.
 package cache
 
 import (

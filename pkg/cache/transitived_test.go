@@ -48,6 +48,42 @@ func TestMergeTransitiveD_EmptyIsEmpty(t *testing.T) {
 	}
 }
 
+// The metis#24 migration guard rests entirely on a JSON-codec invariant: a genuine #24 empty
+// closure ([]) MUST round-trip to a NON-NIL slice (so an empty-closure step still HITs
+// vacuously), while a legacy (pre-#24) entry with no transitive_d key decodes to NIL (→ the
+// isHit guard MISSes it). Dropping `omitempty` on Entry.TransitiveD is what makes [] survive as
+// non-nil; re-adding it would silently break the guard AND make every empty-closure step MISS
+// forever. Pinned directly here (not just implicitly via the warm-HIT e2e) so a regression
+// fails THIS test loudly, independent of any e2e fixture's step choices.
+func TestEntry_TransitiveDCodec_EmptyIsNonNil_LegacyIsNil(t *testing.T) {
+	empty := MergeTransitiveD(nil) // an empty #24 closure — never nil
+	if empty == nil {
+		t.Fatal("MergeTransitiveD must return a non-nil slice (the #24 empty-closure marker)")
+	}
+	b, err := EncodeEntry(Entry{Kpre: "k", TransitiveD: empty, Output: "o"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := DecodeEntry(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.TransitiveD == nil {
+		t.Error("a #24 empty closure ([]) must round-trip NON-NIL (else it MISSes forever) — did omitempty return?")
+	}
+
+	// A legacy entry (no transitive_d key) and an explicit null both decode to nil → MISS.
+	for _, raw := range []string{`{"kpre":"k","d":[],"output":"o"}`, `{"kpre":"k","transitive_d":null,"output":"o"}`} {
+		e, err := DecodeEntry([]byte(raw))
+		if err != nil {
+			t.Fatalf("decode %s: %v", raw, err)
+		}
+		if e.TransitiveD != nil {
+			t.Errorf("a legacy/null transitive_d must decode to nil (the migration-guard signal); raw=%s", raw)
+		}
+	}
+}
+
 // A step's TransitiveD snapshot must survive the on-disk index codec (isHit re-hashes it).
 func TestEntry_TransitiveDRoundtrip(t *testing.T) {
 	e := Entry{
