@@ -102,9 +102,9 @@ Durable plan: `workshop/plans/000018-experiment-design-algebra-m1a-plan.md` (5 r
 
 - [x] M1a-1 — schema: phase-structured Shape + Sweeper/Driver structs, strict unknown-key parse, combined-DAG ValidateShape, closed `#ExperimentShape` CUE rewrite + drift guard, reshaped titanic-sweep.md. *(`cmd/metis` red until M1a-4 — dependency-forced; green scoped to `pkg/experiment`+CUE.)*
 - [x] M1a-2 — pure Sampler core: Sampler interface + generic Run + FixedKFolds/GridConfigs/SingleDriver + Aggregate(mean,SE) + Winner (`pkg/sampler`; zero-IO).
-- [~] M1a-3 (foundations landed) — `Entry.TransitiveD`+`MergeTransitiveD` (pure, `bae19a1`) + `model.fold_score` (`b407f3d`). The merge revealed the boundary is a ~1000-line sweep-driver re-architecture (dependency order is IO-first) → **reordered + split** into M1a-3a/M1a-3b:
+- [x] M1a-3 (foundations landed) — `Entry.TransitiveD`+`MergeTransitiveD` (pure, `bae19a1`) + `model.fold_score` (`b407f3d`). The merge revealed the boundary is a ~1000-line sweep-driver re-architecture (dependency order is IO-first) → **reordered + split** into M1a-3a/M1a-3b (both SHIPPED):
   - [x] M1a-3a — **IO rewire → `cmd/metis` GREEN** (was M1a-4, reordered first): nested-Sampler loop (`run.go`/`sweep.go` off flat `Shape`) + fold-aware `train.py`/`features` + engine partition + per-fold ledger + retire `pkg/sweep`, on the EXISTING output-hash cache. Close: whole-module `go build ./...` green + Titanic sweeper → `(mean,SE)` leaderboard. **SHIPPED (FIX-THEN-SHIP → fixed).**
-  - [ ] M1a-3b — **cache #24 + soundness gate** (was M1a-3, reordered second — now testable): input-addressed `Kpre` + transitive-`D` snapshot wired into `caching.go` (foundations already committed) + real-executor soundness e2e (edit `features.py` → `train` MISSes).
+  - [x] M1a-3b — **cache #24 + soundness gate** (was M1a-3, reordered second — now testable): input-addressed `Kpre` + transitive-`D` snapshot wired into `caching.go` (foundations already committed) + real-executor soundness e2e (edit `features.py` → `train` MISSes). **SHIPPED (review SHIP, 2 Minors fixed).**
 - [ ] M1a-5 — ship + e2e: driver:single ship (all-rows refit→predict→submission), reconstructable winner run-keys, honest Titanic e2e, atlas. *(M1a-4 label retired — folded into M1a-3a.)*
 
 ## Log
@@ -154,6 +154,7 @@ Durable plan: `workshop/plans/000018-experiment-design-algebra-m1a-plan.md` (5 r
   identity (#24) · M1a-4 IO integration · M1a-5 ship+e2e. Lessons → `workshop/lessons.md`.
 
 ### 2026-07-08 (M1a-3a Go rewire — SHIPPED, whole module green)
+- 2026-07-08: closed M1a-3b — input-addressed Kpre + transitive-D snapshot (metis#24): go build/vet/test ./... green; 3 real-executor soundness gates (upstream-code-edit→downstream MISS via the stored closure; output-nondeterminism→HIT; HIT-feeds-downstream repopulation) each mutation-proven to have teeth; migration guard + direct codec test; both experiment merge-checks pass. Fresh-eyes review (in-harness Agent, binary judge network-blocked) = SHIP, 2 Minors fixed.; review verdict: SHIP (fresh-eyes review dispatched via the in-harness Agent tool over 03344c1..HEAD — the binary's nested-claude judge needs Anthropic-API network the sandbox blocks; 0 Critical / 0 Important, 2 Minors fixed: pkg/cache package-header staleness + a direct []≠nil codec test)
 - **M1a-3a IO rewire DONE + committed (`1bb1783`).** `cmd/metis` rewired onto the nested-Sampler fold
   loop — `go build/vet/test ./...` + both `experiment` merge-checks all green (the all-or-nothing-compile
   boundary that bounced 3 forks is passed). Changes: `run.go` dispatch (tolerant Parse peeks type →
