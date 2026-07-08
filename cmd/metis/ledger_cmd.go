@@ -25,7 +25,7 @@ func cmdLedger(args []string) error {
 	}
 	fs := flag.NewFlagSet("ledger show", flag.ContinueOnError)
 	sweep := fs.String("sweep", "", "filter to one sweep-SHA (code-version)")
-	sortMetric := fs.String("sort", "", "sort by this namespaced metric (e.g. train.cv_score)")
+	sortMetric := fs.String("sort", "", "sort by this namespaced metric (e.g. train.fold_score)")
 	direction := fs.String("dir", "", "sort direction: maximize | minimize (default: the shape's objective direction)")
 	top := fs.Int("top", 0, "show only the top N (0 = all)")
 	shapePath, flags, err := hoistShapePath(args[1:])

@@ -16,7 +16,7 @@ import (
 
 // rowsFromManifest turns a sweep manifest + the per-point records into ledger rows —
 // PURE (the caller reads the record.json files). The metric collision fix lives here:
-// each row's metrics are NAMESPACED per step (train.cv_score, not a flat cv_score that
+// each row's metrics are NAMESPACED per step (train.fold_score, not a flat fold_score that
 // v0's merge collided). Keys: point-address (manifest run-id) + sweep-SHA (the
 // manifest's repo SHA, read from any point's record).
 func rowsFromManifest(man sweepManifest, records map[string]record.RunRecord) []ledger.Row {
