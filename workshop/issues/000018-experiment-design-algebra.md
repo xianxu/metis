@@ -102,8 +102,10 @@ Durable plan: `workshop/plans/000018-experiment-design-algebra-m1a-plan.md` (5 r
 
 - [x] M1a-1 — schema: phase-structured Shape + Sweeper/Driver structs, strict unknown-key parse, combined-DAG ValidateShape, closed `#ExperimentShape` CUE rewrite + drift guard, reshaped titanic-sweep.md. *(`cmd/metis` red until M1a-4 — dependency-forced; green scoped to `pkg/experiment`+CUE.)*
 - [x] M1a-2 — pure Sampler core: Sampler interface + generic Run + FixedKFolds/GridConfigs/SingleDriver + Aggregate(mean,SE) + Winner (`pkg/sampler`; zero-IO).
-- [ ] M1a-3 — **cache identity + IO integration** (M1a-4 folded in per operator, to dissolve the `cmd/metis`-red window + run the soundness gate naturally): input-addressed Kpre + transitive-D snapshot in each Entry; fold-aware Python (features/train/fold_score); engine-materialized partition; per-fold ledger; nested driver-loop wiring → **`cmd/metis` returns GREEN**; retire `pkg/sweep`; the real-executor soundness gate (edit `features.py` → `train` MISSes) runs here.
-- [ ] M1a-5 — ship + e2e: driver:single ship (all-rows refit→predict→submission), reconstructable winner run-keys, honest Titanic e2e, atlas. *(M1a-4 label retired — folded into M1a-3.)*
+- [~] M1a-3 (foundations landed) — `Entry.TransitiveD`+`MergeTransitiveD` (pure, `bae19a1`) + `model.fold_score` (`b407f3d`). The merge revealed the boundary is a ~1000-line sweep-driver re-architecture (dependency order is IO-first) → **reordered + split** into M1a-3a/M1a-3b:
+  - [ ] M1a-3a — **IO rewire → `cmd/metis` GREEN** (was M1a-4, reordered first): nested-Sampler loop (`run.go`/`sweep.go` off flat `Shape`) + fold-aware `train.py`/`features` + engine partition + per-fold ledger + retire `pkg/sweep`, on the EXISTING output-hash cache. Close: whole-module `go build ./...` green + Titanic sweeper → `(mean,SE)` leaderboard.
+  - [ ] M1a-3b — **cache #24 + soundness gate** (was M1a-3, reordered second — now testable): input-addressed `Kpre` + transitive-`D` snapshot wired into `caching.go` (foundations already committed) + real-executor soundness e2e (edit `features.py` → `train` MISSes).
+- [ ] M1a-5 — ship + e2e: driver:single ship (all-rows refit→predict→submission), reconstructable winner run-keys, honest Titanic e2e, atlas. *(M1a-4 label retired — folded into M1a-3a.)*
 
 ## Log
 
