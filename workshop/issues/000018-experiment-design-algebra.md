@@ -1,12 +1,13 @@
 ---
 id: 000018
-status: working
+status: codecomplete
 deps: []
 github_issue:
 created: 2026-07-07
-updated: 2026-07-07
+updated: 2026-07-08
 estimate_hours: 7.0
 started: 2026-07-07T11:08:31-07:00
+actual_hours: N/A
 ---
 
 # experiment-design algebra M1a — three-phase shape + Sampler fold node (static samplers, per-fold pipeline, driver:single)
@@ -154,6 +155,7 @@ Durable plan: `workshop/plans/000018-experiment-design-algebra-m1a-plan.md` (5 r
   identity (#24) · M1a-4 IO integration · M1a-5 ship+e2e. Lessons → `workshop/lessons.md`.
 
 ### 2026-07-08 (M1a-3a Go rewire — SHIPPED, whole module green)
+- 2026-07-08: closed — All 4 Done-when met (end-of-issue integration review = SHIP; per-milestone reviews M1a-1..M1a-5 all shipped, each with a Review-Verdict trailer). Three-phase shape + nested Sampler algebra (driver⊃sweeper⊃resample) → honest per-config (mean,SE) → argmax-mean winner → driver:single ship (real-step smoke run ships a valid PassengerId,Survived submission, no cv-split, capture_status=captured). Input-addressed cache + transitive-D soundness (mutation-proven, E2E through the sweep). Partition-as-artifact + fold-emergent caching; (mean,SE) content-addressed/order-independent. promote reconstructs a runnable per-fold winner + honest sweep_estimate. atlas documents the algebra. metis 9 Go pkgs + both merge-checks + 42 pytest, kbench 36 pytest (incl real-step e2e) green. Real 42-config Kaggle run operator-gated (RUNBOOK). --no-verdict: all 5 REAL boundaries (M1a-1/2/3a/3b/5) carry trailers; the gate trips only on the M1a-3 PARENT grouping row, which was split into M1a-3a+M1a-3b (both reviewed) and was never a separate boundary. --no-actual: active-time contaminated (interleaved #24 + unattributed fallbacks + forked agents), as all prior #18 milestones. --no-judge: binary judge network-blocked in sandbox; fresh-eyes done via in-harness Agent (SHIP).; review verdict: SHIP (end-of-issue integration review via the in-harness Agent tool over b455bda..HEAD — the binary's auto-judge needs Anthropic-API network the sandbox blocks; all 4 Done-when confirmed delivered, coherent across milestones, no doc/atlas drift; 1 trivial doc nit fixed in a3b1af6)
 - 2026-07-08: closed M1a-5 — driver:single ship wired (Run(SingleDriver)⊃Run(GridConfigs)⊃Run(FixedKFolds)); winner refits all-rows→predict→submission — real smoke run ships a valid PassengerId,Survived submission (no cv-split, capture_status=captured all 6 steps); promote reconstructs a runnable experiment from a per-fold ledger (+honest sweep_estimate); HonestE2E ties the algebra + the metis#24 soundness gate end-to-end (mutation-checked teeth). metis 9 Go pkgs + both merge-checks + 42 pytest, kbench 36 pytest (incl e2e) green.; review verdict: FIX-THEN-SHIP → fixed (two fresh-eyes reviews via the in-harness Agent tool — binary judge network-blocked in sandbox; metis diff over 3535102..HEAD = FIX-THEN-SHIP: 1 Important — the driver:single ship silently skipped metis#14 code-capture, fixed by dropping inSweep for the ship + a teeth test asserting CaptureStatus=captured, re-verified on the real smoke run; 3 minors fixed; kbench diff = SHIP)
 - 2026-07-08: closed M1a-3b — input-addressed Kpre + transitive-D snapshot (metis#24): go build/vet/test ./... green; 3 real-executor soundness gates (upstream-code-edit→downstream MISS via the stored closure; output-nondeterminism→HIT; HIT-feeds-downstream repopulation) each mutation-proven to have teeth; migration guard + direct codec test; both experiment merge-checks pass. Fresh-eyes review (in-harness Agent, binary judge network-blocked) = SHIP, 2 Minors fixed.; review verdict: SHIP (fresh-eyes review dispatched via the in-harness Agent tool over 03344c1..HEAD — the binary's nested-claude judge needs Anthropic-API network the sandbox blocks; 0 Critical / 0 Important, 2 Minors fixed: pkg/cache package-header staleness + a direct []≠nil codec test)
 - **M1a-3a IO rewire DONE + committed (`1bb1783`).** `cmd/metis` rewired onto the nested-Sampler fold
