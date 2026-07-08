@@ -102,9 +102,8 @@ Durable plan: `workshop/plans/000018-experiment-design-algebra-m1a-plan.md` (5 r
 
 - [x] M1a-1 — schema: phase-structured Shape + Sweeper/Driver structs, strict unknown-key parse, combined-DAG ValidateShape, closed `#ExperimentShape` CUE rewrite + drift guard, reshaped titanic-sweep.md. *(`cmd/metis` red until M1a-4 — dependency-forced; green scoped to `pkg/experiment`+CUE.)*
 - [x] M1a-2 — pure Sampler core: Sampler interface + generic Run + FixedKFolds/GridConfigs/SingleDriver + Aggregate(mean,SE) + Winner (`pkg/sampler`; zero-IO).
-- [ ] M1a-3 — cache identity (#24): input-addressed Kpre + transitive-D snapshot in each Entry + real-executor soundness gate.
-- [ ] M1a-4 — IO integration: fold-aware Python (features/train/fold_score), engine-materialized partition, per-fold ledger, nested driver-loop wiring (`cmd/metis` build returns green here).
-- [ ] M1a-5 — ship + e2e: driver:single ship (all-rows refit→predict→submission), reconstructable winner run-keys, honest Titanic e2e, atlas.
+- [ ] M1a-3 — **cache identity + IO integration** (M1a-4 folded in per operator, to dissolve the `cmd/metis`-red window + run the soundness gate naturally): input-addressed Kpre + transitive-D snapshot in each Entry; fold-aware Python (features/train/fold_score); engine-materialized partition; per-fold ledger; nested driver-loop wiring → **`cmd/metis` returns GREEN**; retire `pkg/sweep`; the real-executor soundness gate (edit `features.py` → `train` MISSes) runs here.
+- [ ] M1a-5 — ship + e2e: driver:single ship (all-rows refit→predict→submission), reconstructable winner run-keys, honest Titanic e2e, atlas. *(M1a-4 label retired — folded into M1a-3.)*
 
 ## Log
 
