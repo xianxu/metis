@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/xianxu/metis/pkg/experiment"
 	"github.com/xianxu/metis/pkg/ledger"
 )
 
@@ -58,22 +59,42 @@ func writePerFoldLedger(t *testing.T, dir string) string {
 	return shapePath
 }
 
-// promote of a per-fold sweep ledger REFUSES cleanly (metis#18) — it must not emit a corrupt
-// or unrunnable .md (the reconstruction lands in M1a-5). Guards the NUL-corruption regression.
-func TestPromote_PerFoldLedgerRefusesCleanly(t *testing.T) {
+// promote --best on a per-fold sweep ledger reconstructs a RUNNABLE single experiment
+// (metis#18 M1a-5): it reduces the raw fold rows to per-config (mean, SE), picks the champion,
+// and writes data ++ pipeline(winner config) ++ ship — NO cv-split (the ship refit needs no
+// CV) — with the honest (mean, SE) recorded in the provenance. Winner = config a (0.85 > 0.71).
+func TestPromote_PerFoldLedgerReconstructsRunnable(t *testing.T) {
 	dir := t.TempDir()
 	shapePath := writePerFoldLedger(t, dir)
 	var out strings.Builder
-	err := runPromote(promoteOpts{shapePath: shapePath, best: true, name: "winner", out: &out})
-	if err == nil {
-		t.Fatal("promote --best on a per-fold ledger must error cleanly, not emit a file")
+	if err := runPromote(promoteOpts{shapePath: shapePath, best: true, name: "winner", out: &out}); err != nil {
+		t.Fatalf("promote --best on a per-fold ledger must reconstruct a runnable experiment: %v", err)
 	}
-	if !strings.Contains(err.Error(), "per-fold") || !strings.Contains(err.Error(), "M1a-5") {
-		t.Errorf("the error should explain the per-fold/M1a-5 deferral; got: %v", err)
+	raw, err := os.ReadFile(filepath.Join(dir, "winner.md"))
+	if err != nil {
+		t.Fatalf("promote must write winner.md: %v", err)
 	}
-	// It must NOT have written the promoted .md (no corrupt/NUL output).
-	if _, statErr := os.Stat(filepath.Join(dir, "winner.md")); !os.IsNotExist(statErr) {
-		t.Error("promote must not write any output when it refuses")
+	// The promoted .md parses + validates as a runnable plain experiment.
+	exp, err := experiment.Parse(string(raw))
+	if err != nil {
+		t.Fatalf("promoted experiment must parse: %v", err)
+	}
+	if err := experiment.Validate(exp); err != nil {
+		t.Fatalf("promoted experiment must validate (runnable): %v", err)
+	}
+	steps := map[string]experiment.Step{}
+	for _, s := range exp.Steps {
+		steps[s.ID] = s
+	}
+	if _, ok := steps[partitionStepID]; ok {
+		t.Error("the promoted ship experiment must NOT carry a cv-split step (no CV at ship)")
+	}
+	if steps["train"].With["model"] != "a" {
+		t.Errorf("promoted train should carry the winner's model=a; got %v", steps["train"].With["model"])
+	}
+	// The honest sweep estimate (mean, SE) is recorded in the promotion provenance (mean 0.85).
+	if !strings.Contains(string(raw), "sweep_estimate") || !strings.Contains(string(raw), "0.85") {
+		t.Errorf("promoted experiment must record the honest (mean, SE) estimate; got:\n%s", raw)
 	}
 }
 

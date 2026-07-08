@@ -203,7 +203,7 @@ func AggregateView(l Ledger, metric string) Ledger {
 			out.Append(r) // pass a pre-aggregated / v1 row through untouched
 			continue
 		}
-		fpb, _ := json.Marshal(r.FreeParams) // Go sorts map keys → canonical group key
+		fpb, _ := json.Marshal(r.FreeParams)  // Go sorts map keys → canonical group key
 		key := r.SweepSHA + "|" + string(fpb) // NUL-free: an aggregate row is not a content-
 		//   address (no single point ran it) — the key is a config-grouping id, kept printable
 		//   (a \x00 separator would corrupt any consumer that renders PointAddr, e.g. promote).
@@ -229,7 +229,7 @@ func AggregateView(l Ledger, metric string) Ledger {
 		if n := len(g.scores); n > 0 {
 			mean, se := meanSE(g.scores)
 			row.Metrics = map[string]float64{
-				metric:           mean,
+				metric:            mean,
 				metric + seSuffix: se,
 				metric + nSuffix:  float64(n),
 			}
@@ -261,18 +261,6 @@ func meanSE(scores []float64) (mean, se float64) {
 		se = math.Sqrt(ss/float64(n-1)) / math.Sqrt(float64(n))
 	}
 	return mean, se
-}
-
-// HasFoldRows reports whether the ledger holds any RAW per-fold row (a fold coordinate).
-// metis#18: a per-fold ledger is a leaderboard-via-AggregateView, not a set of promotable
-// single-run rows — `promote` refuses it until the M1a-5 ship reconstruction lands.
-func HasFoldRows(l Ledger) bool {
-	for _, r := range l.Rows {
-		if r.Fold != nil {
-			return true
-		}
-	}
-	return false
 }
 
 // Best returns the row optimizing the objective metric (maximize / minimize), skipping

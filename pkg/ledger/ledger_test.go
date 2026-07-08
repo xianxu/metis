@@ -252,20 +252,6 @@ func TestAggregateView_NonFoldRowPassesThrough(t *testing.T) {
 	}
 }
 
-// HasFoldRows distinguishes a per-fold sweep ledger (promote refuses it) from a plain one.
-func TestHasFoldRows(t *testing.T) {
-	var fold Ledger
-	fold.Append(foldRow("s", "a0", map[string]any{"m": "a"}, 0, 0.8, "ok"))
-	if !HasFoldRows(fold) {
-		t.Error("a ledger with a fold coordinate must report HasFoldRows=true")
-	}
-	var plain Ledger
-	plain.Append(row("s", "a", nil, map[string]float64{"m": 0.8}, "ok"))
-	if HasFoldRows(plain) {
-		t.Error("a plain ledger (no fold coordinate) must report HasFoldRows=false")
-	}
-}
-
 // Filter selects rows by sweep-SHA (an invocation view).
 func TestFilter_BySweepSHA(t *testing.T) {
 	var l Ledger

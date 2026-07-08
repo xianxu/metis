@@ -194,30 +194,24 @@ func runPromote(o promoteOpts) error {
 	if err != nil {
 		return err
 	}
-	// metis#18: a per-fold sweep ledger can't yet be promoted — reconstructing a RUNNABLE
-	// single experiment from a config aggregate needs the ship wiring (cv-split synthesis +
-	// the all-rows predict handoff via io.dataset_dir), which lands in M1a-5. Refuse cleanly
-	// rather than emit a corrupt/unrunnable .md; the honest per-config leaderboard is
-	// `metis ledger show --sort`.
-	if ledger.HasFoldRows(led) {
-		return fmt.Errorf("promote: %q is a per-fold sweep ledger (metis#18) — promote (runnable-experiment reconstruction) lands in M1a-5; for the honest per-config leaderboard run `metis ledger show %s --sort %s`", o.shapePath, filepath.Base(o.shapePath), sh.Sweeper.Objective.Metric)
-	}
 	led = ledger.Filter(led, o.sweep)
+	// metis#18: reduce the raw per-fold rows to per-config (mean, SE) BEFORE selecting, so
+	// BOTH --best and --point promote a CONFIG by its honest estimate — not a single fold's
+	// row. AggregateView is a no-op on a v1 non-fold ledger (rows pass through untouched), so
+	// this is backward-compatible; metis#19's 1-SE select re-reduces the same rows for free.
+	agg := ledger.AggregateView(led, sh.Sweeper.Objective.Metric)
 
 	var row ledger.Row
 	if o.best {
-		// metis#18: reduce the raw per-fold rows to per-config (mean, SE), then pick the
-		// champion by the objective mean (metis#19's 1-SE select re-reduces the same rows).
-		agg := ledger.AggregateView(led, sh.Sweeper.Objective.Metric)
 		best, ok := ledger.Best(agg, sh.Sweeper.Objective.Metric, sh.Sweeper.Objective.Direction)
 		if !ok {
 			return fmt.Errorf("promote --best: no qualifying config for objective %q — per-fold metrics are namespaced `<step>.<metric>` (e.g. train.fold_score); check the shape's sweeper.objective.metric", sh.Sweeper.Objective.Metric)
 		}
 		row = best
 	} else {
-		r, ok := findRow(led, parsePointSelector(o.point))
+		r, ok := findRow(agg, parsePointSelector(o.point))
 		if !ok {
-			return fmt.Errorf("promote --point %q: no ledger row matches those free-params", o.point)
+			return fmt.Errorf("promote --point %q: no config matches those free-params", o.point)
 		}
 		row = r
 	}
@@ -235,7 +229,7 @@ func runPromote(o promoteOpts) error {
 		return err
 	}
 	exp.ID = o.name // the promoted experiment's id matches its <name>.md filename (the experiment convention)
-	doc := renderPromoted(exp, sh.ID, row)
+	doc := renderPromoted(exp, sh.ID, row, sh.Sweeper.Objective.Metric)
 	outPath := filepath.Join(filepath.Dir(o.shapePath), o.name+".md")
 	if err := os.WriteFile(outPath, []byte(doc), 0o644); err != nil {
 		return err
@@ -297,9 +291,11 @@ func parsePointSelector(s string) map[string]any {
 
 // renderPromoted writes the all-singleton experiment markdown with a back-link that
 // records the FULL origin provenance — the shape, the row's point-address, its
-// sweep-SHA (the code-version it was measured under), and the free-param tuple — so the
-// promoted experiment can be checked against (and recovered to) its origin row.
-func renderPromoted(exp experiment.Experiment, fromShape string, row ledger.Row) string {
+// sweep-SHA (the code-version it was measured under), the free-param tuple, and the honest
+// (mean, SE) sweep estimate the config was selected on — so the promoted experiment can be
+// checked against (and recovered to) its origin row. `metric` is the objective's namespaced
+// metric (e.g. train.fold_score); the aggregated row carries `<metric>{,.se,.n}`.
+func renderPromoted(exp experiment.Experiment, fromShape string, row ledger.Row, metric string) string {
 	var b strings.Builder
 	b.WriteString("---\n")
 	fmt.Fprintf(&b, "type: experiment\nid: %s\n", exp.ID)
@@ -308,6 +304,13 @@ func renderPromoted(exp experiment.Experiment, fromShape string, row ledger.Row)
 	}
 	fmt.Fprintf(&b, "seed: %d\nstatus: active\n", exp.Seed)
 	fmt.Fprintf(&b, "promoted_from: %s @ %s (sweep %s) %s\n", fromShape, row.PointAddr, short(row.SweepSHA), freeParamTupleMap(row.FreeParams))
+	// The honest per-config estimate the winner was selected on (mean ± SE over n folds) —
+	// NOT a resubstitution number: this is the sweep's inner-CV estimate, recorded as
+	// provenance so the promotion carries WHY this config won. `.se`/`.n` are the ledger's
+	// AggregateView column convention (pkg/ledger).
+	if mean, ok := row.Metrics[metric]; ok {
+		fmt.Fprintf(&b, "sweep_estimate: %s mean=%.6f se=%.6f n=%.0f\n", metric, mean, row.Metrics[metric+".se"], row.Metrics[metric+".n"])
+	}
 	b.WriteString("steps:\n")
 	for _, s := range exp.Steps {
 		fmt.Fprintf(&b, "  - id: %s\n    uses: %s\n", s.ID, s.Uses)
