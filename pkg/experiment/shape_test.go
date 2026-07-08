@@ -127,6 +127,45 @@ func TestValidateShape_v2(t *testing.T) {
 	}
 }
 
+// A backward cross-phase edge (a step depending on a LATER-phase step) must be rejected —
+// it would violate the data│pipeline leakage cut. Distinct from acyclicity: the edge here
+// is acyclic (an isolated ship step nothing else depends on) but phase-backward.
+func TestValidateShape_RejectsBackwardPhaseEdge(t *testing.T) {
+	sh, err := ParseShape(mdOf(validShapeV2))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sh.Ship = append(sh.Ship, Step{ID: "extra", Uses: "titanic/submission"})
+	sh.Data[0].Needs = []string{"extra"} // data(0) → ship(2): acyclic, but phase-backward
+	err = ValidateShape(sh)
+	if err == nil {
+		t.Fatal("expected a backward-phase-edge error, got nil")
+	}
+	if !strings.Contains(err.Error(), "phase") && !strings.Contains(err.Error(), "leakage") {
+		t.Errorf("error should name the phase/leakage violation, got: %v", err)
+	}
+}
+
+// The empty-pipeline guard must be exercised in ISOLATION — the T3 mutator nils Pipeline
+// on the full fixture, so `predict needs [train]` goes dangling and Validate fails FIRST
+// (masking the guard). Here Pipeline+Ship are dropped so the DAG is valid and only the
+// pipeline-required guard can fire; reverting the guard must fail this test.
+func TestValidateShape_EmptyPipelineGuard(t *testing.T) {
+	sh, err := ParseShape(mdOf(validShapeV2))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sh.Pipeline = nil
+	sh.Ship = nil // predict needed train (now gone) — drop ship so there's no dangling need
+	err = ValidateShape(sh)
+	if err == nil {
+		t.Fatal("expected an empty-pipeline error, got nil")
+	}
+	if !strings.Contains(err.Error(), "pipeline") {
+		t.Errorf("expected pipeline-required error, got: %v", err)
+	}
+}
+
 // TestShapeConformsToCUE is the drift guard for #ExperimentShape: the Go Shape struct
 // (+ the titanic-baseline-shape fixture ParseShape accepts) must also validate against
 // the CUE #ExperimentShape, so the two can't silently diverge. Skips when cue is absent.

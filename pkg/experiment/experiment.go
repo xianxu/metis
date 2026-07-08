@@ -23,15 +23,22 @@ type Step struct {
 	With  map[string]any `yaml:"with,omitempty"`  // free config map; typed per step-type in M3
 }
 
-// Experiment mirrors CUE #Experiment: the pipeline (steps) plus config, read
-// from a markdown file's YAML frontmatter.
-type Experiment struct {
+// Header is the shared identity/config prefix of both an Experiment and its lifted
+// Shape (metis#18) — declared ONCE here and embedded `yaml:",inline"` into both, mirroring
+// the CUE `_meta` single-source (ARCH-DRY), so adding a header field is a one-place edit.
+type Header struct {
 	Type        string `yaml:"type"`
 	ID          string `yaml:"id"`
 	Competition string `yaml:"competition,omitempty"`
 	Seed        int    `yaml:"seed"`
 	Status      string `yaml:"status"`
-	Steps       []Step `yaml:"steps"`
+}
+
+// Experiment mirrors CUE #Experiment: the shared Header plus the pipeline (steps),
+// read from a markdown file's YAML frontmatter.
+type Experiment struct {
+	Header `yaml:",inline"`
+	Steps  []Step `yaml:"steps"`
 }
 
 // Run mirrors CUE #Run: one recorded execution, written to runs/<id>/run.json by

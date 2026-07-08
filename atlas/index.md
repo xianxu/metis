@@ -66,9 +66,12 @@ identical on a non-Kaggle platform?* — if yes, it lives here.
   untyped `with` bag. `Expand(steps, rangeSteps) → []Point` collapses a shape's reserved `$`-key
   descriptors (`$any` — one choice primitive dispatching on shape: list=untagged set / map=tagged bundled labeled-sum, both recursive + ADD / `$linear-range`·`$log-range`
   grid) into concrete v0-shaped points, each carrying its **free-param path** (the swept coordinates →
-  #8 ledger key / #3 point-address). `experiment.Shape`/`Sweep` parse `type: experiment-shape` + the
-  `sweep:` block; CUE `#ExperimentShape` (with `#Experiment` = the singleton refinement, single-sourced
-  via the shared `_pipeline`); the `construct/datatype/experiment-shape.md` prototype. `metis run` on a
+  #8 ledger key / #3 point-address). `experiment.Shape` (metis#18 v2) parses `type: experiment-shape`
+  into three phases (`data│pipeline│ship`) + a `sweeper` (config-level Sampler) + a `driver` (outer
+  Sampler); CUE `#ExperimentShape` is closed, with `#Experiment` = the flat singleton (no sweeper/driver)
+  — the shared identity header single-sourced via `_meta`, the per-phase step-list via `_phase`; the
+  `construct/datatype/experiment-shape.md` prototype. (Full three-phase / Sampler-fold-node write-up at
+  metis#18 M1a-5.) `metis run` on a
   shape expands it — an all-singleton shape runs like a v0 experiment; a multi-point shape points to the
   **sweep driver (metis#7)**. The ledger keyed off the free-param path is **metis#8**. [metis#6]
 - **`pkg/cache`** (the validating-trace policy layer) — metis#2, the step cache over `pkg/cas`

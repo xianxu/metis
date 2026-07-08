@@ -19,16 +19,12 @@ import (
 // than restating the DAG (ARCH-DRY). The `$`-key value-algebra lives in the untyped
 // `with` bags (pkg/shape expands it). Supersedes the v1 flat `steps` + `sweep` shape.
 type Shape struct {
-	Type        string  `yaml:"type"`
-	ID          string  `yaml:"id"`
-	Competition string  `yaml:"competition,omitempty"`
-	Seed        int     `yaml:"seed"`
-	Status      string  `yaml:"status"`
-	Data        []Step  `yaml:"data"`
-	Pipeline    []Step  `yaml:"pipeline"`
-	Ship        []Step  `yaml:"ship"`
-	Sweeper     Sweeper `yaml:"sweeper"`
-	Driver      Driver  `yaml:"driver"`
+	Header   `yaml:",inline"` // shared type/id/competition/seed/status (ARCH-DRY, mirrors CUE _meta)
+	Data     []Step           `yaml:"data"`
+	Pipeline []Step           `yaml:"pipeline"`
+	Ship     []Step           `yaml:"ship"`
+	Sweeper  Sweeper          `yaml:"sweeper"`
+	Driver   Driver           `yaml:"driver"`
 }
 
 // Sweeper is the config-level Sampler (mlr3 AutoTuner): the sampler that proposes
@@ -109,15 +105,17 @@ func ParseShape(content string) (Shape, error) {
 // sampler, a valid inner resample, a valid objective direction, an M1a-supported select
 // rule, and exactly one driver mode (single | cv).
 func ValidateShape(sh Shape) error {
-	combined := Experiment{
-		Type:        "experiment",
-		ID:          sh.ID,
-		Competition: sh.Competition,
-		Seed:        sh.Seed,
-		Status:      sh.Status,
-		Steps:       combinedSteps(sh),
-	}
+	combined := Experiment{Header: sh.Header, Steps: combinedSteps(sh)}
+	combined.Type = "experiment"
 	if err := Validate(combined); err != nil {
+		return err
+	}
+	// Phase-ordering: a step may only `needs` steps in an earlier-or-equal phase
+	// (data=0 │ pipeline=1 │ ship=2). A backward edge (e.g. a `data` step depending on a
+	// `pipeline` step) validates clean under acyclicity but would silently break the
+	// data│pipeline run-once/per-fold leakage cut when M1a-4 wires execution — reject it
+	// here with a sharp diagnostic. (needs already resolve, per Validate above.)
+	if err := validatePhaseOrdering(sh); err != nil {
 		return err
 	}
 
@@ -130,7 +128,13 @@ func ValidateShape(sh Shape) error {
 	if sh.Sweeper.Resample.CV.K < 2 {
 		return fmt.Errorf("shape %q: sweeper.resample.cv.k must be >= 2, got %d", sh.ID, sh.Sweeper.Resample.CV.K)
 	}
-	if d := sh.Sweeper.Objective.Direction; d != "" && d != "maximize" && d != "minimize" {
+	// Match CUE's required objective (metric + direction present); Go was looser (empty
+	// direction / absent metric passed) — a semantic validator should not be laxer than
+	// the structural one.
+	if sh.Sweeper.Objective.Metric == "" {
+		return fmt.Errorf("shape %q: sweeper.objective.metric is required", sh.ID)
+	}
+	if d := sh.Sweeper.Objective.Direction; d != "maximize" && d != "minimize" {
 		return fmt.Errorf("shape %q: sweeper.objective.direction %q must be maximize|minimize", sh.ID, d)
 	}
 	if s := sh.Sweeper.Objective.Select; s != "argmax-mean" {
@@ -161,4 +165,34 @@ func combinedSteps(sh Shape) []Step {
 	all = append(all, sh.Pipeline...)
 	all = append(all, sh.Ship...)
 	return all
+}
+
+// phaseNames indexes the phase order: data(0) │ pipeline(1) │ ship(2).
+var phaseNames = [...]string{"data", "pipeline", "ship"}
+
+// validatePhaseOrdering enforces that every `needs` edge runs monotonically by phase — a
+// step in phase P may only depend on steps in phase ≤ P. This defends the data│pipeline
+// structural cut: a backward edge (a `data`/`pipeline` step reaching forward into a later
+// phase) is acyclic-legal but would corrupt the run-once/per-fold execution invariant.
+// Assumes needs already resolve (Validate ran first), so every need is in the phase map.
+func validatePhaseOrdering(sh Shape) error {
+	phase := map[string]int{}
+	for _, s := range sh.Data {
+		phase[s.ID] = 0
+	}
+	for _, s := range sh.Pipeline {
+		phase[s.ID] = 1
+	}
+	for _, s := range sh.Ship {
+		phase[s.ID] = 2
+	}
+	for _, s := range combinedSteps(sh) {
+		for _, need := range s.Needs {
+			if phase[need] > phase[s.ID] {
+				return fmt.Errorf("shape %q: %s step %q needs %s step %q — a step may not depend on a later phase (defends the data│pipeline leakage cut)",
+					sh.ID, phaseNames[phase[s.ID]], s.ID, phaseNames[phase[need]], need)
+			}
+		}
+	}
+	return nil
 }

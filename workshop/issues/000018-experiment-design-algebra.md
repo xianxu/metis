@@ -100,7 +100,7 @@ provisional.
 
 Durable plan: `workshop/plans/000018-experiment-design-algebra-m1a-plan.md` (5 review boundaries).
 
-- [ ] M1a-1 — schema: phase-structured Shape + Sweeper/Driver structs, strict unknown-key parse, combined-DAG ValidateShape, closed `#ExperimentShape` CUE rewrite + drift guard, reshaped titanic-sweep.md. *(`cmd/metis` red until M1a-4 — dependency-forced; green scoped to `pkg/experiment`+CUE.)*
+- [x] M1a-1 — schema: phase-structured Shape + Sweeper/Driver structs, strict unknown-key parse, combined-DAG ValidateShape, closed `#ExperimentShape` CUE rewrite + drift guard, reshaped titanic-sweep.md. *(`cmd/metis` red until M1a-4 — dependency-forced; green scoped to `pkg/experiment`+CUE.)*
 - [ ] M1a-2 — pure Sampler core: Sampler interface + generic Run + FixedKFolds/GridConfigs/SingleDriver + Aggregate(mean,SE) + Winner (`pkg/sampler`; zero-IO).
 - [ ] M1a-3 — cache identity (#24): input-addressed Kpre + transitive-D snapshot in each Entry + real-executor soundness gate.
 - [ ] M1a-4 — IO integration: fold-aware Python (features/train/fold_score), engine-materialized partition, per-fold ledger, nested driver-loop wiring (`cmd/metis` build returns green here).
@@ -109,6 +109,7 @@ Durable plan: `workshop/plans/000018-experiment-design-algebra-m1a-plan.md` (5 r
 ## Log
 
 ### 2026-07-07
+- 2026-07-07: closed M1a-1 — pkg/... build+vet+test green (independently re-verified). Real-cue drift-guard (TestShapeConformsToCUE) + closedness test + both merge-checks (experiment-schema-selftest, experiment-validate) pass. cmd/metis red is dependency-forced+confined (go build ./... names ONLY cmd/metis — the v1 flat-sweep paths M1a-4 rewires); whole-module green returns at M1a-4. kbench titanic-sweep reshape c55b549 cue-validated. Bypasses: --no-atlas (atlas at M1a-5/Task 21), --no-actual (per-boundary active-time contaminated in forked+interleaved session; reconcile at full close), --no-project (project tracks at M1a grain; row updated at full close).; review verdict: FIX-THEN-SHIP
 - Filed as metis-v2 M1 (the core). Design in the pensive + project (`sources`). The operator's frame:
   resampling & selection are first-class, declarative axes with per-axis reducers — one algebra, not loops.
 
