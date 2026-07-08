@@ -1,17 +1,26 @@
-"""metis/train step-type — cross-validate then fit a model on all training rows.
+"""metis/train step-type — score ONE CV fold (M1a per-fold), or fit-on-all (ship).
 
-Thin entrypoint (ARCH-PURE): metis.io in → pure cv_score + train → metis.io out.
-Reads the dataset (experiment-relative) and the fold assignment from the upstream
-cv-split step, records the CV score, and persists the model fit on all rows.
+Thin entrypoint (ARCH-PURE): metis.io in → pure fold_score/cv_score+train → metis.io
+out. Two modes, selected by the engine-injected fold-context:
+
+- **per-fold (metis#18 M1a):** when `with._fold.idx` is present, the resample Sampler
+  is driving the fold axis — score ONE assessment fold via `fold_score` and emit
+  `fold_score`. The `_fold` term enters the step's Kpre so folds are cache-distinct;
+  Done reduces the k fold-scores → (mean, SE), and the ledger keeps the raw rows so
+  metis#19's 1-SE select is a free re-reduction.
+- **all-rows (v1 / the M1a-5 ship refit):** when there's no `_fold`, compute the
+  whole-CV `cv_score` mean AND fit a model on ALL training rows, persisted as
+  model.pkl for the downstream predict/submission (ship) steps.
 
 with:
-  dataset: experiment-relative path to a serialized Dataset dir   (required)
-  folds:   id of the upstream cv-split step (reads its folds.json) (required)
-  model:   a kind string ("logreg" | "rf"), OR the $any-map     (required)
-           (tagged, ex-$oneof) bundle carrying the swept hyperparams
+  dataset: experiment-relative path to a serialized Dataset dir       (required)
+  folds:   id of the upstream cv-split step (reads its folds.json)     (required)
+  model:   a kind string ("logreg" | "rf") OR the $any-map bundle      (required)
            ({"rf": {"n_estimators": 200, "max_depth": 4}}). Parsed by
            metis.model.parse_model_config → (kind, params).
-Outputs: model.pkl (artifact) + metrics.json{cv_score}.
+  _fold:   {partition, idx} — engine-injected fold-context; present in  (per-fold)
+           the per-fold run, absent for the all-rows ship refit.
+Outputs: metrics.json{fold_score} (per-fold) OR model.pkl + metrics.json{cv_score}.
 """
 
 from __future__ import annotations
@@ -20,7 +29,7 @@ import json
 import pickle
 
 from metis import io
-from metis.model import cv_score, parse_model_config, train
+from metis.model import cv_score, fold_score, parse_model_config, train
 
 
 def main() -> None:
@@ -31,11 +40,19 @@ def main() -> None:
         folds = json.load(f)
 
     X, y = ds.X(ds.train), ds.y(ds.train)
-    # `model` is a kind string ("logreg") OR the $any-map (ex-$oneof) bundle ({"rf": {n_estimators…}}).
+    # `model` is a kind string ("logreg") OR the $any-map bundle ({"rf": {n_estimators…}}).
     kind, params = parse_model_config(w["model"])
-    score = cv_score(X, y, folds, kind, ctx.seed, params)
-    model = train(X, y, kind, ctx.seed, params)  # final model: fit on ALL training rows
 
+    fold = w.get("_fold")
+    if isinstance(fold, dict) and "idx" in fold:
+        # per-fold: the engine drives the fold axis; score the one assessment fold.
+        score = fold_score(X, y, folds, int(fold["idx"]), kind, ctx.seed, params)
+        io.write_metrics(ctx, {"fold_score": score})
+        return
+
+    # all-rows (v1 / ship refit): whole-CV mean + a model fit on ALL rows for predict.
+    score = cv_score(X, y, folds, kind, ctx.seed, params)
+    model = train(X, y, kind, ctx.seed, params)
     with open(io.out_path(ctx, "model.pkl"), "wb") as f:
         pickle.dump(model, f)
     io.write_metrics(ctx, {"cv_score": score})
