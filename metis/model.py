@@ -66,20 +66,32 @@ def predict(estimator, X):
     return estimator.predict(X)
 
 
-def cv_score(X, y, folds, kind: str, seed: int, params: dict | None = None) -> float:
-    """Mean validation accuracy over the fold assignment (pure, deterministic).
+def fold_score(X, y, folds, fold_idx: int, kind: str, seed: int, params: dict | None = None) -> float:
+    """Validation accuracy for ONE fold (pure, deterministic) — metis#18 M1a.
 
-    For each fold f: train on rows where fold != f, score on rows where fold == f;
-    return the mean accuracy. Uses numpy internally so per-fold models are
-    name-free and reproducible. `params` are the swept hyperparams (threaded to make_model).
+    Train on the analysis rows (fold != fold_idx), score on the assessment rows
+    (fold == fold_idx); return the accuracy. This is the single-fold body cv_score
+    looped over, LIFTED OUT so the engine drives the fold axis: each (config, fold) is a
+    cached run emitting one fold_score, and the resample Sampler's Done reduces the k
+    fold-scores → (mean, SE) (the ledger keeps the raw fold rows, so metis#19's select is
+    a free re-reduction). Uses numpy so per-fold models are name-free and reproducible.
     """
     Xa = np.asarray(X)
     ya = np.asarray(y)
     fa = np.asarray(folds)
-    scores = []
-    for f in sorted(set(fa.tolist())):
-        val = fa == f
-        trn = ~val
-        model = train(Xa[trn], ya[trn], kind, seed, params)
-        scores.append(accuracy_score(ya[val], predict(model, Xa[val])))
+    val = fa == fold_idx
+    trn = ~val
+    model = train(Xa[trn], ya[trn], kind, seed, params)
+    return float(accuracy_score(ya[val], predict(model, Xa[val])))
+
+
+def cv_score(X, y, folds, kind: str, seed: int, params: dict | None = None) -> float:
+    """Mean validation accuracy over the fold assignment (pure, deterministic).
+
+    The v1 whole-CV reducer, now expressed over fold_score (ARCH-DRY) — retained for
+    callers that want the mean in one call; the M1a engine instead runs fold_score
+    per (config, fold) and reduces in the resample Sampler's Done.
+    """
+    fa = np.asarray(folds)
+    scores = [fold_score(X, y, folds, f, kind, seed, params) for f in sorted(set(fa.tolist()))]
     return float(np.mean(scores))
