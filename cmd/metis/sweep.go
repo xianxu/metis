@@ -85,6 +85,12 @@ func runShapeSweep(o runOpts, sh experiment.Shape, now func() time.Time, out io.
 	if err != nil {
 		return fmt.Errorf("%s: %w", o.expPath, err)
 	}
+	// An empty config-space (e.g. a pipeline `$any: []`) has no winner — reject early with a
+	// sharp diagnostic rather than let the sweeper's Done return a zero Winner whose nil Point
+	// crashes the driver:single ship late (a pipeline step with a nil `with`).
+	if len(configPts) == 0 {
+		return fmt.Errorf("%s: shape %q expands to 0 configs — an empty sweep has no winner (check the pipeline's $any choices)", o.expPath, sh.ID)
+	}
 	k := sh.Sweeper.Resample.CV.K
 	if o.dryRun {
 		fmt.Fprintf(out, "metis: sweep %s — %d configs × %d folds (dry run):\n", sh.ID, len(configPts), k)
@@ -146,9 +152,16 @@ func runShapeSweep(o runOpts, sh experiment.Shape, now func() time.Time, out io.
 // experiment (data ++ pipeline all-rows ++ ship — NO cv-split, the refit needs no CV) DIRECTLY
 // from the Winner's resolved Point (metis#18 M1a-5 T19 — not by re-expanding the grid), refit
 // it on ALL training rows, predict, and write the submission. A no-ship shape (leaderboard-only)
-// is a clean no-op. The ship rides the sweep's single code-capture (inSweep — same HEAD sha as
-// the folds); its run dir is content-addressed on the no-_fold config, so it's distinct from the
-// per-fold runs and re-runs cache-HIT.
+// is a clean no-op. Its run dir is content-addressed on the no-_fold config, so it's distinct
+// from the per-fold runs and re-runs cache-HIT.
+//
+// The ship captures its OWN code closure (inSweep stays false → runResolvedExperiment calls
+// captureSingleRun → refs/metis/runs/<shipRunID> + backfills its record). It must NOT ride the
+// sweep's single capture: captureSweepCode ran BEFORE the ship existed and its closure is the
+// UNION of the fold runs only (features/train/cv-split) — the ship-only steps (predict,
+// submission) aren't in it, so a dirty ship would silently lose its durable SHA (metis#14). The
+// ship is ONE run, so capturing it directly is correct + non-redundant (the inSweep optimization
+// only exists to avoid N×k redundant per-FOLD captures).
 func (ss *shapeSweep) shipWinner(w sampler.Winner) error {
 	if len(ss.sh.Ship) == 0 {
 		return nil
@@ -158,9 +171,7 @@ func (ss *shapeSweep) shipWinner(w sampler.Winner) error {
 	if err != nil {
 		return fmt.Errorf("ship winner %s: %w", freeParamStrFromParams(w.Point.FreeParams), err)
 	}
-	pointOpts := ss.o
-	pointOpts.inSweep = true // the sweep captured the code once (captureSweepCode); same sha
-	run, err := runResolvedExperiment(shipExp, pointOpts, shipRunID, ss.now, ss.out)
+	run, err := runResolvedExperiment(shipExp, ss.o, shipRunID, ss.now, ss.out)
 	if err != nil {
 		return fmt.Errorf("ship winner %s (%s): %w", freeParamStrFromParams(w.Point.FreeParams), shipRunID, err)
 	}

@@ -307,9 +307,11 @@ func renderPromoted(exp experiment.Experiment, fromShape string, row ledger.Row,
 	// The honest per-config estimate the winner was selected on (mean ± SE over n folds) —
 	// NOT a resubstitution number: this is the sweep's inner-CV estimate, recorded as
 	// provenance so the promotion carries WHY this config won. `.se`/`.n` are the ledger's
-	// AggregateView column convention (pkg/ledger).
-	if mean, ok := row.Metrics[metric]; ok {
-		fmt.Fprintf(&b, "sweep_estimate: %s mean=%.6f se=%.6f n=%.0f\n", metric, mean, row.Metrics[metric+".se"], row.Metrics[metric+".n"])
+	// AggregateView column convention (pkg/ledger). Gate on `.n` (the aggregate marker): a v1
+	// non-fold ledger row carries the bare metric but NO `.n`, and emitting `se=0 n=0` there
+	// would falsely imply a zero-SE, zero-fold estimate — so only a true aggregate row prints it.
+	if n, ok := row.Metrics[metric+".n"]; ok {
+		fmt.Fprintf(&b, "sweep_estimate: %s mean=%.6f se=%.6f n=%.0f\n", metric, row.Metrics[metric], row.Metrics[metric+".se"], n)
 	}
 	b.WriteString("steps:\n")
 	for _, s := range exp.Steps {

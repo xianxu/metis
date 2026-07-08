@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/xianxu/metis/pkg/experiment"
 	"github.com/xianxu/metis/pkg/ledger"
+	"github.com/xianxu/metis/pkg/record"
 )
 
 // soundFoldExec is the T20 honest-e2e inner exec: it drives the FULL metis#18 phase model
@@ -155,5 +157,72 @@ func TestShapeSweep_HonestE2E(t *testing.T) {
 		if n := countCalls(after, invariant); n != 0 {
 			t.Errorf("%s is upstream of the edit / config-invariant → must stay cached, got %d re-runs", invariant, n)
 		}
+	}
+}
+
+// TestShapeSweep_ShipRunIsCodeCaptured guards the metis#14 code-capture invariant for the
+// driver:single ship (the boundary-review Important): the ship is a DISTINCT run, not a manifest
+// fold-point, so it must capture its OWN code closure — its ship-only steps (predict, submission)
+// aren't in the sweep's fold-only capture, so a silent skip would lose the submitted run's durable
+// SHA on a dirty tree. Assert the ship record is CaptureStatus="captured" and its side-ref resolves.
+func TestShapeSweep_ShipRunIsCodeCaptured(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH (code capture uses git hash-object)")
+	}
+	ws := t.TempDir()
+	codeRepo := t.TempDir()
+	mustRun(t, codeRepo, "git", "init", "-q")
+	// A HEAD commit so the capture side-ref can parent on it; the step files stay UNTRACKED
+	// (dirty) so capture writes a durable side-ref (a clean closure would just return HEAD).
+	if err := os.WriteFile(filepath.Join(codeRepo, "seed"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mustRun(t, codeRepo, "git", "add", "seed")
+	mustRun(t, codeRepo, "git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "seed")
+	for _, f := range []string{"features.py", "train.py", "predict.py", "submission.py"} {
+		if err := os.WriteFile(filepath.Join(codeRepo, f), []byte("v = 1\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	expPath := writeShapeFile(t, ws, foldShapeShipMD("[a, b]"))
+	// The ship-only steps (predict, submission) read code too — so their closure exists to capture.
+	reads := map[string]string{"features": "features.py", "train": "train.py", "predict": "predict.py", "submission": "submission.py"}
+
+	if _, err := runExperiment(runOpts{
+		expPath: expPath, now: fixedNow(), git: fakeGitProbe{name: "metis", sha: "sha"},
+		cache: true, exec: soundFoldExec{codeRepo: codeRepo, reads: reads}, out: io.Discard,
+	}); err != nil {
+		t.Fatalf("sweep+ship: %v", err)
+	}
+
+	// The ship run = the unique run dir carrying a submission step.
+	shipSteps, _ := filepath.Glob(filepath.Join(ws, "runs", "*", "submission", "out.txt"))
+	if len(shipSteps) != 1 {
+		t.Fatalf("expected one ship run, got %d", len(shipSteps))
+	}
+	shipRun := filepath.Dir(filepath.Dir(shipSteps[0]))
+	shipRunID := filepath.Base(shipRun)
+
+	// Its record must be code-captured — NOT the empty "" a silently-skipped capture would leave.
+	b, err := os.ReadFile(filepath.Join(shipRun, "record.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rec record.RunRecord
+	if err := json.Unmarshal(b, &rec); err != nil {
+		t.Fatal(err)
+	}
+	if len(rec.Steps) == 0 {
+		t.Fatal("ship record has no steps")
+	}
+	for _, s := range rec.Steps {
+		if s.Code.CaptureStatus != "captured" {
+			t.Errorf("ship step %s CaptureStatus=%q, want \"captured\" — the ship must capture its OWN "+
+				"closure, not silently ride the fold-only sweep capture (metis#14)", s.StepID, s.Code.CaptureStatus)
+		}
+	}
+	// The ship's own side-ref resolves to a durable commit (dirty closure → a recoverable SHA).
+	if _, err := gitOut(codeRepo, "rev-parse", "--verify", "refs/metis/runs/"+shipRunID); err != nil {
+		t.Errorf("ship side-ref refs/metis/runs/%s must resolve (the ship's durable code SHA): %v", shipRunID, err)
 	}
 }
