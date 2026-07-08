@@ -30,41 +30,58 @@ package experiment
 	artifacts?: [...string]          // repo-relative paths under runs/<id>/
 }
 
-// _pipeline is the shared field set of an experiment and its lifted shape — defined
-// ONCE here (ARCH-DRY) and embedded into both closed definitions below, so the DAG +
-// config shape isn't hand-maintained in two places. (A hidden field, not a `#` def, so
-// it can be embedded and each embedder stays closed over exactly its own fields.)
-_pipeline: {
+// _meta is the shared header field set — defined ONCE (ARCH-DRY) and embedded into the
+// singleton #Experiment (via _pipeline) and the phase-structured #ExperimentShape, so
+// id/competition/seed/status aren't hand-maintained in two places. (A hidden field, not
+// a `#` def, so each embedder stays closed over exactly its own fields.)
+_meta: {
 	id:           string   // slug; matches filename
 	competition?: string   // set on kbench instances; absent on metis fixtures
 	seed:         int
 	status:       #Status
-	steps: [...#Step]      // the pipeline DAG (may be a single step)
+}
+
+// _phase is one phase's step DAG — a metis#18 shape is three of these (data|pipeline|ship).
+_phase: [...#Step]
+
+// _pipeline is the singleton experiment's field set: the shared header + a flat step DAG.
+_pipeline: {
+	_meta
+	steps: _phase          // the pipeline DAG (may be a single step)
 }
 
 // #Experiment is the SINGLETON case: the shared pipeline narrowed to `type:
-// "experiment"` with no sweep block. Closed (no stray fields) for sharp diagnostics.
-// An all-singleton #ExperimentShape (every $any/$*-range collapsed) expands to
-// exactly one of these.
+// "experiment"` with no sweeper. Closed (no stray fields) for sharp diagnostics. A
+// resolved per-fold/ship run (every $any collapsed) is one of these.
 #Experiment: {
 	_pipeline
 	type: "experiment"
 }
 
-// #ExperimentShape (metis#6) is the experiment lifted into a config-space: the same
-// shared pipeline, plus `type: "experiment-shape"` and a `sweep:` block. The `$`-key
-// value-algebra ($any [list=untagged / map=tagged] + $*-range) lives in the untyped `with` bag (value-level,
-// NOT CUE-typed — pkg/shape expands it), so structurally a shape is a pipeline + sweep.
+// #ExperimentShape (metis#18 v2) is the experiment lifted into a config-space AND
+// structured into three phases — `data` (once, above the resample) │ `pipeline` (the
+// swept algorithm×hyperparameter atom, per-fold) │ `ship` (winner-only) — plus a
+// `sweeper` (config sampler + inner resample + objective/select) and a `driver`
+// (single | cv). The `$`-key value-algebra lives in the untyped `with` bag (value-
+// level, NOT CUE-typed — pkg/shape expands it). Closed (no `...`) for sharp diagnostics.
 #ExperimentShape: {
-	_pipeline
+	_meta
 	type: "experiment-shape"
-	sweep: {
-		sampler: string        // "grid" (v1); the propose/should-stop seam is metis#7
-		objective?: {
+	data:     _phase       // produced once, above the resample (shared across folds)
+	pipeline: _phase       // the swept algorithm×hyperparameter atom (run per-fold)
+	ship:     _phase       // winner-only (predict/submission)
+	sweeper: {
+		sampler: string                     // "grid" (M1a); the ask/tell seam is metis#7
+		resample: {cv: {k: int, stratify?: bool}} // the inner CV — how each config is scored
+		objective: {
 			metric:    string
 			direction: "maximize" | "minimize"
+			select:    string               // "argmax-mean" (M1a); one-std-err | pct-loss later (metis#19)
 		}
-		range_steps?: int      // default grid resolution for a $*-range without its own steps
+	}
+	driver: {              // exactly one mode; M1a runs `single`, `cv` is metis#23
+		single?: {}
+		cv?: {k: int, stratify?: bool}
 	}
 }
 

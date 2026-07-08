@@ -15,14 +15,18 @@ import (
 	"github.com/xianxu/metis/pkg/record"
 )
 
-// upstreamHashes maps a step's needs → the upstream steps' output-hashes (sorted, so a
-// derived cache key is invariant to needs-declaration order). Shared by the record
-// assembler (buildRecord) and the cachingExecutor's K_pre — one source for the DAG
-// wiring (ARCH-DRY).
-func upstreamHashes(needs []string, outputs map[string]record.Hash) []record.Hash {
+// sortedUpstream collects a step's upstream terms — one per resolved `need` present in
+// the map — and returns them sorted (so a derived key is invariant to needs-declaration
+// order). ONE collection primitive, two callers passing DIFFERENT maps by design (metis#24):
+//   - the record-provenance assembler (buildRecord) passes upstream OUTPUT-hashes;
+//   - the cachingExecutor's K_pre passes upstream K_pres (input identities).
+//
+// The wiring is identical; only the term's meaning differs — so after #24 the executor's
+// key and the record's Upstream deliberately DIVERGE (input-addressed vs output-addressed).
+func sortedUpstream(needs []string, terms map[string]record.Hash) []record.Hash {
 	up := make([]record.Hash, 0, len(needs))
 	for _, need := range needs {
-		if h, ok := outputs[need]; ok {
+		if h, ok := terms[need]; ok {
 			up = append(up, h)
 		}
 	}
@@ -44,12 +48,20 @@ type outputManifest struct {
 }
 
 // cachingExecutor decorates a StepExecutor with the metis#2 validating-trace cache.
-// Before running a step it computes K_pre (from the step's config, the run seed, and
-// the upstream steps' output-hashes accumulated in topo order), looks up the cache
-// index, and on a HIT (the stored read-set D re-hashes clean) materializes the cached
-// output from the CAS and SKIPS the subprocess. On a MISS it runs, records D (from the
-// sensor's reads.json) + stores the output, and writes the index entry. Runner.Run
-// executes in topo order, so a step's upstream output-hashes are ready when reached.
+// Before running a step it computes K_pre (from the step's config, the run seed, and the
+// upstream steps' K_pres — input identities, metis#24 — accumulated in topo order), looks
+// up the cache index, and on a HIT (the stored transitive-D re-hashes clean) materializes
+// the cached output from the CAS and SKIPS the subprocess. On a MISS it runs, records D
+// (from the sensor's reads.json), folds the transitive-D snapshot, stores the output, and
+// writes the index entry. Runner.Run executes in topo order, so a step's upstream K_pres
+// and transitive-D closures are ready when reached.
+//
+// The two accumulators are the metis#24 mechanism: `kpres` makes the key input-addressed
+// (invariant to upstream OUTPUT non-determinism); `transitiveD` restores the upstream-CODE
+// invalidation that the dropped output-hash term used to carry (each step stores its own
+// transitive closure of read-sets; isHit re-hashes it). Both are per-point (a fresh
+// executor per point-run — run.go), populated in topo order and repopulated from the stored
+// entry on a HIT so a downstream step in the same run still sees an upstream HIT's closure.
 type cachingExecutor struct {
 	inner    experiment.StepExecutor
 	store    cas.Store
@@ -57,7 +69,8 @@ type cachingExecutor struct {
 	seed     int
 	out      io.Writer
 
-	outputs map[string]record.Hash // step-id → output-hash, accumulated across the run
+	kpres       map[string]cache.Hash       // step-id → K_pre (input identity), for downstream keys
+	transitiveD map[string][]record.CodeRef // step-id → transitive read-set closure snapshot
 }
 
 // newCachingExecutor: D paths are now repo-qualified (metis#11) — each ref carries its own
@@ -65,12 +78,13 @@ type cachingExecutor struct {
 // ref in its own repo.
 func newCachingExecutor(inner experiment.StepExecutor, store cas.Store, cacheDir string, seed int, out io.Writer) *cachingExecutor {
 	return &cachingExecutor{
-		inner:    inner,
-		store:    store,
-		indexDir: filepath.Join(cacheDir, "index"),
-		seed:     seed,
-		out:      out,
-		outputs:  map[string]record.Hash{},
+		inner:       inner,
+		store:       store,
+		indexDir:    filepath.Join(cacheDir, "index"),
+		seed:        seed,
+		out:         out,
+		kpres:       map[string]cache.Hash{},
+		transitiveD: map[string][]record.CodeRef{},
 	}
 }
 
@@ -79,6 +93,10 @@ func (c *cachingExecutor) Execute(step experiment.Step, runDir string) (experime
 	if err != nil {
 		return experiment.StepResult{}, err
 	}
+	// Remember this step's K_pre unconditionally (identical on HIT + MISS — it's the
+	// input identity, computed here before the lookup), so a downstream step's key can
+	// reference it. Set here (not in a HIT-only branch) so the MISS path can't forget it.
+	c.kpres[step.ID] = kpre
 	stepDir := filepath.Join(runDir, step.ID)
 
 	entry, ok, err := c.lookup(kpre)
@@ -90,9 +108,11 @@ func (c *cachingExecutor) Execute(step experiment.Step, runDir string) (experime
 		switch {
 		case err == nil:
 			fmt.Fprintf(c.out, "⚡ step %s (cache hit)\n", step.ID)
-			if err := c.recordOutput(step.ID, res.Artifacts, runDir); err != nil {
-				return experiment.StepResult{}, err
-			}
+			// Repopulate this step's transitive-D closure from the STORED snapshot so a
+			// downstream step in the same run still folds an upstream HIT's closure into
+			// its own snapshot (load-bearing — a dropped repopulation only surfaces one
+			// edit later; see TestCachingExecutor_HitFeedsDownstreamClosure).
+			c.transitiveD[step.ID] = entry.TransitiveD
 			return res, nil
 		case errors.Is(err, cas.ErrNotFound) || errors.Is(err, cas.ErrCorrupt):
 			// The wipeable-cache contract (pkg/cas): a missing/corrupt/evicted output
@@ -104,29 +124,27 @@ func (c *cachingExecutor) Execute(step experiment.Step, runDir string) (experime
 		}
 	}
 
-	// MISS (or a recoverable materialize failure) — run, then record D + store the
-	// output + write the index entry.
+	// MISS (or a recoverable materialize failure) — run, then record D + fold the
+	// transitive-D snapshot + store the output + write the index entry.
 	res, err := c.inner.Execute(step, runDir)
 	if err != nil {
 		return res, err
 	}
-	if err := c.recordMiss(kpre, res, stepDir, runDir); err != nil {
-		return res, err
-	}
-	if err := c.recordOutput(step.ID, res.Artifacts, runDir); err != nil {
+	if err := c.recordMiss(step, kpre, res, stepDir, runDir); err != nil {
 		return res, err
 	}
 	return res, nil
 }
 
 // kpre builds the ex-ante cache key from the step's config, the run seed, and the
-// upstream steps' output-hashes accumulated so far (Kpre sorts them internally).
+// upstream steps' K_pres accumulated so far (input-addressed, metis#24 — Kpre sorts them
+// internally). A step reached in topo order has every upstream's K_pre in c.kpres.
 func (c *cachingExecutor) kpre(step experiment.Step) (cache.Hash, error) {
 	return cache.Kpre(record.StepRecord{
 		StepID:   step.ID,
 		Uses:     step.Uses,
 		With:     step.With,
-		Upstream: upstreamHashes(step.Needs, c.outputs),
+		Upstream: sortedUpstream(step.Needs, c.kpres),
 	}, c.seed)
 }
 
@@ -147,20 +165,30 @@ func (c *cachingExecutor) lookup(kpre cache.Hash) (cache.Entry, bool, error) {
 
 // isHit decides whether an index entry is a HIT. An immutable-leaf step (a conscious
 // pin that its external source is frozen) hits on the K_pre match alone; every other
-// step re-hashes its stored read-set D via git and hits only if all files are
-// unchanged. A hasher failure is treated as a MISS (safe: recompute, never stale).
+// step re-hashes its stored TRANSITIVE-D closure via git and hits only if every file —
+// its own AND every transitively-upstream read — is unchanged (metis#24: the input-
+// addressed K_pre no longer carries upstream-code edits, so the closure snapshot does).
+// A hasher failure is treated as a MISS (safe: recompute, never stale).
 func (c *cachingExecutor) isHit(step experiment.Step, entry cache.Entry) bool {
 	if isImmutableLeaf(step) {
 		return true
 	}
-	// Re-hash the stored D per-repo (metis#11): group the refs by their repo root, hash
+	// Migration guard (metis#24): the K_pre-term change orphans all non-root entries (an
+	// implicit cache-version bump), but a surviving root entry — or any legacy entry —
+	// carries no TransitiveD (nil, absent in its JSON). A #24 entry ALWAYS stores a non-nil
+	// TransitiveD (MergeTransitiveD never returns nil). So a nil snapshot means "written by
+	// pre-#24 code" → MISS, so a nil can never vacuously HIT and serve an unvalidated output.
+	if entry.TransitiveD == nil {
+		return false
+	}
+	// Re-hash the stored closure per-repo (metis#11): group the refs by their repo root, hash
 	// each repo's paths in ITS repo (git -C repo), then validate. Symmetric with the store
-	// side (recordMiss) — both key by repo, so store and HIT-check can't disagree.
-	hashesByRepo, err := hashDByRepo(entry.D)
+	// side (recordMiss folds + stores the SAME closure) — store and HIT-check can't disagree.
+	hashesByRepo, err := hashDByRepo(entry.TransitiveD)
 	if err != nil {
 		return false
 	}
-	return cache.Validate(entry.D, func(ref record.CodeRef) (record.Hash, error) {
+	return cache.Validate(entry.TransitiveD, func(ref record.CodeRef) (record.Hash, error) {
 		h, ok := hashesByRepo[ref.Repo][ref.Path]
 		if !ok {
 			return "", fmt.Errorf("no hash for %s:%s", ref.Repo, ref.Path)
@@ -229,9 +257,10 @@ func (c *cachingExecutor) materialize(entry cache.Entry, stepDir, runDir string)
 }
 
 // recordMiss stores a freshly-run step's output in the CAS + writes the index entry:
-// build D from the sensor's reads.json, CAS-store each artifact into an output
-// manifest, and index the manifest hash under K_pre.
-func (c *cachingExecutor) recordMiss(kpre cache.Hash, res experiment.StepResult, stepDir, runDir string) error {
+// build D from the sensor's reads.json, fold the transitive-D snapshot (this step's D
+// unioned with each upstream's stored closure — the metis#24 soundness snapshot), CAS-store
+// each artifact into an output manifest, and index the manifest hash under K_pre.
+func (c *cachingExecutor) recordMiss(step experiment.Step, kpre cache.Hash, res experiment.StepResult, stepDir, runDir string) error {
 	rs, err := loadReadSet(stepDir)
 	if err != nil {
 		return err
@@ -271,6 +300,19 @@ func (c *cachingExecutor) recordMiss(kpre cache.Hash, res experiment.StepResult,
 		return err
 	}
 
+	// Fold the transitive-D snapshot: this step's own D unioned with each upstream's
+	// already-computed closure (topo order guarantees they're populated — set on their
+	// own MISS or repopulated on their HIT). Stored in THIS step's entry so isHit
+	// validates the closure against the current tree (restoring upstream-code invalidation
+	// the input-addressed K_pre drops). MergeTransitiveD returns a non-nil slice even when
+	// empty, so a #24 entry's TransitiveD is never nil (distinguishing it from a legacy one).
+	upstream := make([][]record.CodeRef, 0, len(step.Needs))
+	for _, need := range step.Needs {
+		upstream = append(upstream, c.transitiveD[need])
+	}
+	td := cache.MergeTransitiveD(d, upstream...)
+	c.transitiveD[step.ID] = td
+
 	man := outputManifest{Metrics: res.Metrics}
 	for _, rel := range res.Artifacts {
 		b, err := os.ReadFile(filepath.Join(runDir, filepath.FromSlash(rel)))
@@ -292,7 +334,7 @@ func (c *cachingExecutor) recordMiss(kpre cache.Hash, res experiment.StepResult,
 	if err != nil {
 		return err
 	}
-	return c.writeEntry(cache.Entry{Kpre: kpre, D: d, Output: outHash})
+	return c.writeEntry(cache.Entry{Kpre: kpre, D: d, TransitiveD: td, Output: outHash})
 }
 
 func (c *cachingExecutor) writeEntry(e cache.Entry) error {
@@ -304,17 +346,6 @@ func (c *cachingExecutor) writeEntry(e cache.Entry) error {
 		return err
 	}
 	return os.WriteFile(filepath.Join(c.indexDir, string(e.Kpre)+".json"), b, 0o644)
-}
-
-// recordOutput computes and remembers a step's output-hash (from its artifacts) so
-// downstream steps' K_pre can reference it — the same OutputHash used in the record.
-func (c *cachingExecutor) recordOutput(stepID string, artifacts []string, runDir string) error {
-	fhs, err := hashArtifacts(runDir, artifacts)
-	if err != nil {
-		return err
-	}
-	c.outputs[stepID] = record.OutputHash(fhs)
-	return nil
 }
 
 // isImmutableLeaf reports whether a step is marked as a pinned external leaf

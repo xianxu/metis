@@ -16,17 +16,19 @@ import (
 
 // rowsFromManifest turns a sweep manifest + the per-point records into ledger rows —
 // PURE (the caller reads the record.json files). The metric collision fix lives here:
-// each row's metrics are NAMESPACED per step (train.cv_score, not a flat cv_score that
+// each row's metrics are NAMESPACED per step (train.fold_score, not a flat fold_score that
 // v0's merge collided). Keys: point-address (manifest run-id) + sweep-SHA (the
 // manifest's repo SHA, read from any point's record).
 func rowsFromManifest(man sweepManifest, records map[string]record.RunRecord) []ledger.Row {
 	rows := make([]ledger.Row, 0, len(man.Points))
 	for _, p := range man.Points {
 		rec := records[p.RunID]
+		fold := p.Fold // fresh per-iteration var → &fold is the row's own fold coordinate
 		rows = append(rows, ledger.Row{
 			FreeParams: p.FreeParams,
 			SweepSHA:   sweepSHAOf(rec),
 			PointAddr:  p.RunID,
+			Fold:       &fold, // metis#18: a RAW per-fold row (AggregateView reduces read-time)
 			Metrics:    namespacedMetrics(rec),
 			Status:     p.Status,
 		})
@@ -58,22 +60,40 @@ func sweepSHAOf(rec record.RunRecord) string {
 	return ""
 }
 
-// promotedExperiment reconstructs the all-singleton experiment for a ledger row by
-// EXPANDING the shape and matching the point whose free-params equal the row's — PURE,
-// no repo. This inverts the sweep by re-derivation (reusing shape.Expand +
-// shapePointToExperiment), not a fragile flat-map inversion: the free-param tuple is the
-// human key that uniquely identifies a point within the shape (metis#6/#8 design).
+// promotedExperiment reconstructs the winner's runnable experiment for a ledger row by
+// EXPANDING the pipeline config-space and matching the config whose free-params equal the
+// row's — PURE, no repo. This inverts the sweep by re-derivation (reusing shape.Expand +
+// shapeConfigToExperiment), not a fragile flat-map inversion: the free-param tuple is the
+// human key that uniquely identifies a config within the shape (metis#6/#8 design).
 func promotedExperiment(sh experiment.Shape, freeParams map[string]any) (experiment.Experiment, error) {
-	points, err := shape.Expand(sh.Steps, sh.Sweep.RangeSteps)
+	configs, err := shape.Expand(sh.Pipeline, 0)
 	if err != nil {
 		return experiment.Experiment{}, err
 	}
-	for _, p := range points {
-		if freeParamsEqual(p, freeParams) {
-			return shapePointToExperiment(sh, p), nil
+	for _, c := range configs {
+		if freeParamsEqual(c, freeParams) {
+			return shapeConfigToExperiment(sh, c), nil
 		}
 	}
-	return experiment.Experiment{}, fmt.Errorf("no point in shape %q matches free-params %v", sh.ID, freeParams)
+	return experiment.Experiment{}, fmt.Errorf("no config in shape %q matches free-params %v", sh.ID, freeParams)
+}
+
+// shapeConfigToExperiment reconstructs the winner's runnable experiment for a config point:
+// data ++ pipeline (config overlaid, NO fold-context → the all-rows/ship path train.py takes
+// when `_fold` is absent) ++ ship. The metis#18 promote/ship reconstruction; the per-fold
+// experiment is buildFoldExperiment. (M1a-5 injects the `{mode:all}` ship signal here.)
+func shapeConfigToExperiment(sh experiment.Shape, c shape.Point) experiment.Experiment {
+	steps := make([]experiment.Step, 0, len(sh.Data)+len(sh.Pipeline)+len(sh.Ship))
+	steps = append(steps, sh.Data...)
+	for _, ps := range sh.Pipeline {
+		s := ps
+		s.With = c.With[ps.ID]
+		steps = append(steps, s)
+	}
+	steps = append(steps, sh.Ship...)
+	exp := experiment.Experiment{Header: sh.Header, Steps: steps}
+	exp.Type = "experiment"
+	return exp
 }
 
 // freeParamsEqual reports whether an expanded point's free-param path equals the row's
@@ -94,11 +114,12 @@ func ledgerPath(shapePath string) string {
 	return base + ".ledger.csv"
 }
 
-// writeSweepLedger appends a finished sweep's rows to the shape's ledger sidecar
-// (idempotent — dedups by point-address). Called by runSweep after the manifest is
-// written. It does NOT touch the experiment .md (#13 — the config is immutable input);
-// the human top-N view is on-demand via `metis ledger show` over the sidecar.
-func writeSweepLedger(shapePath string, man sweepManifest, objective experiment.Objective) error {
+// writeSweepLedger appends a finished sweep's RAW per-fold rows to the shape's ledger
+// sidecar (idempotent — dedups by point-address). Called by runShapeSweep after the
+// manifest is written. It does NOT touch the experiment .md (#13 — the config is immutable
+// input); the human per-config (mean,SE) view is on-demand via `metis ledger show` (which
+// AggregateView-reduces the raw rows).
+func writeSweepLedger(shapePath string, man sweepManifest) error {
 	records, err := loadSweepRecords(shapePath, man)
 	if err != nil {
 		return err
@@ -112,11 +133,7 @@ func writeSweepLedger(shapePath string, man sweepManifest, objective experiment.
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(ledgerPath(shapePath), b, 0o644); err != nil {
-		return err
-	}
-	warnIfObjectiveMissing(led, objective)
-	return nil
+	return os.WriteFile(ledgerPath(shapePath), b, 0o644)
 }
 
 // loadLedger reads the shape's ledger sidecar (absent → empty).
@@ -147,20 +164,6 @@ func loadSweepRecords(shapePath string, man sweepManifest) (map[string]record.Ru
 		out[p.RunID] = rec
 	}
 	return out, nil
-}
-
-// warnIfObjectiveMissing surfaces the one genuinely-useful check the old body-summary
-// carried: a sweep whose objective metric matches NO ledger row — almost always a
-// namespacing mistake (rows carry `<step>.<metric>`, e.g. train.cv_score). It's loud,
-// not a silently-empty result. (#13: the top-N summary is no longer written into the
-// experiment .md — the config is immutable input; the human view is `metis ledger show`.)
-func warnIfObjectiveMissing(led ledger.Ledger, obj experiment.Objective) {
-	if obj.Metric == "" || len(led.Rows) == 0 {
-		return
-	}
-	if len(ledger.TopN(led, obj.Metric, obj.Direction, 10)) == 0 {
-		fmt.Fprintf(os.Stderr, "metis: warning: objective metric %q is not present in any ledger row — metrics are namespaced `<step>.<metric>` (e.g. train.%s)\n", obj.Metric, obj.Metric)
-	}
 }
 
 // freeParamTuple renders a row's free-params as a compact `(k=v, …)` human key

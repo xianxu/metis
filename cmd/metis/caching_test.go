@@ -242,18 +242,21 @@ func TestCachingExecutor_RealDMissesOnSourceEdit(t *testing.T) {
 	}
 	c := &cachingExecutor{}
 	// metis#11: D is repo-qualified — the ref carries its repo root so isHit re-hashes it there.
-	entry := cache.Entry{Kpre: "k", D: []record.CodeRef{{Repo: root, Path: "src.py", BlobHash: hashes["src.py"]}}}
-	step := experiment.Step{ID: "s"} // NOT a leaf → D revalidation applies
+	// metis#24: isHit validates TransitiveD (the closure), so pin the ref there (a root step's
+	// closure == its own D).
+	refs := []record.CodeRef{{Repo: root, Path: "src.py", BlobHash: hashes["src.py"]}}
+	entry := cache.Entry{Kpre: "k", D: refs, TransitiveD: refs}
+	step := experiment.Step{ID: "s"} // NOT a leaf → closure revalidation applies
 
 	if !c.isHit(step, entry) {
-		t.Fatal("unchanged D must HIT")
+		t.Fatal("unchanged closure must HIT")
 	}
-	// Edit the source file in D → its blob-hash moves → the step must MISS.
+	// Edit the source file in the closure → its blob-hash moves → the step must MISS.
 	if err := os.WriteFile(src, []byte("x = 2  # edited\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if c.isHit(step, entry) {
-		t.Error("a byte-changed file in D must MISS (D revalidation is the cache's core soundness)")
+		t.Error("a byte-changed file in the closure must MISS (closure revalidation is the cache's core soundness)")
 	}
 }
 
@@ -283,10 +286,12 @@ func TestCachingExecutor_MultiRepoDMissesOnConsumerEdit(t *testing.T) {
 	ch, _ := gitBlobHashes(consumerRepo, []string{"titanic/features.py"})
 
 	c := &cachingExecutor{}
-	entry := cache.Entry{Kpre: "k", D: []record.CodeRef{
+	// metis#24: the two-repo closure lives in TransitiveD (isHit validates it).
+	refs := []record.CodeRef{
 		{Repo: metisRepo, Path: "io.py", BlobHash: mh["io.py"]},
 		{Repo: consumerRepo, Path: "titanic/features.py", BlobHash: ch["titanic/features.py"]},
-	}}
+	}
+	entry := cache.Entry{Kpre: "k", D: refs, TransitiveD: refs}
 	step := experiment.Step{ID: "s"}
 
 	if !c.isHit(step, entry) {
@@ -298,6 +303,66 @@ func TestCachingExecutor_MultiRepoDMissesOnConsumerEdit(t *testing.T) {
 	}
 	if c.isHit(step, entry) {
 		t.Error("editing the CONSUMER repo's code must MISS — the metis#11 cross-repo guarantee")
+	}
+}
+
+// metis#24 input-addressing: the executor's K_pre upstream term is the upstream steps'
+// K_pres (input identity), NOT their output-hashes — so a step's key is computable
+// pre-run from the DAG and invariant to upstream output non-determinism. Pins the
+// executor wiring (the pure Kpre five-term test is agnostic to WHICH map feeds Upstream).
+func TestCachingExecutor_KpreUsesUpstreamKpres(t *testing.T) {
+	c := &cachingExecutor{seed: 7, kpres: map[string]cache.Hash{"up": "UPKPRE"}}
+	step := experiment.Step{ID: "down", Uses: "metis/train", Needs: []string{"up"}, With: map[string]any{"a": 1}}
+
+	got, err := c.kpre(step)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The key must equal Kpre fed the UPSTREAM's Kpre as the upstream term.
+	want, err := cache.Kpre(record.StepRecord{
+		StepID: "down", Uses: "metis/train", With: step.With, Upstream: []record.Hash{"UPKPRE"},
+	}, 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Errorf("executor K_pre must use the upstream K_pre as its upstream term:\n got %q\nwant %q", got, want)
+	}
+
+	// A change to the upstream's INPUT identity (its K_pre) re-keys the downstream —
+	// input-identity propagation, the replacement for the dropped output-hash chain.
+	c2 := &cachingExecutor{seed: 7, kpres: map[string]cache.Hash{"up": "DIFFERENT"}}
+	if got2, _ := c2.kpre(step); got2 == got {
+		t.Error("a changed upstream K_pre must re-key the downstream step")
+	}
+
+	// A per-run fold coordinate overlaid into `with` re-keys the step (the B2 fold-distinct
+	// guard at the executor level — two folds of one step get distinct entries).
+	foldStep := step
+	foldStep.With = map[string]any{"a": 1, "_fold": map[string]any{"partition": "p", "idx": 1}}
+	if gotFold, _ := c.kpre(foldStep); gotFold == got {
+		t.Error("a _fold coordinate in `with` must re-key the step (fold-distinct cache)")
+	}
+}
+
+// metis#24 migration guard: the K_pre-term change orphans non-root entries, but a legacy
+// (pre-#24) entry carries NO TransitiveD (nil). A non-leaf step with a nil closure MISSes
+// (a nil can't vacuously HIT an unvalidated output), while a genuine #24 empty closure
+// (non-nil []) still HITs vacuously, and an immutable leaf HITs on K_pre regardless.
+func TestCachingExecutor_LegacyNilTransitiveDMisses(t *testing.T) {
+	c := &cachingExecutor{}
+	step := experiment.Step{ID: "s"}
+	legacy := cache.Entry{Kpre: "k", D: []record.CodeRef{{Repo: "r", Path: "a.py", BlobHash: "h"}}} // TransitiveD nil
+	if c.isHit(step, legacy) {
+		t.Error("a legacy entry (nil TransitiveD) must MISS — a nil closure can't vacuously HIT")
+	}
+	empty := cache.Entry{Kpre: "k", TransitiveD: []record.CodeRef{}} // a genuine #24 empty closure
+	if !c.isHit(step, empty) {
+		t.Error("a #24 empty-closure entry ([] TransitiveD) must HIT vacuously (K_pre alone)")
+	}
+	leaf := experiment.Step{ID: "get", With: map[string]any{"cache": map[string]any{"leaf": "immutable"}}}
+	if !c.isHit(leaf, legacy) {
+		t.Error("an immutable leaf must HIT on K_pre alone regardless of the migration guard")
 	}
 }
 
@@ -350,16 +415,19 @@ steps:
 // MISSes for a normal step. Pins the runner-level bypass, not just the marker predicate.
 func TestCachingExecutor_ImmutableLeafBypassesDValidation(t *testing.T) {
 	c := &cachingExecutor{}
-	tmp := t.TempDir() // no git repo / no D file here → the ref can't re-hash → MISS (for a normal step)
-	badEntry := cache.Entry{Kpre: "k", D: []record.CodeRef{{Repo: tmp, Path: "nope.py", BlobHash: "stale"}}}
+	tmp := t.TempDir() // no git repo / no closure file here → the ref can't re-hash → MISS (for a normal step)
+	// A non-nil TransitiveD that can't re-hash: the plain step MISSes via the re-hash-fail
+	// path (not the nil migration guard), so this still pins the leaf BYPASS specifically.
+	badRefs := []record.CodeRef{{Repo: tmp, Path: "nope.py", BlobHash: "stale"}}
+	badEntry := cache.Entry{Kpre: "k", D: badRefs, TransitiveD: badRefs}
 
 	leaf := experiment.Step{ID: "get", With: map[string]any{"cache": map[string]any{"leaf": "immutable"}}}
 	if !c.isHit(leaf, badEntry) {
-		t.Error("an immutable leaf must HIT on K_pre alone, bypassing D re-validation")
+		t.Error("an immutable leaf must HIT on K_pre alone, bypassing closure re-validation")
 	}
 	plain := experiment.Step{ID: "train"}
 	if c.isHit(plain, badEntry) {
-		t.Error("a normal step must MISS when its D cannot re-hash clean")
+		t.Error("a normal step must MISS when its closure cannot re-hash clean")
 	}
 }
 

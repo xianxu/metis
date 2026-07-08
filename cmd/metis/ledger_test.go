@@ -43,21 +43,21 @@ func TestRowsFromManifest_NamespacedMetrics(t *testing.T) {
 	}
 }
 
-// promotedExperiment reconstructs the all-singleton experiment for a row by matching
-// its free-params against the shape's expanded points — pure, no repo. Reuses Expand +
-// shapePointToExperiment (no fragile expand-inversion).
+// promotedExperiment reconstructs the winner's experiment for a row by matching its
+// free-params against the shape's expanded PIPELINE configs — pure, no repo. Reuses
+// shape.Expand(sh.Pipeline) + shapeConfigToExperiment (metis#18 phase model; no fragile
+// expand-inversion).
 func TestPromotedExperiment_MatchesByFreeParams(t *testing.T) {
 	sh := experiment.Shape{
-		Experiment: experiment.Experiment{
-			Type: "experiment-shape", ID: "titanic", Seed: 42, Status: "active",
-			Steps: []experiment.Step{
-				{ID: "train", Uses: "metis/train", With: map[string]any{
-					"model": map[string]any{"$any": []any{"logreg", "rf"}},
-					"fixed": "keep",
-				}},
-			},
+		Header: experiment.Header{Type: "experiment-shape", ID: "titanic", Seed: 42, Status: "active"},
+		Data:   []experiment.Step{{ID: "adapt", Uses: "titanic/adapt", With: map[string]any{"out": "../data/x"}}},
+		Pipeline: []experiment.Step{
+			{ID: "train", Uses: "metis/train", Needs: []string{"adapt"}, With: map[string]any{
+				"model": map[string]any{"$any": []any{"logreg", "rf"}},
+				"fixed": "keep",
+			}},
 		},
-		Sweep: experiment.Sweep{Sampler: "grid"},
+		Ship: []experiment.Step{{ID: "predict", Uses: "metis/predict", Needs: []string{"train"}}},
 	}
 	exp, err := promotedExperiment(sh, map[string]any{"train.model": "rf"})
 	if err != nil {
@@ -66,17 +66,28 @@ func TestPromotedExperiment_MatchesByFreeParams(t *testing.T) {
 	if exp.Type != "experiment" {
 		t.Errorf("promoted should be a plain experiment, got %q", exp.Type)
 	}
-	// The matched point pinned model=rf ($any → verbatim value) + kept the fixed leaf.
-	tw := exp.Steps[0].With
+	// The reconstruction threads all three phases: data (adapt) ++ pipeline (train) ++ ship
+	// (predict). Find the train step and confirm it pinned model=rf + kept the fixed leaf.
+	var tw map[string]any
+	ids := make([]string, len(exp.Steps))
+	for i, s := range exp.Steps {
+		ids[i] = s.ID
+		if s.ID == "train" {
+			tw = s.With
+		}
+	}
+	if len(exp.Steps) != 3 || ids[0] != "adapt" || ids[2] != "predict" {
+		t.Errorf("promoted experiment should be data++pipeline++ship (adapt, train, predict); got %v", ids)
+	}
 	if tw["model"] != "rf" {
 		t.Errorf("promoted train.model should be the pinned $any value 'rf'; got %#v", tw["model"])
 	}
 	if tw["fixed"] != "keep" {
 		t.Errorf("fixed leaf must be preserved; got %v", tw["fixed"])
 	}
-	// A non-existent free-param set errors (no matching point).
+	// A non-existent free-param set errors (no matching config).
 	if _, err := promotedExperiment(sh, map[string]any{"train.model": "nope"}); err == nil {
-		t.Error("promotedExperiment must error when no point matches the free-params")
+		t.Error("promotedExperiment must error when no config matches the free-params")
 	}
 }
 

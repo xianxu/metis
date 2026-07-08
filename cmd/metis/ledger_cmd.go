@@ -25,7 +25,7 @@ func cmdLedger(args []string) error {
 	}
 	fs := flag.NewFlagSet("ledger show", flag.ContinueOnError)
 	sweep := fs.String("sweep", "", "filter to one sweep-SHA (code-version)")
-	sortMetric := fs.String("sort", "", "sort by this namespaced metric (e.g. train.cv_score)")
+	sortMetric := fs.String("sort", "", "sort by this namespaced metric (e.g. train.fold_score)")
 	direction := fs.String("dir", "", "sort direction: maximize | minimize (default: the shape's objective direction)")
 	top := fs.Int("top", 0, "show only the top N (0 = all)")
 	shapePath, flags, err := hoistShapePath(args[1:])
@@ -41,8 +41,8 @@ func cmdLedger(args []string) error {
 	if dir == "" {
 		dir = "maximize"
 		if raw, err := os.ReadFile(shapePath); err == nil {
-			if sh, err := experiment.ParseShape(string(raw)); err == nil && sh.Sweep.Objective.Direction != "" {
-				dir = sh.Sweep.Objective.Direction
+			if sh, err := experiment.ParseShape(string(raw)); err == nil && sh.Sweeper.Objective.Direction != "" {
+				dir = sh.Sweeper.Objective.Direction
 			}
 		}
 	}
@@ -59,7 +59,10 @@ func showLedger(shapePath, sweep, sortMetric, direction string, top int, out io.
 	led = ledger.Filter(led, sweep)
 	rows := led.Rows
 	if sortMetric != "" {
-		rows = ledger.SortAll(led, sortMetric, direction) // sorts by objective, KEEPS failed/missing rows
+		// metis#18: the sidecar holds RAW per-fold rows — reduce to per-config (mean, SE)
+		// before ranking, so `--sort <metric>` is a config leaderboard, not fold noise.
+		agg := ledger.AggregateView(led, sortMetric)
+		rows = ledger.SortAll(agg, sortMetric, direction) // sorts by objective, KEEPS failed/missing rows
 	}
 	if top > 0 && top < len(rows) {
 		rows = rows[:top]
@@ -192,18 +195,23 @@ func runPromote(o promoteOpts) error {
 		return err
 	}
 	led = ledger.Filter(led, o.sweep)
+	// metis#18: reduce the raw per-fold rows to per-config (mean, SE) BEFORE selecting, so
+	// BOTH --best and --point promote a CONFIG by its honest estimate — not a single fold's
+	// row. AggregateView is a no-op on a v1 non-fold ledger (rows pass through untouched), so
+	// this is backward-compatible; metis#19's 1-SE select re-reduces the same rows for free.
+	agg := ledger.AggregateView(led, sh.Sweeper.Objective.Metric)
 
 	var row ledger.Row
 	if o.best {
-		best, ok := ledger.Best(led, sh.Sweep.Objective.Metric, sh.Sweep.Objective.Direction)
+		best, ok := ledger.Best(agg, sh.Sweeper.Objective.Metric, sh.Sweeper.Objective.Direction)
 		if !ok {
-			return fmt.Errorf("promote --best: no qualifying row for objective %q — metrics are namespaced `<step>.<metric>` (e.g. train.%s); check the shape's sweep.objective.metric", sh.Sweep.Objective.Metric, sh.Sweep.Objective.Metric)
+			return fmt.Errorf("promote --best: no qualifying config for objective %q — per-fold metrics are namespaced `<step>.<metric>` (e.g. train.fold_score); check the shape's sweeper.objective.metric", sh.Sweeper.Objective.Metric)
 		}
 		row = best
 	} else {
-		r, ok := findRow(led, parsePointSelector(o.point))
+		r, ok := findRow(agg, parsePointSelector(o.point))
 		if !ok {
-			return fmt.Errorf("promote --point %q: no ledger row matches those free-params", o.point)
+			return fmt.Errorf("promote --point %q: no config matches those free-params", o.point)
 		}
 		row = r
 	}
@@ -221,7 +229,7 @@ func runPromote(o promoteOpts) error {
 		return err
 	}
 	exp.ID = o.name // the promoted experiment's id matches its <name>.md filename (the experiment convention)
-	doc := renderPromoted(exp, sh.ID, row)
+	doc := renderPromoted(exp, sh.ID, row, sh.Sweeper.Objective.Metric)
 	outPath := filepath.Join(filepath.Dir(o.shapePath), o.name+".md")
 	if err := os.WriteFile(outPath, []byte(doc), 0o644); err != nil {
 		return err
@@ -283,9 +291,11 @@ func parsePointSelector(s string) map[string]any {
 
 // renderPromoted writes the all-singleton experiment markdown with a back-link that
 // records the FULL origin provenance — the shape, the row's point-address, its
-// sweep-SHA (the code-version it was measured under), and the free-param tuple — so the
-// promoted experiment can be checked against (and recovered to) its origin row.
-func renderPromoted(exp experiment.Experiment, fromShape string, row ledger.Row) string {
+// sweep-SHA (the code-version it was measured under), the free-param tuple, and the honest
+// (mean, SE) sweep estimate the config was selected on — so the promoted experiment can be
+// checked against (and recovered to) its origin row. `metric` is the objective's namespaced
+// metric (e.g. train.fold_score); the aggregated row carries `<metric>{,.se,.n}`.
+func renderPromoted(exp experiment.Experiment, fromShape string, row ledger.Row, metric string) string {
 	var b strings.Builder
 	b.WriteString("---\n")
 	fmt.Fprintf(&b, "type: experiment\nid: %s\n", exp.ID)
@@ -294,6 +304,15 @@ func renderPromoted(exp experiment.Experiment, fromShape string, row ledger.Row)
 	}
 	fmt.Fprintf(&b, "seed: %d\nstatus: active\n", exp.Seed)
 	fmt.Fprintf(&b, "promoted_from: %s @ %s (sweep %s) %s\n", fromShape, row.PointAddr, short(row.SweepSHA), freeParamTupleMap(row.FreeParams))
+	// The honest per-config estimate the winner was selected on (mean ± SE over n folds) —
+	// NOT a resubstitution number: this is the sweep's inner-CV estimate, recorded as
+	// provenance so the promotion carries WHY this config won. `.se`/`.n` are the ledger's
+	// AggregateView column convention (pkg/ledger). Gate on `.n` (the aggregate marker): a v1
+	// non-fold ledger row carries the bare metric but NO `.n`, and emitting `se=0 n=0` there
+	// would falsely imply a zero-SE, zero-fold estimate — so only a true aggregate row prints it.
+	if n, ok := row.Metrics[metric+".n"]; ok {
+		fmt.Fprintf(&b, "sweep_estimate: %s mean=%.6f se=%.6f n=%.0f\n", metric, row.Metrics[metric], row.Metrics[metric+".se"], n)
+	}
 	b.WriteString("steps:\n")
 	for _, s := range exp.Steps {
 		fmt.Fprintf(&b, "  - id: %s\n    uses: %s\n", s.ID, s.Uses)

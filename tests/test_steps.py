@@ -58,6 +58,31 @@ def test_train_then_predict_chain(tmp_path, monkeypatch):
     assert len(preds) == 20  # the toy test split
 
 
+def test_ship_refit_reads_captured_features_no_folds(tmp_path, monkeypatch):
+    """The driver:single ship (metis#18 M1a-5): train + predict refit on the all-rows
+    `features` output as a CAPTURED upstream artifact, with NO cv-split/folds.
+
+    Two seams at once: (1) train's all-rows path must not require `folds` (the ship refit
+    fits on ALL rows for predict — CV is the sweep's job, not the ship's); (2) predict must
+    resolve `dataset: features` via io.dataset_dir (the captured handoff), not io.exp_path.
+    """
+    run = tmp_path / "runs" / "ship"
+    # Simulate the all-rows `features` step: a captured `dataset/` artifact in its step dir.
+    ds = io.load_dataset(str(TOY_PARENT / "toy"))
+    io.save_dataset(ds, str(run / "features" / "dataset"))
+
+    # train fits on ALL rows (no `_fold`, no `folds`) → model.pkl, no cv_score demanded.
+    ts = _run_step(monkeypatch, run, "train", {"dataset": "features", "model": "logreg"}, train.main)
+    assert (ts / "model.pkl").exists()
+    assert "cv_score" not in json.loads((ts / "metrics.json").read_text())
+
+    # predict reads the SAME captured features dataset (dataset_dir), not an exp-relative path.
+    ps = _run_step(monkeypatch, run, "predict", {"dataset": "features", "model": "train"}, predict.main)
+    preds = pd.read_csv(ps / "predictions.csv")
+    assert list(preds.columns) == ["id", "prediction"]
+    assert len(preds) == 20  # the toy test split — predict ran on the captured dataset's test frame
+
+
 def test_train_step_accepts_any_map_model_config(tmp_path, monkeypatch):
     """The train step must consume the $any-map (ex-$oneof) bundle `{kind: {params}}` — the EXACT
     shape a hyperparam sweep (kbench#4) emits (was: `kind = w["model"]` failed on the dict)."""

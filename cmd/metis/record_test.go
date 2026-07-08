@@ -98,4 +98,3 @@ func TestBuildRecord_PropagatesConfigError(t *testing.T) {
 		t.Error("buildRecord must propagate the point-address error on non-finite config")
 	}
 }
-

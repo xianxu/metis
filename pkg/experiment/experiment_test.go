@@ -14,10 +14,7 @@ func TestParse_ValidBaseline(t *testing.T) {
 		t.Fatalf("Parse: %v", err)
 	}
 	want := Experiment{
-		Type:   "experiment",
-		ID:     "valid-baseline",
-		Seed:   42,
-		Status: "active",
+		Header: Header{Type: "experiment", ID: "valid-baseline", Seed: 42, Status: "active"},
 		Steps: []Step{
 			{ID: "prep", Uses: "metis/cv-split", With: map[string]any{"k": 5}},
 			{ID: "train", Uses: "metis/train", Needs: []string{"prep"}, With: map[string]any{"model": "logreg"}},

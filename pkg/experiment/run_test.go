@@ -30,7 +30,7 @@ func fixedClock(t time.Time) Clock { return func() time.Time { return t } }
 // executes in dependency order, no subprocess, and assembles a Run with merged
 // metrics, ordered artifacts, and injected-clock timestamps.
 func TestRunner_Run_OrderAndAssembly(t *testing.T) {
-	exp := Experiment{ID: "exp1", Seed: 7, Steps: []Step{
+	exp := Experiment{Header: Header{ID: "exp1", Seed: 7}, Steps: []Step{
 		{ID: "train", Uses: "metis/train", Needs: []string{"prep"}},
 		{ID: "prep", Uses: "metis/cv-split"},
 	}}
@@ -69,7 +69,7 @@ func TestRunner_Run_OrderAndAssembly(t *testing.T) {
 // execution (topo) order — the breakdown a provenance record needs, which the flat
 // Run merge discards. Each StepRun pairs the executed Step with its Result.
 func TestRunner_Run_ReturnsPerStepResults(t *testing.T) {
-	exp := Experiment{ID: "exp1", Seed: 7, Steps: []Step{
+	exp := Experiment{Header: Header{ID: "exp1", Seed: 7}, Steps: []Step{
 		{ID: "train", Uses: "metis/train", Needs: []string{"prep"}},
 		{ID: "prep", Uses: "metis/cv-split", With: map[string]any{"k": 5}},
 	}}
@@ -104,7 +104,7 @@ func TestRunner_Run_ReturnsPerStepResults(t *testing.T) {
 // TestRunner_Run_StepFailure: a failing step stops the pipeline and records a
 // "failed" Run; later steps never execute.
 func TestRunner_Run_StepFailure(t *testing.T) {
-	exp := Experiment{ID: "exp1", Steps: []Step{
+	exp := Experiment{Header: Header{ID: "exp1"}, Steps: []Step{
 		{ID: "a", Uses: "metis/a"},
 		{ID: "b", Uses: "metis/b", Needs: []string{"a"}},
 	}}

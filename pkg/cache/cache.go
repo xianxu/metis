@@ -3,17 +3,27 @@
 // per-step record (key-material). It is the "validating trace": a step's output is
 // keyed by two hashes computed at different times —
 //
-//   - K_pre (ex-ante): hash(step-id, uses, resolved-with, seed, upstream-output-hashes)
-//     — everything determining the output that is known BEFORE the step runs.
+//   - K_pre (ex-ante): hash(step-id, uses, resolved-with, seed, sorted upstream **K_pres**)
+//     — the INPUT RECIPE (metis#24), everything determining the output that is known BEFORE
+//     the step runs, computable pre-run from the DAG (no upstream *output* needed) and
+//     invariant to upstream output non-determinism.
 //   - D (ex-post): the recorded read-set of first-party code+config files, each an
 //     (path, git-blob-hash) pair, captured by the metis#2 read-sensor after a run.
+//   - TransitiveD (ex-post, metis#24): the closure of this step's D unioned with every
+//     upstream step's D, stored in this step's OWN Entry — the soundness snapshot below.
 //
-// A run is a HIT iff a stored entry for its K_pre exists AND re-hashing every path in
-// its D still matches (an edited code file is a path in D whose hash moved → MISS).
-// Code-version invalidation thus falls out of the trace — no git-SHA / import-closure
-// term. The pure core lives here (Kpre / Validate / the Entry codec); the
-// read-sensor and the git blob-hasher (metis#2 M2) and the runner skip/materialize
-// integration (M3) are the thin IO shell in cmd/metis.
+// A run is a HIT iff a stored entry for its K_pre exists AND re-hashing every path in its
+// stored **TransitiveD** still matches (an edited code file anywhere in the transitive
+// closure is a path whose hash moved → MISS). The transitive closure is what carries
+// upstream-**code** invalidation: input-addressing deliberately drops the upstream
+// output-hash term (so output non-determinism can't spuriously re-key), and since D
+// excludes upstream artifacts, the snapshot is the sole replacement propagator. Storing it
+// in the DOWNSTREAM's own entry (not walking upstream *live* entries) is what makes it sound
+// under the topo executor's heal-before-check ordering. Code-version invalidation still falls
+// out of the trace — no git-SHA / import-closure term. The pure core lives here (Kpre /
+// Validate / MergeTransitiveD / the Entry codec); the read-sensor and git blob-hasher (M2)
+// and the runner skip/materialize + K_pre/TransitiveD accumulation (M3 + #24) are the thin
+// IO shell in cmd/metis.
 package cache
 
 import (
@@ -31,8 +41,16 @@ type Hash = cas.Hash
 // Kpre computes the ex-ante cache key from a step's determinants known before it runs.
 // seed is an explicit arg because it lives on RunRecord, not StepRecord. uses is
 // included so two steps sharing id/with/seed/upstream but a different step-type cannot
-// false-HIT and serve the wrong step's output. The upstream output-hashes are sorted
-// so the key is invariant to the author's `needs` declaration order.
+// false-HIT and serve the wrong step's output.
+//
+// INPUT-ADDRESSED (metis#24): the executor feeds `rec.Upstream` = the sorted upstream
+// steps' **Kpres** (input identity), NOT their output-hashes. So a step's key is its
+// *input recipe* (config + seed + upstream input-identities), computable pre-run from
+// the DAG and invariant to upstream output non-determinism. Upstream **code**-edit
+// propagation is restored separately by the transitive-D snapshot (Entry.TransitiveD),
+// since `D` deliberately excludes data/upstream artifacts. The entries are sorted so the
+// key is invariant to the author's `needs` declaration order. (The record-provenance
+// path keeps its own StepRecord with Upstream = output-hashes — a SEPARATE construction.)
 func Kpre(rec record.StepRecord, seed int) (Hash, error) {
 	upstream := sortedHashes(rec.Upstream)
 	h, err := record.CanonicalHash(struct {
@@ -74,9 +92,49 @@ func Validate(storedD []record.CodeRef, hash func(ref record.CodeRef) (record.Ha
 // on-disk JSON so the index survives across runs, sessions, and branches. (v1 gitignores
 // the whole cache dir; git-sharing the index across clones is a future enhancement.)
 type Entry struct {
-	Kpre   Hash             `json:"kpre"`
-	D      []record.CodeRef `json:"d"`
-	Output Hash             `json:"output"`
+	Kpre Hash             `json:"kpre"`
+	D    []record.CodeRef `json:"d"` // this step's OWN read-set (provenance / debug)
+	// TransitiveD is the metis#24 soundness snapshot: this step's own D UNIONED with the
+	// transitive closure of its upstream steps' D — captured at THIS step's computation and
+	// stored in its OWN entry. isHit re-hashes TransitiveD (not D), so an edit to any
+	// transitively-upstream code file invalidates this step (restoring the code-propagation
+	// the input-addressed Kpre drops). Stored + validated on the SAME bytes (symmetric),
+	// needs no upstream-entry lookup at validate (eviction-robust), and folds a diamond once.
+	// NOT `omitempty`: a #24 entry ALWAYS serializes TransitiveD (as `[]` when the closure is
+	// empty — MergeTransitiveD returns a non-nil slice), so an empty-closure step round-trips
+	// to a non-nil slice and still HITs vacuously; only a LEGACY (pre-#24) entry decodes to a
+	// nil TransitiveD, which isHit treats as a MISS (cmd/metis isHit migration guard).
+	TransitiveD []record.CodeRef `json:"transitive_d"`
+	Output      Hash             `json:"output"`
+}
+
+// MergeTransitiveD folds a step's transitive-D snapshot: its own read-set unioned with
+// each already-computed upstream snapshot, deduped by (repo, path) and returned in a
+// canonical sort order — so the persisted bytes are stable (a diamond S←A,S←B,both←R
+// folds R once; order-independent). Pure: the topo-order accumulation lives in the
+// executor (transitiveD[id] = MergeTransitiveD(ownD, transitiveD[needs]...)).
+func MergeTransitiveD(ownD []record.CodeRef, upstream ...[]record.CodeRef) []record.CodeRef {
+	seen := make(map[[2]string]record.CodeRef)
+	add := func(refs []record.CodeRef) {
+		for _, r := range refs {
+			seen[[2]string{r.Repo, r.Path}] = r
+		}
+	}
+	add(ownD)
+	for _, u := range upstream {
+		add(u)
+	}
+	out := make([]record.CodeRef, 0, len(seen))
+	for _, r := range seen {
+		out = append(out, r)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Repo != out[j].Repo {
+			return out[i].Repo < out[j].Repo
+		}
+		return out[i].Path < out[j].Path
+	})
+	return out
 }
 
 // EncodeEntry / DecodeEntry are the index codec (pure) — the thin IO layer (M3) reads
