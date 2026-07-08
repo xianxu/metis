@@ -1,11 +1,12 @@
 ---
 id: 000019
-status: open
+status: working
 deps: []
 github_issue:
 created: 2026-07-07
-updated: 2026-07-07
+updated: 2026-07-08
 estimate_hours:
+started: 2026-07-08T12:01:41-07:00
 ---
 
 # selection objectives — 1-SE rule + mean-std (configurable sweeper select rule, not raw cv-max)
