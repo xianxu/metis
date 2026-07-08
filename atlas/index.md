@@ -50,18 +50,24 @@ identical on a non-Kaggle platform?* — if yes, it lives here.
   / `git cat-file blob <hash>`. metis stores no code bytes (git owns code); the CAS holds only wipeable
   output bytes. (`CodeManifest.Deps`/uv.lock-digest is a post-v1 follow-up; per-repo record `Commit`
   is single-valued — the D is fully repo-qualified.) [metis#8/#11/#14]
-- **`pkg/sweep`** (the sweep sampler) — metis#7, the pure ask/tell seam: `Sampler` (`Ask()`/`Tell()`),
-  `Grid` (enumerates `shape.Expand`'s points in order; adaptive samplers slot in with no loop change),
-  and `StopPredicate`s (`MaxPoints`, `TargetReached`, `AnyStop`). The **driver** is `cmd/metis`:
-  `metis run` on a multi-point shape **sweeps** (via `runSweep`) — loops Ask → run each point through the
-  shared `runResolvedExperiment` (cached runner) keyed by its `record.PointAddress` (so re-runs dedup +
-  resume-from-cache is free) → Tell; **per-point failure is recorded + the sweep continues**; a
-  **shape-run manifest** (`sweeps/<id>/manifest.json`) groups the N point-runs (the **metis#8** ledger
-  handoff). Flags: `--max-points` (budget stop), `--dry-run` (list points). **Detect-and-abort**: the
-  sweep freezes on the HEAD code sha (via `gitProbe`) and aborts on mid-sweep commit/branch drift (NOT
-  the dirty flag — the sweep's own outputs dirty the tree; precise code-dirty detection is metis#10).
-  Proven by e2e: N-runs+manifest, cache-reuse across points, failure-continues, max-points, dry-run,
-  abort-on-drift, no-false-abort-on-dirty. [metis#7]
+- **`pkg/sampler`** (the Sampler fold node) — metis#18, the pure ask/tell resample/sweep construct
+  superseding metis#7's `pkg/sweep`: `Sampler[S,P,O,R]` (`Init`/`Ask`/`Tell`/`Done`) + a generic `Run`
+  loop, instantiated nested (driver ⊃ sweeper ⊃ resample). Static Samplers: `GridConfigs` (the sweeper —
+  every `shape.Expand` config at once), `FixedKFolds` (the inner resample — k folds over the materialized
+  partition), `SingleDriver` (the degenerate outer driver:single). `Aggregate` → `MeanSE` (the honest
+  per-config `(mean,SE)`); `Winner` (reconstructable run-keys). The **driver** is `cmd/metis`: `metis run`
+  on an experiment-shape drives the nested loop (`runShapeSweep`: `Run(GridConfigs) ⊃ Run(FixedKFolds)`),
+  running each `(config, fold)` through the shared `runResolvedExperiment` (cached runner) keyed by its
+  content-address. Each fold builds a per-fold experiment (`data ++ engine-synthesized cv-split ++
+  pipeline`, config + `_fold` overlaid so `Kpre` is fold-distinct); a **failing fold is FATAL** (a partial
+  resample is not an honest estimate — unlike a v1 flat point). A **shape-run manifest**
+  (`sweeps/<id>/manifest.json`) groups the runs; the ledger sidecar keeps the **raw per-fold rows** and
+  `ledger.AggregateView` reduces them read-time → the per-config `(mean,SE)` leaderboard (metis#8 handoff).
+  `--dry-run` lists configs. **Detect-and-abort** on mid-sweep HEAD-sha drift (not the dirty flag — the
+  sweep's own outputs dirty the tree). Proven by `shapesweep_test.go` (fake exec on the real cache):
+  nested loop → winner + N×k ledger + per-config `(mean,SE)`, fold-distinct cache, warm-HIT, incremental
+  recompute, dry-run, fatal-fold, abort-on-drift. (Full `pkg/sampler` surface + the input-addressed cache
+  land with metis#24/M1a-5.) [metis#18]
 - **`pkg/shape`** (the experiment-shape lift) — metis#6, the pure config-space algebra over v0's
   untyped `with` bag. `Expand(steps, rangeSteps) → []Point` collapses a shape's reserved `$`-key
   descriptors (`$any` — one choice primitive dispatching on shape: list=untagged set / map=tagged bundled labeled-sum, both recursive + ADD / `$linear-range`·`$log-range`

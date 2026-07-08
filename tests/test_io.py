@@ -1,5 +1,6 @@
 """Tests for metis.io Dataset serialization: parquet round-trip + CSV fixture load."""
 
+import os
 from pathlib import Path
 
 import pandas as pd
@@ -7,10 +8,29 @@ import pytest
 from pandas.testing import assert_frame_equal
 
 from metis.dataset import Dataset
-from metis.io import load_dataset, save_dataset
+from metis.io import StepContext, dataset_dir, load_dataset, save_dataset
 from metis.schema import Schema
 
 TOY = Path(__file__).parents[1] / "testdata" / "dataset" / "toy"
+
+
+def test_dataset_dir_prefers_captured_upstream_else_exp_relative(tmp_path):
+    """metis#18: `dataset` is polymorphic — a captured upstream `<run>/<ref>/dataset/` artifact
+    wins (the per-fold features→train handoff); otherwise fall back to the exp-relative path
+    (a v1 shared dataset OR a bare-token dir like `toy`). Detected by existence, not a name."""
+    run = tmp_path / "runs" / "r1"
+    exp = tmp_path / "exp"
+    ctx = StepContext(step_dir=str(run / "train"), run_dir=str(run), step_id="train",
+                      exp_dir=str(exp), seed=1)
+    # No captured artifact yet: a bare token resolves against the EXP dir (not the run dir),
+    # so a v1 `dataset: toy` still works.
+    assert dataset_dir(ctx, "toy") == str(exp / "toy")
+    # An exp-relative PATH also resolves against the exp dir.
+    assert dataset_dir(ctx, "../data/x") == os.path.normpath(str(exp / ".." / "data" / "x"))
+    # Once `features` has written its captured `dataset/` artifact, the same bare-token ref
+    # resolves to the UPSTREAM artifact — the fold handoff.
+    (run / "features" / "dataset").mkdir(parents=True)
+    assert dataset_dir(ctx, "features") == str(run / "features" / "dataset")
 
 
 def test_save_load_parquet_round_trip(tmp_path):

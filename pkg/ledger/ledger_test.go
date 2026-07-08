@@ -178,6 +178,94 @@ func TestSortAll_KeepsFailedRows(t *testing.T) {
 	}
 }
 
+// foldRow builds a raw per-fold Row (metis#18) with the given fold coordinate.
+func foldRow(sha, addr string, fp map[string]any, fold int, score float64, status string) Row {
+	f := fold
+	return Row{SweepSHA: sha, PointAddr: addr, FreeParams: fp, Fold: &f,
+		Metrics: map[string]float64{"train.fold_score": score}, Status: status}
+}
+
+// AggregateView reduces raw per-fold rows → one per-config (mean, SE, n) row, grouping by
+// (free-params, sweep-SHA). The read-time reduction the leaderboard + promote sort over.
+func TestAggregateView_ReducesPerConfig(t *testing.T) {
+	var l Ledger
+	cfgA := map[string]any{"model": "a"}
+	cfgB := map[string]any{"model": "b"}
+	l.Append(
+		foldRow("s", "a0", cfgA, 0, 0.80, "ok"),
+		foldRow("s", "a1", cfgA, 1, 0.90, "ok"),
+		foldRow("s", "b0", cfgB, 0, 0.70, "ok"),
+		foldRow("s", "b1", cfgB, 1, 0.70, "ok"),
+	)
+	agg := AggregateView(l, "train.fold_score")
+	if len(agg.Rows) != 2 {
+		t.Fatalf("4 fold rows over 2 configs → 2 aggregate rows, got %d", len(agg.Rows))
+	}
+	byModel := map[any]Row{}
+	for _, r := range agg.Rows {
+		if r.Fold != nil {
+			t.Errorf("an aggregate row must NOT carry a fold coordinate: %+v", r)
+		}
+		byModel[r.FreeParams["model"]] = r
+	}
+	// config a: mean(0.80,0.90)=0.85, n=2, SE = sd/√2 = (0.0707.../√2); config b: mean=0.70, SE=0.
+	if got := byModel["a"].Metrics["train.fold_score"]; got < 0.8499 || got > 0.8501 {
+		t.Errorf("config a mean = %v, want ~0.85", got)
+	}
+	if got := byModel["a"].Metrics["train.fold_score.n"]; got != 2 {
+		t.Errorf("config a fold count = %v, want 2", got)
+	}
+	if got := byModel["a"].Metrics["train.fold_score.se"]; got <= 0 {
+		t.Errorf("config a SE = %v, want > 0 (folds differ)", got)
+	}
+	if got := byModel["b"].Metrics["train.fold_score.se"]; got != 0 {
+		t.Errorf("config b SE = %v, want 0 (identical folds)", got)
+	}
+}
+
+// A group with ANY failed fold is marked failed in its aggregate row.
+func TestAggregateView_FailedFoldMarksConfigFailed(t *testing.T) {
+	var l Ledger
+	cfg := map[string]any{"model": "a"}
+	l.Append(
+		foldRow("s", "a0", cfg, 0, 0.80, "ok"),
+		foldRow("s", "a1", cfg, 1, 0, "failed"),
+	)
+	agg := AggregateView(l, "train.fold_score")
+	if len(agg.Rows) != 1 || agg.Rows[0].Status != "failed" {
+		t.Errorf("a config with a failed fold must aggregate to a failed row, got %+v", agg.Rows)
+	}
+}
+
+// A row with no fold coordinate (Fold==nil) passes through unchanged — the view is idempotent.
+func TestAggregateView_NonFoldRowPassesThrough(t *testing.T) {
+	var l Ledger
+	l.Append(row("s", "plain", map[string]any{"model": "a"}, map[string]float64{"train.fold_score": 0.9}, "ok"))
+	agg := AggregateView(l, "train.fold_score")
+	if len(agg.Rows) != 1 || agg.Rows[0].PointAddr != "plain" {
+		t.Errorf("a non-fold row must pass through unchanged, got %+v", agg.Rows)
+	}
+	// Idempotent: aggregating an already-aggregated view is a no-op fixpoint.
+	agg2 := AggregateView(AggregateView(l, "train.fold_score"), "train.fold_score")
+	if len(agg2.Rows) != 1 {
+		t.Errorf("AggregateView must be idempotent on non-fold rows, got %d", len(agg2.Rows))
+	}
+}
+
+// HasFoldRows distinguishes a per-fold sweep ledger (promote refuses it) from a plain one.
+func TestHasFoldRows(t *testing.T) {
+	var fold Ledger
+	fold.Append(foldRow("s", "a0", map[string]any{"m": "a"}, 0, 0.8, "ok"))
+	if !HasFoldRows(fold) {
+		t.Error("a ledger with a fold coordinate must report HasFoldRows=true")
+	}
+	var plain Ledger
+	plain.Append(row("s", "a", nil, map[string]float64{"m": 0.8}, "ok"))
+	if HasFoldRows(plain) {
+		t.Error("a plain ledger (no fold coordinate) must report HasFoldRows=false")
+	}
+}
+
 // Filter selects rows by sweep-SHA (an invocation view).
 func TestFilter_BySweepSHA(t *testing.T) {
 	var l Ledger

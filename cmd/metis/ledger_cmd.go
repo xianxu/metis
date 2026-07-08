@@ -194,6 +194,14 @@ func runPromote(o promoteOpts) error {
 	if err != nil {
 		return err
 	}
+	// metis#18: a per-fold sweep ledger can't yet be promoted — reconstructing a RUNNABLE
+	// single experiment from a config aggregate needs the ship wiring (cv-split synthesis +
+	// the all-rows predict handoff via io.dataset_dir), which lands in M1a-5. Refuse cleanly
+	// rather than emit a corrupt/unrunnable .md; the honest per-config leaderboard is
+	// `metis ledger show --sort`.
+	if ledger.HasFoldRows(led) {
+		return fmt.Errorf("promote: %q is a per-fold sweep ledger (metis#18) — promote (runnable-experiment reconstruction) lands in M1a-5; for the honest per-config leaderboard run `metis ledger show %s --sort %s`", o.shapePath, filepath.Base(o.shapePath), sh.Sweeper.Objective.Metric)
+	}
 	led = ledger.Filter(led, o.sweep)
 
 	var row ledger.Row

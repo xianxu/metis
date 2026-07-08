@@ -103,13 +103,14 @@ Durable plan: `workshop/plans/000018-experiment-design-algebra-m1a-plan.md` (5 r
 - [x] M1a-1 — schema: phase-structured Shape + Sweeper/Driver structs, strict unknown-key parse, combined-DAG ValidateShape, closed `#ExperimentShape` CUE rewrite + drift guard, reshaped titanic-sweep.md. *(`cmd/metis` red until M1a-4 — dependency-forced; green scoped to `pkg/experiment`+CUE.)*
 - [x] M1a-2 — pure Sampler core: Sampler interface + generic Run + FixedKFolds/GridConfigs/SingleDriver + Aggregate(mean,SE) + Winner (`pkg/sampler`; zero-IO).
 - [~] M1a-3 (foundations landed) — `Entry.TransitiveD`+`MergeTransitiveD` (pure, `bae19a1`) + `model.fold_score` (`b407f3d`). The merge revealed the boundary is a ~1000-line sweep-driver re-architecture (dependency order is IO-first) → **reordered + split** into M1a-3a/M1a-3b:
-  - [ ] M1a-3a — **IO rewire → `cmd/metis` GREEN** (was M1a-4, reordered first): nested-Sampler loop (`run.go`/`sweep.go` off flat `Shape`) + fold-aware `train.py`/`features` + engine partition + per-fold ledger + retire `pkg/sweep`, on the EXISTING output-hash cache. Close: whole-module `go build ./...` green + Titanic sweeper → `(mean,SE)` leaderboard.
+  - [x] M1a-3a — **IO rewire → `cmd/metis` GREEN** (was M1a-4, reordered first): nested-Sampler loop (`run.go`/`sweep.go` off flat `Shape`) + fold-aware `train.py`/`features` + engine partition + per-fold ledger + retire `pkg/sweep`, on the EXISTING output-hash cache. Close: whole-module `go build ./...` green + Titanic sweeper → `(mean,SE)` leaderboard. **SHIPPED (FIX-THEN-SHIP → fixed).**
   - [ ] M1a-3b — **cache #24 + soundness gate** (was M1a-3, reordered second — now testable): input-addressed `Kpre` + transitive-`D` snapshot wired into `caching.go` (foundations already committed) + real-executor soundness e2e (edit `features.py` → `train` MISSes).
 - [ ] M1a-5 — ship + e2e: driver:single ship (all-rows refit→predict→submission), reconstructable winner run-keys, honest Titanic e2e, atlas. *(M1a-4 label retired — folded into M1a-3a.)*
 
 ## Log
 
 ### 2026-07-07
+- 2026-07-07: closed M1a-3a — M1a-3a IO rewire: whole-module go build/vet/test ./... + both experiment merge-checks green (Go rewire 1bb1783; io/train handoff 067870b). Nested-Sampler fold loop wired (sampler.Run(GridConfigs)⊃Run(FixedKFolds)); retired pkg/sweep. Real OFFLINE Titanic smoke sweep (fake-kaggle serving the committed fixture) → honest per-config (mean,SE) leaderboard + argmax-mean winner; ledger holds 4x3=12 raw per-fold rows (fold coord); warm re-run cache-hits everything; metis ledger show --sort reduces to the 4-config aggregate; one-knob change recomputes only affected folds (Go shapesweep_test). kbench full suite green (36) incl. leak-free fold-fit unit test; metis-v1 plain-experiment threads still pass. Scope: EXISTING output-hash cache (#24=M1a-3b); ship+real-data-reproduce=M1a-5.; review verdict: FIX-THEN-SHIP
 - 2026-07-07: closed M1a-2 — go test ./pkg/sampler/... green — 14 tests incl. TestRun_NestedComposition (real 3-level driver⊃sweeper⊃resample; generics monomorphize, NO concrete-triple fallback needed), FixedKFolds/GridConfigs(argmax-mean+tie-break)/SingleDriver/Aggregate(mean,SE,told-set key,order-independent). Pure zero-IO greenfield pkg/sampler. pkg/sweep untouched (additive; retired at M1a-4); go build ./... still names ONLY cmd/metis (no new breakage). Deviation: stop-predicates NOT ported (YAGNI — adaptive-sampler surface; M1a wires only static grid/fixed-k). Bypasses: --no-atlas (atlas at M1a-5), --no-actual (contaminated forked actuals; reconcile at full close), --no-project (project tracks at M1a grain).; review verdict: FIX-THEN-SHIP
 - 2026-07-07: M1a-2 review fixes (FIX-THEN-SHIP → shipped) — `Run` empty-batch guard (panic on a non-progressing `Ask`, was a silent-hang risk) + test; `Winner` seed single-sourced from `Ctx.Seed` (dropped `GridConfigs.Seed` — two-sources-for-one-fact); scheduled `pkg/sweep` retirement at M1a-4 (plan Task 17 Step 6 + `## Revisions`) — a **transient `pkg/sweep`↔`pkg/sampler` duplication** that resolves when `cmd/metis` rewires off `pkg/sweep`; enriched Task 21 atlas scope. Deferred to M1a-4 (per reviewer, when the wiring feeds real values): `staticAsk` consolidation of the two identical static `Ask`s, a `folds.go` `K<0` guard, and empty-`Done`/minimize-tie-break test coverage.
 - 2026-07-07: closed M1a-1 — pkg/... build+vet+test green (independently re-verified). Real-cue drift-guard (TestShapeConformsToCUE) + closedness test + both merge-checks (experiment-schema-selftest, experiment-validate) pass. cmd/metis red is dependency-forced+confined (go build ./... names ONLY cmd/metis — the v1 flat-sweep paths M1a-4 rewires); whole-module green returns at M1a-4. kbench titanic-sweep reshape c55b549 cue-validated. Bypasses: --no-atlas (atlas at M1a-5/Task 21), --no-actual (per-boundary active-time contaminated in forked+interleaved session; reconcile at full close), --no-project (project tracks at M1a grain; row updated at full close).; review verdict: FIX-THEN-SHIP
@@ -175,3 +176,27 @@ Durable plan: `workshop/plans/000018-experiment-design-algebra-m1a-plan.md` (5 r
   (train reads the exp-relative dataset) → `train.py` needs dual-mode reads OR those pipelines migrate too.
   Phase B (features fold-aware + captured output, train dual-read, shape migrations, kbench smoke e2e) is a
   distinct dedicated effort — checkpointed to a fresh session (see the superseding continuation).
+
+### 2026-07-08 (M1a-3a Phase B + boundary review — FIX-THEN-SHIP → fixed, SHIPPED)
+- **Phase B done:** fold-aware `features` (analysis-only fit, leak-free) writing a CAPTURED step-dir
+  artifact; `train` reads the per-fold handoff via `io.dataset_dir` (upstream-artifact-or-exp-relative,
+  dual-mode so the plain experiments stay green); `titanic-sweep(-smoke).md` migrated to the phase model;
+  smoke e2e migrated. Verified OFFLINE (fake-kaggle + committed fixture): the nested loop → honest
+  per-config `(mean,SE)` leaderboard + winner; 12 raw per-fold ledger rows; warm re-run all-HIT;
+  `metis ledger show --sort` → 4-config aggregate. Commits: metis `067870b`, kbench `c8d1d28`.
+- **Boundary reviews:** metis fresh-eyes (auto, `sdlc milestone-close`) = **FIX-THEN-SHIP**; kbench
+  fresh-eyes (separate — kbench escapes the metis window) = **SHIP** (leakage cut / row-alignment /
+  value-identity all confirmed correct + tested). Fixed the metis findings before crossing:
+  - **Critical** — `promote --best` emitted a corrupt (NUL-in-frontmatter) + unrunnable experiment on a
+    per-fold ledger. Fixed: `AggregateView` identity is NUL-free (`|` sep); `promote` **refuses cleanly**
+    on a per-fold ledger (full reconstruction = M1a-5); restored a promote guard test. Confirmed e2e
+    (promote on the real smoke ledger → clean error, no file written).
+  - **Important** — restored `promote`/`ledger show`/`AggregateView`/`hoistShapePath` test coverage
+    (`ledger_cmd_test.go`, `pkg/ledger` unit tests); `objective.metric` → `train.fold_score` (fixture +
+    shapes); `atlas/index.md` `pkg/sweep` bullet rewritten to `pkg/sampler` (dangling-ref + reversed
+    failure-semantics fix); `io.dataset_dir` unit test.
+  - **Minor** — dropped `writeSweepLedger`'s dead `objective` param; stale `M1a-4` comment; kbench body
+    prose (`accuracy`→`train.fold_score`); fold-fit test row-order assertion.
+- **M1a-5 items surfaced by review:** `predict.py` still resolves `dataset` via `exp_path` (not
+  `io.dataset_dir`) → the ship `predict.dataset: features` will fail until M1a-5 reconciles it; the driver
+  level is inlined (`SingleDriver` built+tested but not in the call path) → #23 must insert the outer wrap.

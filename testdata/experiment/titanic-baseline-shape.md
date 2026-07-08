@@ -31,7 +31,7 @@ ship:
 sweeper:
   sampler: grid
   resample: {cv: {k: 5, stratify: true}}
-  objective: {metric: accuracy, direction: maximize, select: argmax-mean}
+  objective: {metric: train.fold_score, direction: maximize, select: argmax-mean}
 driver:
   single: {}
 ---

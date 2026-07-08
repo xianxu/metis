@@ -132,7 +132,7 @@ func runShapeSweep(o runOpts, sh experiment.Shape, now func() time.Time, out io.
 	// Persist the raw per-fold rows to the shape's append-only ledger sidecar (metis#8/#18):
 	// AggregateView reduces them read-time to per-config (mean, SE) — so metis#19's 1-SE
 	// select re-reduces the same rows without a re-run.
-	if err := writeSweepLedger(o.expPath, ss.man, sh.Sweeper.Objective); err != nil {
+	if err := writeSweepLedger(o.expPath, ss.man); err != nil {
 		return err
 	}
 	ss.reportWinner(winner)
@@ -258,7 +258,7 @@ func appendUnique(needs []string, extra string) []string {
 }
 
 // partitionRef is the stable identity of the materialized partition — deterministic per
-// (k, stratify, seed) so every fold-point's address is reproducible. metis#18 M1a-4 will
+// (k, stratify, seed) so every fold-point's address is reproducible. A later boundary can
 // thread the cv-split's content-hash here; a deterministic id suffices for the told-set key.
 func partitionRef(sh experiment.Shape) sampler.PartitionRef {
 	cv := sh.Sweeper.Resample.CV

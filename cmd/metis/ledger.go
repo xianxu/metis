@@ -118,8 +118,8 @@ func ledgerPath(shapePath string) string {
 // sidecar (idempotent — dedups by point-address). Called by runShapeSweep after the
 // manifest is written. It does NOT touch the experiment .md (#13 — the config is immutable
 // input); the human per-config (mean,SE) view is on-demand via `metis ledger show` (which
-// AggregateView-reduces the raw rows). objective sets the show/promote sort direction.
-func writeSweepLedger(shapePath string, man sweepManifest, objective experiment.Objective) error {
+// AggregateView-reduces the raw rows).
+func writeSweepLedger(shapePath string, man sweepManifest) error {
 	records, err := loadSweepRecords(shapePath, man)
 	if err != nil {
 		return err
