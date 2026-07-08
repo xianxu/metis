@@ -17,6 +17,7 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -24,10 +25,17 @@ import (
 
 // Row is one ledger entry: the free-param tuple + sweep-SHA + point-address (identity)
 // + namespaced metrics + status. The raw recipe + result.
+//
+// metis#18 (M1a): a Row is now a RAW per-fold row — one (config, fold) run's fold_score.
+// Fold is the resample-fold coordinate (nil = a non-fold row, e.g. a v1 whole-CV row or
+// an AggregateView output). Keeping the raw fold rows (not a pre-reduced mean) is what
+// lets metis#19's 1-standard-error select re-reduce for free — AggregateView groups them
+// read-time into per-config (mean, SE) without a re-run.
 type Row struct {
 	FreeParams map[string]any
 	SweepSHA   string
 	PointAddr  string // the metis#3 point content-address — row identity for dedup
+	Fold       *int   // metis#18: the resample-fold index (nil = not a per-fold row)
 	Metrics    map[string]float64
 	Status     string // "ok" | "failed"
 }
@@ -69,7 +77,19 @@ const (
 // view (Decode → Filter/TopN), never a storage concern — the file stays append-order.
 func Encode(l Ledger) ([]byte, error) {
 	fpCols, metricCols := unionColumns(l.Rows)
+	// The `fold` column is present only when ≥1 row carries a fold coordinate (a per-fold
+	// sweep) — so a v1-shaped ledger (no folds) stays byte-identical (ragged, ARCH-DRY).
+	hasFold := false
+	for _, r := range l.Rows {
+		if r.Fold != nil {
+			hasFold = true
+			break
+		}
+	}
 	header := append([]string{"sweep_sha", "point_addr", "status"}, fpCols...)
+	if hasFold {
+		header = append(header, "fold")
+	}
 	header = append(header, metricCols...)
 
 	var buf bytes.Buffer
@@ -82,6 +102,13 @@ func Encode(l Ledger) ([]byte, error) {
 		rec = append(rec, r.SweepSHA, r.PointAddr, r.Status)
 		for _, c := range fpCols {
 			rec = append(rec, cell(r.FreeParams[strings.TrimPrefix(c, fpPrefix)]))
+		}
+		if hasFold {
+			if r.Fold != nil {
+				rec = append(rec, strconv.Itoa(*r.Fold))
+			} else {
+				rec = append(rec, "") // an aggregate/non-fold row blanks the fold column
+			}
 		}
 		for _, c := range metricCols {
 			if v, ok := r.Metrics[strings.TrimPrefix(c, metricPrefix)]; ok {
@@ -123,6 +150,10 @@ func Decode(b []byte) (Ledger, error) {
 				row.PointAddr = rec[i]
 			case col == "status":
 				row.Status = rec[i]
+			case col == "fold":
+				if f, err := strconv.Atoi(rec[i]); err == nil {
+					row.Fold = &f
+				}
 			case strings.HasPrefix(col, fpPrefix):
 				row.FreeParams[strings.TrimPrefix(col, fpPrefix)] = parseCell(rec[i])
 			case strings.HasPrefix(col, metricPrefix):
@@ -140,6 +171,94 @@ func Decode(b []byte) (Ledger, error) {
 		l.Append(row)
 	}
 	return l, nil
+}
+
+// Aggregate-view metric suffixes: a per-config row carries `<metric>` (the fold mean),
+// `<metric>.se` (standard error), and `<metric>.n` (fold count).
+const (
+	seSuffix = ".se"
+	nSuffix  = ".n"
+)
+
+// AggregateView reduces the RAW per-fold rows into one per-config (mean, SE) row —
+// grouping by (free-params, sweep-SHA) over the fold coordinate. metis#18: the ledger
+// stores the raw fold rows (so metis#19's 1-standard-error select re-reduces for free),
+// and this is the read-time reduction the leaderboard + `promote --best` sort over.
+// `metric` is the per-fold metric to reduce (e.g. "train.fold_score"); each aggregate row
+// carries `metric` (the mean) + `metric+".se"` (standard error) + `metric+".n"` (fold
+// count). A group with ANY failed fold is marked failed. Rows with no fold coordinate
+// (Fold==nil — a v1 whole-CV row or an already-aggregated row) pass through unchanged, so
+// the view is idempotent. Grouping + ordering are deterministic (first-seen config order).
+func AggregateView(l Ledger, metric string) Ledger {
+	type agg struct {
+		row    Row
+		scores []float64
+		failed bool
+	}
+	var order []string
+	groups := map[string]*agg{}
+	var out Ledger
+	for _, r := range l.Rows {
+		if r.Fold == nil {
+			out.Append(r) // pass a pre-aggregated / v1 row through untouched
+			continue
+		}
+		fpb, _ := json.Marshal(r.FreeParams) // Go sorts map keys → canonical group key
+		key := r.SweepSHA + "\x00" + string(fpb)
+		g := groups[key]
+		if g == nil {
+			g = &agg{row: Row{FreeParams: r.FreeParams, SweepSHA: r.SweepSHA, PointAddr: key, Status: "ok"}}
+			groups[key] = g
+			order = append(order, key)
+		}
+		if r.Status == "failed" {
+			g.failed = true
+		}
+		if v, ok := r.Metrics[metric]; ok {
+			g.scores = append(g.scores, v)
+		}
+	}
+	for _, key := range order {
+		g := groups[key]
+		row := g.row
+		if g.failed {
+			row.Status = "failed"
+		}
+		if n := len(g.scores); n > 0 {
+			mean, se := meanSE(g.scores)
+			row.Metrics = map[string]float64{
+				metric:           mean,
+				metric + seSuffix: se,
+				metric + nSuffix:  float64(n),
+			}
+		}
+		out.Append(row)
+	}
+	return out
+}
+
+// meanSE reduces fold scores → (mean, standard error). SE = sample-std/√n (n−1
+// denominator; 0 when n<2). Order-independent. Mirrors sampler.Aggregate — the ledger
+// re-derives it read-time from the raw rows rather than trusting a stored mean.
+func meanSE(scores []float64) (mean, se float64) {
+	n := len(scores)
+	if n == 0 {
+		return 0, 0
+	}
+	var sum float64
+	for _, s := range scores {
+		sum += s
+	}
+	mean = sum / float64(n)
+	if n > 1 {
+		var ss float64
+		for _, s := range scores {
+			d := s - mean
+			ss += d * d
+		}
+		se = math.Sqrt(ss/float64(n-1)) / math.Sqrt(float64(n))
+	}
+	return mean, se
 }
 
 // Best returns the row optimizing the objective metric (maximize / minimize), skipping

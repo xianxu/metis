@@ -11,7 +11,6 @@ import (
 	"github.com/xianxu/metis/internal/repo"
 	"github.com/xianxu/metis/pkg/cas"
 	"github.com/xianxu/metis/pkg/experiment"
-	"github.com/xianxu/metis/pkg/shape"
 )
 
 // cacheProjectRoot resolves the metis code root (the module dir above steps/) that D
@@ -46,40 +45,28 @@ func ensureCacheGitignore(cacheDir string) error {
 // runOpts are the inputs to one `metis run`. now/git/out are injected so the e2e
 // test gets a deterministic clock, a fake git probe, and can discard progress output.
 type runOpts struct {
-	expPath   string
-	runID     string
-	stepPath  []string
-	now       func() time.Time
-	git       gitProbe
-	cache     bool // enable the metis#2 validating-trace cache (<expDir>/.metis-cache)
-	maxPoints int  // metis#7 sweep budget cap (0 = run to exhaustion)
-	dryRun    bool // metis#7: list the expanded points without running them
-	inSweep   bool // metis#14: this run is a sweep point — suppress per-point single-run
+	expPath  string
+	runID    string
+	stepPath []string
+	now      func() time.Time
+	git      gitProbe
+	cache    bool // enable the metis#2 validating-trace cache (<expDir>/.metis-cache)
+	dryRun   bool // metis#18: list the swept configs without running them
+	inSweep  bool // metis#14: this run is a sweep point — suppress per-point single-run
 	//               capture (the sweep captures once per shape-run in captureSweepCode)
-	out io.Writer
+	out  io.Writer
+	exec experiment.StepExecutor // test seam: an injected fake replaces the subprocess
+	//                              execStep (nil → the production execStep). Composes with
+	//                              cache: the caching decorator still wraps it.
 }
 
-// shapePointToExperiment overlays an expanded point's resolved `with` onto the shape's
-// steps, yielding a concrete `type: experiment` — the singleton collapse
-// (#Experiment = #ExperimentShape & all-singleton) made runnable.
-func shapePointToExperiment(sh experiment.Shape, p shape.Point) experiment.Experiment {
-	exp := sh.Experiment
-	exp.Type = "experiment"
-	steps := make([]experiment.Step, len(sh.Steps))
-	for i, s := range sh.Steps {
-		s.With = p.With[s.ID]
-		steps[i] = s
-	}
-	exp.Steps = steps
-	return exp
-}
-
-// runExperiment reads the experiment at o.expPath, runs it through the pure
-// pkg/experiment.Runner wired to the real subprocess StepExecutor, and writes
-// runs/<id>/{run,record}.json. The experiment `.md` is immutable input (#13) — never
-// written back. All side effects (read, subprocess, write) live here; the ordering/validation logic
-// stays in pkg/experiment. Returns the assembled Run and the run error (if any),
-// after the ledger is written — so a failed run is still recorded.
+// runExperiment reads the experiment at o.expPath and dispatches: a `type:
+// experiment-shape` is the metis#18 nested-Sampler SWEEP (the sweeper grids over configs,
+// the inner resample folds each — runShapeSweep); a plain `type: experiment` is the
+// one-point path (runResolvedExperiment). The `.md` is immutable input (#13) — never
+// written back; all side effects live in the shell below, the ordering/validation logic
+// stays in pkg/experiment. Returns the assembled Run (empty for a sweep — the manifest +
+// per-fold records + ledger are its output) and the run error.
 func runExperiment(o runOpts) (experiment.Run, error) {
 	now := o.now
 	if now == nil {
@@ -94,28 +81,24 @@ func runExperiment(o runOpts) (experiment.Run, error) {
 	if err != nil {
 		return experiment.Run{}, err
 	}
-	// Dispatch: a multi-point experiment-shape sweeps (metis#7); a plain experiment or
-	// an all-singleton shape is the one-point path.
-	sh, err := experiment.ParseShape(string(raw))
+	// Peek the type with the tolerant experiment parser (it ignores the shape-only
+	// data/pipeline/ship/sweeper keys); a shape then re-parses through the STRICT
+	// ParseShape (unknown-key-loud) for the sweep path.
+	exp, err := experiment.Parse(string(raw))
 	if err != nil {
 		return experiment.Run{}, fmt.Errorf("%s: %w", o.expPath, err)
 	}
-	if sh.Type == "experiment-shape" {
-		if err := experiment.ValidateShape(sh); err != nil {
-			return experiment.Run{}, fmt.Errorf("%s: %w", o.expPath, err)
-		}
-		points, err := shape.Expand(sh.Steps, sh.Sweep.RangeSteps)
+	if exp.Type == "experiment-shape" {
+		sh, err := experiment.ParseShape(string(raw))
 		if err != nil {
 			return experiment.Run{}, fmt.Errorf("%s: %w", o.expPath, err)
 		}
-		if len(points) != 1 {
-			// A sweep — no single Run to return; the manifest + per-point records are
-			// the output. runSweep drives the ask/tell loop over the shared run path.
-			return experiment.Run{}, runSweep(o, sh, points, now, out)
+		if err := experiment.ValidateShape(sh); err != nil {
+			return experiment.Run{}, fmt.Errorf("%s: %w", o.expPath, err)
 		}
-		return runResolvedExperiment(shapePointToExperiment(sh, points[0]), o, defaultRunID(o.runID, now), now, out)
+		return experiment.Run{}, runShapeSweep(o, sh, now, out)
 	}
-	return runResolvedExperiment(sh.Experiment, o, defaultRunID(o.runID, now), now, out)
+	return runResolvedExperiment(exp, o, defaultRunID(o.runID, now), now, out)
 }
 
 func defaultRunID(runID string, now func() time.Time) string {
@@ -146,6 +129,9 @@ func runResolvedExperiment(exp experiment.Experiment, o runOpts, runID string, n
 	}
 
 	var exec experiment.StepExecutor = execStep{stepPath: o.stepPath, expDir: expDir, seed: exp.Seed, out: out}
+	if o.exec != nil {
+		exec = o.exec // test seam: drive the loop/cache with a fake, no subprocess
+	}
 	if o.cache {
 		cacheDir := filepath.Join(expDir, ".metis-cache")
 		if err := ensureCacheGitignore(cacheDir); err != nil {

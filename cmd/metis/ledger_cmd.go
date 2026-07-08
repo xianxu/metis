@@ -41,8 +41,8 @@ func cmdLedger(args []string) error {
 	if dir == "" {
 		dir = "maximize"
 		if raw, err := os.ReadFile(shapePath); err == nil {
-			if sh, err := experiment.ParseShape(string(raw)); err == nil && sh.Sweep.Objective.Direction != "" {
-				dir = sh.Sweep.Objective.Direction
+			if sh, err := experiment.ParseShape(string(raw)); err == nil && sh.Sweeper.Objective.Direction != "" {
+				dir = sh.Sweeper.Objective.Direction
 			}
 		}
 	}
@@ -59,7 +59,10 @@ func showLedger(shapePath, sweep, sortMetric, direction string, top int, out io.
 	led = ledger.Filter(led, sweep)
 	rows := led.Rows
 	if sortMetric != "" {
-		rows = ledger.SortAll(led, sortMetric, direction) // sorts by objective, KEEPS failed/missing rows
+		// metis#18: the sidecar holds RAW per-fold rows — reduce to per-config (mean, SE)
+		// before ranking, so `--sort <metric>` is a config leaderboard, not fold noise.
+		agg := ledger.AggregateView(led, sortMetric)
+		rows = ledger.SortAll(agg, sortMetric, direction) // sorts by objective, KEEPS failed/missing rows
 	}
 	if top > 0 && top < len(rows) {
 		rows = rows[:top]
@@ -195,9 +198,12 @@ func runPromote(o promoteOpts) error {
 
 	var row ledger.Row
 	if o.best {
-		best, ok := ledger.Best(led, sh.Sweep.Objective.Metric, sh.Sweep.Objective.Direction)
+		// metis#18: reduce the raw per-fold rows to per-config (mean, SE), then pick the
+		// champion by the objective mean (metis#19's 1-SE select re-reduces the same rows).
+		agg := ledger.AggregateView(led, sh.Sweeper.Objective.Metric)
+		best, ok := ledger.Best(agg, sh.Sweeper.Objective.Metric, sh.Sweeper.Objective.Direction)
 		if !ok {
-			return fmt.Errorf("promote --best: no qualifying row for objective %q — metrics are namespaced `<step>.<metric>` (e.g. train.%s); check the shape's sweep.objective.metric", sh.Sweep.Objective.Metric, sh.Sweep.Objective.Metric)
+			return fmt.Errorf("promote --best: no qualifying config for objective %q — per-fold metrics are namespaced `<step>.<metric>` (e.g. train.fold_score); check the shape's sweeper.objective.metric", sh.Sweeper.Objective.Metric)
 		}
 		row = best
 	} else {
