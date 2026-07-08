@@ -139,6 +139,33 @@ func runShapeSweep(o runOpts, sh experiment.Shape, now func() time.Time, out io.
 		return err
 	}
 	ss.reportWinner(winner)
+	return ss.shipWinner(winner)
+}
+
+// shipWinner runs the driver:single ship: reconstruct the winning config's runnable
+// experiment (data ++ pipeline all-rows ++ ship — NO cv-split, the refit needs no CV) DIRECTLY
+// from the Winner's resolved Point (metis#18 M1a-5 T19 — not by re-expanding the grid), refit
+// it on ALL training rows, predict, and write the submission. A no-ship shape (leaderboard-only)
+// is a clean no-op. The ship rides the sweep's single code-capture (inSweep — same HEAD sha as
+// the folds); its run dir is content-addressed on the no-_fold config, so it's distinct from the
+// per-fold runs and re-runs cache-HIT.
+func (ss *shapeSweep) shipWinner(w sampler.Winner) error {
+	if len(ss.sh.Ship) == 0 {
+		return nil
+	}
+	shipExp := shapeConfigToExperiment(ss.sh, w.Point)
+	shipRunID, err := pointAddressOf(shipExp, ss.repoSHAs)
+	if err != nil {
+		return fmt.Errorf("ship winner %s: %w", freeParamStrFromParams(w.Point.FreeParams), err)
+	}
+	pointOpts := ss.o
+	pointOpts.inSweep = true // the sweep captured the code once (captureSweepCode); same sha
+	run, err := runResolvedExperiment(shipExp, pointOpts, shipRunID, ss.now, ss.out)
+	if err != nil {
+		return fmt.Errorf("ship winner %s (%s): %w", freeParamStrFromParams(w.Point.FreeParams), shipRunID, err)
+	}
+	fmt.Fprintf(ss.out, "metis: shipped winner %s → runs/%s/ (%s)\n",
+		freeParamStrFromParams(w.Point.FreeParams), shipRunID, run.Status)
 	return nil
 }
 

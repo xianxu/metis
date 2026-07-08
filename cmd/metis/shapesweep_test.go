@@ -68,9 +68,27 @@ func fakeTrainScore(with map[string]any) float64 {
 }
 
 // foldShapeMD is a valid metis#18 phase shape: data(get-data,adapt) │ pipeline(features,
-// train — train sweeps model ∈ {a,b}) │ ship(predict), a 2-fold stratified-off inner CV,
-// argmax-mean select, driver:single. 2 configs × 2 folds = 4 per-fold runs.
-func foldShapeMD(models string) string {
+// train — train sweeps model ∈ {a,b}), a 2-fold stratified-off inner CV, argmax-mean select,
+// driver:single. NO ship phase — the sweep-mechanism tests exercise the pure sweep in
+// isolation (shipWinner no-ops on an empty ship). 2 configs × 2 folds = 4 per-fold runs.
+func foldShapeMD(models string) string { return foldShape(models, "") }
+
+// foldShapeShipMD adds a ship phase (predict → submission) so the driver:single ship path
+// runs — the winner is refit on all rows (no _fold) and predicted → a submission artifact.
+func foldShapeShipMD(models string) string {
+	return foldShape(models, `ship:
+  - id: predict
+    uses: test/predict
+    needs: [train]
+    with: {dataset: features, model: train}
+  - id: submission
+    uses: test/submission
+    needs: [predict]
+    with: {predictions: predict}
+`)
+}
+
+func foldShape(models, ship string) string {
 	return `---
 type: experiment-shape
 id: fold-sweep
@@ -94,12 +112,7 @@ pipeline:
     needs: [features]
     with:
       model: {$any: ` + models + `}
-ship:
-  - id: predict
-    uses: test/predict
-    needs: [train]
-    with: {model: train}
-sweeper:
+` + ship + `sweeper:
   sampler: grid
   resample: {cv: {k: 2, stratify: false}}
   objective: {metric: train.fold_score, direction: maximize, select: argmax-mean}
@@ -198,6 +211,43 @@ func TestShapeSweep_NestedLoopWinnerAndLedger(t *testing.T) {
 	// The leaderboard + winner are reported to the user.
 	if s := out.String(); !strings.Contains(s, "winner") || !strings.Contains(s, "train.model=b") {
 		t.Errorf("sweep should report the winner (model=b); got:\n%s", s)
+	}
+}
+
+// driver:single ships the winner (metis#18 M1a-5): after the sweeper selects the champion,
+// the ship phase refits it on ALL rows (no _fold) and runs predict → submission. The ship is
+// a SEPARATE content-addressed run, NOT a manifest fold-point — folds run data+cv-split+
+// pipeline only, so the ship run is the unique one carrying the ship steps.
+func TestShapeSweep_ShipsWinner(t *testing.T) {
+	ws := t.TempDir()
+	expPath := writeShapeFile(t, ws, foldShapeShipMD("[a, b]"))
+	var out strings.Builder
+	if err := runFoldSweep(t, expPath, false, nil, &out, nil); err != nil {
+		t.Fatalf("sweep+ship should run: %v", err)
+	}
+
+	// Exactly one run dir holds a `submission` step — the driver:single ship of the winner.
+	shipSteps, _ := filepath.Glob(filepath.Join(ws, "runs", "*", "submission"))
+	if len(shipSteps) != 1 {
+		t.Fatalf("driver:single must ship exactly one winner (one submission run), got %d", len(shipSteps))
+	}
+	shipRun := filepath.Dir(shipSteps[0])
+	// The ship run is the full winning pipeline refit on all rows + the ship steps — and NO
+	// cv-split (the ship needs no CV; shapeConfigToExperiment omits it).
+	for _, step := range []string{"get-data", "adapt", "features", "train", "predict", "submission"} {
+		if _, err := os.Stat(filepath.Join(shipRun, step)); err != nil {
+			t.Errorf("ship run must include the winning pipeline + ship step %q: %v", step, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(shipRun, partitionStepID)); err == nil {
+		t.Errorf("the ship refit must NOT run cv-split — it fits on all rows, no CV")
+	}
+	// The ship is NOT a manifest fold-point (the manifest records only the per-fold sweep).
+	if man := readSweepManifest(t, ws); len(man.Points) != 4 {
+		t.Errorf("manifest should hold only the 4 per-fold points, not the ship; got %d", len(man.Points))
+	}
+	if !strings.Contains(out.String(), "shipped") {
+		t.Errorf("the sweep should report shipping the winner; got:\n%s", out.String())
 	}
 }
 
