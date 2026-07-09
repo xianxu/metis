@@ -91,7 +91,7 @@ func TestRun_NestedComposition(t *testing.T) {
 	}
 	// sweeper's runPoint = run the inner resample for this config.
 	sweeperRun := func(p shape.Point) MeanSE {
-		return Run(ctx, FixedKFolds{K: 3}, func(FoldPoint) float64 { return scoreOf(p) })
+		return Run(ctx, FixedKFolds{K: 3}, func(FoldPoint) FoldOutcome { return FoldOutcome{Score: scoreOf(p)} })
 	}
 	// driver's runPoint = run the whole sweeper.
 	driverRun := func(SinglePoint) Winner { return Run(ctx, sweeper, sweeperRun) }

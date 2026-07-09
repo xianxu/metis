@@ -6,6 +6,27 @@ import (
 	"testing"
 )
 
+// TestAggregate_Complexity: Aggregate also means the per-fold complexity (metis#19),
+// and reports HasComplexity only when every fold carried a measured value — so the M2
+// guard can tell "measured 0" from "not measured".
+func TestAggregate_Complexity(t *testing.T) {
+	got := Aggregate([]FoldScore{
+		{Addr: "a", Score: 0.8, Complexity: 16, HasComplexity: true},
+		{Addr: "b", Score: 0.9, Complexity: 14, HasComplexity: true},
+	})
+	if math.Abs(got.Mean-0.85) > 1e-12 {
+		t.Errorf("mean = %v, want 0.85", got.Mean)
+	}
+	if !got.HasComplexity || math.Abs(got.MeanComplexity-15) > 1e-12 {
+		t.Errorf("complexity = %v (has=%v), want 15,true", got.MeanComplexity, got.HasComplexity)
+	}
+	// Folds without a measured complexity (M1 wires 0 e2e) → HasComplexity false.
+	z := Aggregate([]FoldScore{{Addr: "a", Score: 0.8}, {Addr: "b", Score: 0.9}})
+	if z.HasComplexity {
+		t.Errorf("HasComplexity = true for unmeasured folds, want false")
+	}
+}
+
 func TestAggregate_MeanSE(t *testing.T) {
 	// scores 0.80, 0.82, 0.78, 0.84, 0.76 → mean 0.80; sample sd 0.0316227766…;
 	// SE = sd/√5.
