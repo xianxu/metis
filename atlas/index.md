@@ -60,17 +60,23 @@ identical on a non-Kaggle platform?* — if yes, it lives here.
 - **`pkg/sampler`** (the Sampler fold node) — metis#18, the pure ask/tell resample/sweep construct
   superseding metis#7's `pkg/sweep`: `Sampler[S,P,O,R]` (`Init`/`Ask`/`Tell`/`Done`) + a generic `Run`
   loop, instantiated **nested at three levels** (driver ⊃ sweeper ⊃ resample) that monomorphize by type —
-  the resample's `R=MeanSE` is the sweeper's `O`, the sweeper's `R=Winner` is the driver's `O`. **Static
+  the resample's `R=MeanSE` is the sweeper's `O`, the sweeper's `R=SweepResult` is the driver's `O`. **Static
   vs adaptive is the plannability line:** M1a wires only the *static* (feedback-free) Samplers, whose `Ask`
   emits the whole point-set at once and whose `Tell` ignores feedback — `GridConfigs` (the sweeper — every
   `shape.Expand` config), `FixedKFolds` (the inner resample — k folds over the materialized partition),
   `SingleDriver` (the degenerate outer driver:single). Adaptive Samplers use the feedback edge and are
-  later impls against the SAME node: metis#19 select = a different `Done` over the cached fold-scores,
-  metis#23 nested-CV = an outer resample Sampler swapping `SingleDriver`, racing/Bayesian = feedback-driven
-  `Ask`. `Aggregate` → `MeanSE` (the honest per-config `(mean,SE)`, keyed on the sorted told-set — an
-  adaptive `Done` re-reduces the same scores for free); `Winner` carries the **resolved config `Point`**
-  (its per-step `With` + free-params) as reconstructable run-keys → ship/promote rebuild the exact run
-  DIRECTLY, not by re-expanding the grid. The **driver** is `cmd/metis`: `metis run` on an experiment-shape
+  later impls against the SAME node: metis#23 nested-CV = an outer resample Sampler swapping `SingleDriver`,
+  racing/Bayesian = feedback-driven `Ask`. `Aggregate` → `MeanSE` (the honest per-config
+  `(mean, SE, meanComplexity)`, keyed on the sorted told-set — an adaptive `Done` re-reduces the same
+  scores for free). **The select rule (metis#19)** is a pure `SelectConfigs` (`select.go`) that
+  `GridConfigs.Done` calls: `objective.select` is a tagged union (`argmax-mean|one-std-err|pct-loss|mean-std`,
+  mirroring the `driver` union); it groups configs by **model family** (the tagged-sum `$any`-map branch, read
+  off `Point.With` bundling via `familyOf`), within a family applies a band (SE/%/none) then **minimizes
+  measured complexity** (ε-binned) tie-broken by mean, and picks the cross-family ship by argmax-mean over the
+  per-family winners → `SweepResult{PerFamily, Ship}`. Complexity is **measured on the fitted model** (M2 —
+  each model class reports realized leaves/coef-count, emitted per fold). `Winner` carries the **resolved
+  config `Point`** (its per-step `With` + free-params) + its `Family` as reconstructable run-keys → ship/promote
+  rebuild the exact run DIRECTLY, not by re-expanding the grid. The **driver** is `cmd/metis`: `metis run` on an experiment-shape
   drives the real three-level loop (`runShapeSweep`: `Run(SingleDriver) ⊃ Run(GridConfigs) ⊃
   Run(FixedKFolds)`), running each `(config, fold)` through the shared `runResolvedExperiment` (cached
   runner) keyed by its content-address. Each fold builds a per-fold experiment (`data ++ engine-synthesized
