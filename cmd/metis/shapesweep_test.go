@@ -28,7 +28,8 @@ func fixedNow() func() time.Time {
 // records the step-ids the INNER exec actually ran — a cache HIT skips it, so calls is the
 // MISS trace the cache assertions read.
 type foldFakeExec struct {
-	calls *[]string
+	calls        *[]string
+	noComplexity bool // metis#19: omit the complexity metric (simulate a model class that doesn't report it)
 }
 
 func (f foldFakeExec) Execute(step experiment.Step, runDir string) (experiment.StepResult, error) {
@@ -49,7 +50,9 @@ func (f foldFakeExec) Execute(step experiment.Step, runDir string) (experiment.S
 	metrics := map[string]float64{}
 	if step.ID == "train" {
 		metrics["fold_score"] = fakeTrainScore(step.With)
-		metrics["complexity"] = fakeTrainComplexity(step.With)
+		if !f.noComplexity {
+			metrics["complexity"] = fakeTrainComplexity(step.With)
+		}
 	}
 	return experiment.StepResult{Metrics: metrics, Artifacts: []string{art}}, nil
 }
@@ -129,6 +132,13 @@ driver:
   single: {}
 ---
 `
+}
+
+// foldShapePctLossMD is foldShapeMD with a pct-loss (parsimony) select rule — used to test
+// the metis#19 complexity guard (a parsimony rule needs a measured complexity).
+func foldShapePctLossMD(models string) string {
+	return strings.Replace(foldShapeMD(models),
+		"select: {argmax-mean: {}}", "select: {pct-loss: {tolerance: 0.02}}", 1)
 }
 
 func writeShapeFile(t *testing.T, dir, body string) string {
@@ -248,6 +258,44 @@ func TestShapeSweep_ComplexityThreadsFoldToConfig(t *testing.T) {
 		if _, ok := r.Metrics["train.complexity"]; !ok {
 			t.Errorf("each per-fold ledger row must carry train.complexity; got %+v", r.Metrics)
 		}
+	}
+}
+
+// metis#19 guard: an in-memory sweep with a parsimony rule (pct-loss) whose model step does
+// NOT emit complexity → a hard error (raw rows still persisted; only ship/report is gated).
+func TestShapeSweep_ParsimonyGuardOnMissingComplexity(t *testing.T) {
+	ws := t.TempDir()
+	expPath := writeShapeFile(t, ws, foldShapePctLossMD("[a, b]"))
+	_, err := runExperiment(runOpts{
+		expPath: expPath, now: fixedNow(),
+		git:  fakeGitProbe{name: "metis", sha: "sha", dirty: false},
+		exec: foldFakeExec{noComplexity: true}, out: io.Discard,
+	})
+	if err == nil {
+		t.Fatalf("pct-loss with no emitted complexity must error")
+	}
+	if !strings.Contains(err.Error(), "complexity") {
+		t.Errorf("guard error should mention complexity; got %v", err)
+	}
+	// The raw ledger rows are still persisted (re-selectable after a fix).
+	led := loadLedgerOrFatal(t, expPath)
+	if len(led.Rows) != 4 {
+		t.Errorf("raw fold rows should persist despite the guard; got %d", len(led.Rows))
+	}
+}
+
+// The same pct-loss shape WITH complexity emitted selects cleanly (the guard passes).
+func TestShapeSweep_ParsimonyRuleWithComplexity(t *testing.T) {
+	ws := t.TempDir()
+	expPath := writeShapeFile(t, ws, foldShapePctLossMD("[a, b]"))
+	var out strings.Builder
+	if err := runFoldSweep(t, expPath, false, nil, &out, nil); err != nil {
+		t.Fatalf("pct-loss with complexity should run: %v", err)
+	}
+	// model=b (0.91) is within 2% of itself; parsimony: a (cx 10) is simpler than b (cx 20)
+	// but a's mean 0.81 is outside b's 2% band (0.91·0.98=0.8918) → b wins. Just assert it ran.
+	if s := out.String(); !strings.Contains(s, "winner") {
+		t.Errorf("expected a winner line; got:\n%s", s)
 	}
 }
 

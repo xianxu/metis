@@ -1,6 +1,7 @@
 package sampler
 
 import (
+	"fmt"
 	"math"
 	"sort"
 	"strings"
@@ -8,6 +9,35 @@ import (
 	"github.com/xianxu/metis/pkg/experiment"
 	"github.com/xianxu/metis/pkg/shape"
 )
+
+// GuardComplexity rejects a parsimony rule (one-std-err / pct-loss) when ANY swept family's
+// configs lack a measured complexity — a silently-dropped parsimony axis would give a
+// quietly-wrong winner (the metis#19 v1 corner failure, one level up). Checked post-fold,
+// pre-selection: HasComplexity is only knowable after folds run (the metric is emitted by
+// the model step, not statically declared), so there is no pre-sweep registry to consult.
+// Checks EVERY family (not just the eventual winner — each family's within-winner needs
+// complexity). argmax-mean / mean-std never read complexity → never trip it.
+func GuardComplexity(rule experiment.Select, stats []ConfigStat) error {
+	if rule.OneStdErr == nil && rule.PctLoss == nil {
+		return nil // only parsimony rules consume complexity
+	}
+	var missing []string
+	seen := map[string]bool{}
+	for _, s := range stats {
+		if !s.Score.HasComplexity && !seen[s.Family] {
+			seen[s.Family] = true
+			missing = append(missing, s.Family)
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	sort.Strings(missing)
+	kind, _ := rule.Kind()
+	return fmt.Errorf("select rule %q needs a measured complexity, but families %v report none — "+
+		"have each model class emit a `complexity` metric (metis.model.complexity(kind)) or use argmax-mean/mean-std",
+		kind, missing)
+}
 
 // complexityBinRelTol: two complexities within this relative tolerance are "equally
 // simple" (the same band idea pct-loss applies to the score) — so the mean tie-break

@@ -77,6 +77,9 @@ func runLedgerSelect(o selectOpts) error {
 	if len(stats) == 0 {
 		return fmt.Errorf("ledger select: no scored configs in %s (objective %q) — run the sweep first", ledgerPath(o.shapePath), metric)
 	}
+	if err := sampler.GuardComplexity(rule, stats); err != nil {
+		return err
+	}
 	res := sampler.SelectConfigs(rule, sh.Sweeper.Objective.Direction, sh.Seed, stats)
 	printSelectResult(o.out, sh, rule, res)
 	return nil

@@ -1,6 +1,7 @@
 package sampler
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/xianxu/metis/pkg/experiment"
@@ -26,6 +27,41 @@ func idOf(w Winner) string {
 }
 
 func rule(s experiment.Select) experiment.Select { return s }
+
+// The guard rejects a parsimony rule when any family lacks measured complexity (a
+// silently-dropped parsimony axis → a quietly-wrong winner); argmax-mean/mean-std never
+// consume complexity so never trip it. metis#19.
+func TestGuardComplexity(t *testing.T) {
+	withCx := stat("rf", "a", 0.84, 16) // HasComplexity true (stat() sets it)
+	noCx := stat("logreg", "b", 0.80, 0)
+	noCx.Score.HasComplexity = false
+
+	// parsimony rule + a family with no complexity → error naming the family.
+	for _, r := range []experiment.Select{
+		{PctLoss: &experiment.PctLoss{Tolerance: 0.02}},
+		{OneStdErr: &experiment.OneStdErr{}},
+	} {
+		err := GuardComplexity(r, []ConfigStat{withCx, noCx})
+		if err == nil {
+			t.Errorf("%+v: expected guard error for a family lacking complexity", r)
+		} else if !strings.Contains(err.Error(), "logreg") {
+			t.Errorf("guard error should name the offending family logreg; got %v", err)
+		}
+	}
+	// parsimony rule + ALL families have complexity → no error.
+	if err := GuardComplexity(experiment.Select{PctLoss: &experiment.PctLoss{Tolerance: 0.02}}, []ConfigStat{withCx}); err != nil {
+		t.Errorf("guard should pass when all families report complexity; got %v", err)
+	}
+	// non-parsimony rules never trip the guard even with missing complexity.
+	for _, r := range []experiment.Select{
+		{ArgmaxMean: &experiment.ArgmaxMean{}},
+		{MeanStd: &experiment.MeanStd{Lambda: 1.0}},
+	} {
+		if err := GuardComplexity(r, []ConfigStat{withCx, noCx}); err != nil {
+			t.Errorf("%+v: non-parsimony rule must not trip the complexity guard; got %v", r, err)
+		}
+	}
+}
 
 // argmax-mean: the family/ship winner is the highest mean; complexity ignored.
 func TestSelect_ArgmaxMean(t *testing.T) {

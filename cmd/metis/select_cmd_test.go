@@ -114,3 +114,53 @@ func TestLedgerSelect_ArgmaxMean_PicksGlobalMax(t *testing.T) {
 		t.Errorf("argmax-mean should ship the global-max rf md=8; got:\n%s", s)
 	}
 }
+
+// The guard (metis#19): a parsimony rule over a ledger that carries NO complexity → a hard
+// error (a silently-dropped parsimony axis would give a quietly-wrong winner). argmax-mean
+// over the same ledger is fine (never reads complexity).
+func TestLedgerSelect_ParsimonyWithoutComplexity_Errors(t *testing.T) {
+	dir := t.TempDir()
+	shapePath := writeTaggedSelectLedger(t, dir)
+	// Rewrite the ledger WITHOUT the complexity column (simulate a pre-metis#19 sweep).
+	stripComplexityFromLedger(t, shapePath)
+
+	var out strings.Builder
+	err := runLedgerSelect(selectOpts{shapePath: shapePath, rule: "pct-loss", out: &out})
+	if err == nil {
+		t.Fatalf("pct-loss over a complexity-less ledger must error; got success:\n%s", out.String())
+	}
+	if !strings.Contains(err.Error(), "complexity") {
+		t.Errorf("guard error should mention complexity; got %v", err)
+	}
+	// argmax-mean over the same ledger is fine.
+	out.Reset()
+	if err := runLedgerSelect(selectOpts{shapePath: shapePath, rule: "argmax-mean", out: &out}); err != nil {
+		t.Errorf("argmax-mean must not need complexity; got %v", err)
+	}
+}
+
+// stripComplexityFromLedger rewrites the shape's ledger keeping only train.fold_score.
+func stripComplexityFromLedger(t *testing.T, shapePath string) {
+	t.Helper()
+	led, err := loadLedger(shapePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stripped ledger.Ledger
+	for _, r := range led.Rows {
+		m := map[string]float64{}
+		if v, ok := r.Metrics["train.fold_score"]; ok {
+			m["train.fold_score"] = v
+		}
+		nr := r
+		nr.Metrics = m
+		stripped.Append(nr)
+	}
+	b, err := ledger.Encode(stripped)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ledgerPath(shapePath), b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}

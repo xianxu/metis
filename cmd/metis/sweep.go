@@ -154,8 +154,26 @@ func runShapeSweep(o runOpts, sh experiment.Shape, now func() time.Time, out io.
 	if err := writeSweepLedger(o.expPath, ss.man); err != nil {
 		return err
 	}
+	// Guard (metis#19): a parsimony rule (one-std-err/pct-loss) needs a measured complexity
+	// for every swept family — else the parsimony axis is silently dropped and the winner is
+	// quietly wrong. The raw fold rows are already persisted (re-selectable after a fix); only
+	// the ship/report is gated. Checked here (post-fold) because HasComplexity is only known
+	// after the folds run.
+	if err := sampler.GuardComplexity(sh.Sweeper.Objective.Select, ss.configStats()); err != nil {
+		return err
+	}
 	ss.reportWinner(res)
 	return ss.shipWinner(res.Ship)
+}
+
+// configStats builds the per-config stats (with each config's family) from the completed
+// sweep — the guard's input, matching the shape GridConfigs.Done reduces internally.
+func (ss *shapeSweep) configStats() []sampler.ConfigStat {
+	stats := make([]sampler.ConfigStat, len(ss.configs))
+	for i, c := range ss.configs {
+		stats[i] = sampler.ConfigStat{Point: c.point, Family: sampler.FamilyOf(c.point), Score: c.meanSE}
+	}
+	return stats
 }
 
 // shipWinner runs the driver:single ship: reconstruct the winning config's runnable
