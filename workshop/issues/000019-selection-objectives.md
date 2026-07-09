@@ -5,7 +5,7 @@ deps: []
 github_issue:
 created: 2026-07-07
 updated: 2026-07-08
-estimate_hours: 10
+estimate_hours: 3.7
 started: 2026-07-08T12:01:41-07:00
 ---
 
@@ -207,13 +207,47 @@ scalar per config collapses the per-knob/Pareto/magnitude machinery into "minimi
   before selection** with a next-action message.
 - Each rule unit-tested; `complexity()` per model class tested.
 
+## Estimate
+
+*Produced via `brain/data/life/42shots/velocity/estimate-logic-v3.1.md` against `baseline-v3.1.md`. Method A only.*
+
+```estimate
+model: estimate-logic-v3.1
+familiarity: 1.0
+item: greenfield-go-module   design=0.5 impl=0.4
+item: smaller-go-module      design=0.2 impl=0.3
+item: smaller-go-module      design=0.2 impl=0.3
+item: smaller-go-module      design=0.2 impl=0.3
+item: smaller-go-module      design=0.2 impl=0.4
+item: milestone-review       design=0.0 impl=0.2
+item: milestone-review       design=0.0 impl=0.2
+item: atlas-docs             design=0.05 impl=0.05
+design-buffer: 0.15
+total: 3.70
+```
+
+Design pre-settled (extensive brainstorm + spec + 2 spec-review rounds + an RF-complexity literature
+pass + a plan-review round) → design near the floor. **M1**: greenfield `pkg/sampler/select.go` (the
+pure `SelectConfigs` rule + `familyOf` — the keystone); a sampler type-widening/threading `smaller`
+(fold `float64`→`FoldOutcome`, `Done`→`SweepResult`); the `shape.Select` union + CUE + 3 shape
+migrations `smaller`. **M2**: `metis.model.complexity` + per-fold emit `smaller`; ledger complexity +
+offline `metis ledger select` + guard + verified acceptance `smaller`. Two `milestone-review` (M1, M2
+boundaries) + a small atlas note. Impl at 40%-of-v2 (v3.1); +15% thorough-plan buffer.
+
 ## Plan
 
-- [ ] Durable plan pending (`superpowers-writing-plans`) — likely ≥2 boundaries: (M1) the select
-  rule + sampler evolution (union, group-by-family, within-band + tie-break, Done → per-family map);
-  (M2) model-reported complexity (per-class `complexity()`, per-fold emit + cache + reduce, the guard,
-  the verified acceptance counterfactual). Supersedes the claim-time line (which assumed 1-SE recovers
-  the case — it does not; the band is 15× too tight).
+Durable plan: **`workshop/plans/000019-selection-objectives-plan.md`** (Core-concepts tables + TDD
+tasks, grounded in code recon; passed a fresh-eyes plan review). Two review boundaries:
+
+- [ ] **M1** — Select rule + sampler evolution: `shape.Select` tagged union (mirrors `driver`) + CUE +
+  shape migrations; pure `SelectConfigs` (group-by-family → band → ε-binned min-complexity → mean
+  tie-break; cross-family argmax-mean) + `familyOf`; fold-output widening `float64`→`{score,complexity}`;
+  `GridConfigs.Done`→`SweepResult` threaded through the driver. (Complexity wired as 0 e2e; rule
+  unit-tested with hand-built stats incl. the corner regression.) `sdlc milestone-close M1`.
+- [ ] **M2** — Measured complexity: `metis.model.complexity()` per class (rf mean-leaves, logreg
+  coef-count) emitted per fold → cache → ledger; offline `metis ledger select` reuses `SelectConfigs`;
+  the parsimony-guard; the verified acceptance counterfactual (per-rule table, tune ε if it lands on
+  the sparse corner). `sdlc close M2`.
 
 ## Log
 
