@@ -3,7 +3,8 @@
 An experiment is a git-tracked, declarative **pipeline of steps** — *issue-shaped*: schematized
 frontmatter (the machine-executable pipeline + config) over a freeform body (hypothesis + prose).
 It is **immutable input** (#13): a run never writes back into the `.md` — run history lives in
-`runs/<id>/record.json` + the `.ledger.csv` sidecar (browse via `metis ledger show`), so a
+`runs/<id>/record.json` + the `.ledger.csv` sidecar (browse via `metis ledger show`; apply the
+sweeper's two-level select rule offline via `metis ledger select --rule R`, #19), so a
 committed config is a stable content-hash. The Go step-runner
 (`metis run <id>`, M2) executes it with **no agent in the loop**, unifying data
 reconstruction, training, and experiment tracking under one entrypoint.

@@ -201,8 +201,12 @@ scalar per config collapses the per-knob/Pareto/magnitude machinery into "minimi
   its feature count) is **reported and verified against the ledger, not asserted** (per-rule table).
   If the verified pick is the sparse corner rather than the more-feature config, the complexity-bin ε
   is tuned (or the outcome documented + a fallback chosen) — not left to chance.
-- Both selection surfaces carry it: `GridConfigs.Done` (ship) **and** `pkg/ledger`/`promote` (offline)
-  group by family and expose complexity; `Done` returns the per-family leaderboard + cross-family pick.
+- Both selection surfaces carry it: `GridConfigs.Done` (ship) **and** the offline path group by family
+  and expose complexity; `Done` returns the per-family leaderboard + cross-family pick. *(Shipped: the
+  offline family-grouped surface is the new `metis ledger select` command — reusing the same pure
+  `SelectConfigs`+`FamilyOf` — NOT a `promote --family` flag. `promote` keeps raw `--best`/`--point`;
+  the `ledger select`↔in-memory DRY property is tested via identical path-qualified family keys. See the
+  plan `## Revisions`.)*
 - A parsimony rule + **any swept family** whose model class does not report complexity → **hard error
   before selection** with a next-action message.
 - Each rule unit-tested; `complexity()` per model class tested.
@@ -308,6 +312,8 @@ tasks, grounded in code recon; passed a fresh-eyes plan review). Two review boun
   emission refactors the scoring path to expose the discarded fitted estimator; logreg-vs-rf
   feature-neutrality asymmetry stated. Remaining items are plan-level (M1/M2 sizing around the ripple).
 ### 2026-07-09 (M2 built — measured complexity + VERIFIED acceptance)
+- 2026-07-09: closed M2 — M2 DONE + independently verified: go test ./... + go vet ./... green (9 pkgs), uv run pytest 46 + kbench 36 passed. INDEPENDENTLY re-ran acceptance offline via metis ledger select over the real 891-row Titanic ledger (sweep 4b90538): pct-loss ships rf md=4/all-6-features (cx 14.6 -> public 0.782) vs argmax-mean md=8/3-feat (cx 66.3 -> public 0.770) — recovers shallower regime, NOT sparse nfeat=1 corner; one-std-err confirms band-too-tight. Measured complexity (rf mean leaves, logreg coef count) per-fold+cached+reduced; guard hard-errors on parsimony+unmodeled family; SelectConfigs reused by in-memory ship + offline ledger w/ identical path-qualified family keys. Project file updated in brain repo (separate; cross-repo). est 3.7h/actual 6.20h (over: estimate assumed design pre-settled; this session did full design + 2 spec reviews + literature + plan + review).; review verdict: FIX-THEN-SHIP
+- 2026-07-09: M2 FIX-THEN-SHIP applied (0 Critical, 1 Important): the Spec/Plan promised `promote --family` but the offline family-grouped surface shipped as the new `metis ledger select` command instead (purpose met — the acceptance runs over it; `promote` keeps raw `--best`/`--point`). Reconciled: Spec Done-when item note + plan `## Revisions` recording the substitution + atlas/experiment.md now documents `ledger select`. Deferred minor (in lessons + plan Revisions): offline `ledger select` over a >1-`sweep_sha` ledger misdiagnoses the guard error → wants a "multiple cohorts, scope with --sweep" warning (follow-up). Whole module still green.
 M2 landed TDD (Tasks 9–14): `metis.model.complexity` (rf mean leaves/tree via `fold_fit` — one
 fit feeds score+complexity; logreg coef count); `train` emits `complexity` per fold; `runPipelineFold`
 threads it (`FoldOutcome{Score,Complexity,HasComplexity}`); `AggregateView` means every metric column;
