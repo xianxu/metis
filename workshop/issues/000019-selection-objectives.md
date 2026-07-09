@@ -244,7 +244,7 @@ tasks, grounded in code recon; passed a fresh-eyes plan review). Two review boun
   tie-break; cross-family argmax-mean) + `familyOf`; fold-output widening `float64`→`{score,complexity}`;
   `GridConfigs.Done`→`SweepResult` threaded through the driver. (Complexity wired as 0 e2e; rule
   unit-tested with hand-built stats incl. the corner regression.) `sdlc milestone-close M1`.
-- [ ] **M2** — Measured complexity: `metis.model.complexity()` per class (rf mean-leaves, logreg
+- [x] **M2** — Measured complexity: `metis.model.complexity()` per class (rf mean-leaves, logreg
   coef-count) emitted per fold → cache → ledger; offline `metis ledger select` reuses `SelectConfigs`;
   the parsimony-guard; the verified acceptance counterfactual (per-rule table, tune ε if it lands on
   the sparse corner). `sdlc close M2`.
