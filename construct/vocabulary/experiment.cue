@@ -76,7 +76,12 @@ _pipeline: {
 		objective: {
 			metric:    string
 			direction: "maximize" | "minimize"
-			select:    string               // "argmax-mean" (M1a); one-std-err | pct-loss later (metis#19)
+			select: {                        // metis#19 tagged union; exactly-one enforced in Go (like driver)
+				"argmax-mean"?: {}
+				"one-std-err"?: {}
+				"pct-loss"?: {tolerance: float & >0}
+				"mean-std"?: {lambda:    float & >=0}
+			}
 		}
 	}
 	driver: {              // exactly one mode; M1a runs `single`, `cv` is metis#23
