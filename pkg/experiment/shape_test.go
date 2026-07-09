@@ -145,6 +145,7 @@ func TestValidateShape_v2(t *testing.T) {
 		"select none":                func(s *Shape) { s.Sweeper.Objective.Select = Select{} },
 		"select two branches":        func(s *Shape) { s.Sweeper.Objective.Select = Select{ArgmaxMean: &ArgmaxMean{}, PctLoss: &PctLoss{Tolerance: 0.02}} },
 		"pct-loss tolerance <= 0":    func(s *Shape) { s.Sweeper.Objective.Select = Select{PctLoss: &PctLoss{Tolerance: 0}} },
+		"mean-std lambda < 0":        func(s *Shape) { s.Sweeper.Objective.Select = Select{MeanStd: &MeanStd{Lambda: -1}} },
 		"driver none":                func(s *Shape) { s.Driver = Driver{} },
 		"driver both":                func(s *Shape) { s.Driver.CV = &CVDriver{K: 5} },
 		"driver cv (is #23)":         func(s *Shape) { s.Driver = Driver{CV: &CVDriver{K: 5}} },

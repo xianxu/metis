@@ -112,6 +112,35 @@ func TestSelect_MeanStd_UsesStd_NotComplexity(t *testing.T) {
 	}
 }
 
+// minimize pct-loss (e.g. a loss/error objective): the band admits configs within
+// tolerance ABOVE the best (lowest) mean, then parsimony picks the simpler one — the
+// minimize analogue of the corner regression. best-mean `low_deep` (cx 40) is in-band
+// but complex; `mid_shallow` (mean 0.102 = best·1.02, cx 16) wins on parsimony.
+func TestSelect_PctLoss_MinimizeDirection(t *testing.T) {
+	stats := []ConfigStat{
+		stat("rf", "low_deep", 0.100, 40),    // best (lowest) mean, deep/complex
+		stat("rf", "mid_shallow", 0.102, 16), // within 2% band (0.100·1.02=0.102), simpler
+		stat("rf", "high", 0.150, 8),         // out of band despite lowest complexity
+	}
+	res := SelectConfigs(rule(experiment.Select{PctLoss: &experiment.PctLoss{Tolerance: 0.02}}), "minimize", 1, stats)
+	if got := idOf(res.Ship); got != "mid_shallow" {
+		t.Errorf("minimize pct-loss ship = %q, want mid_shallow (band admits it; simpler than low_deep; high is out of band)", got)
+	}
+}
+
+// minimize mean-std: for minimize the variance penalty is ADDED (mean + λ·std), so a
+// fragile config with a lower raw mean but high variance loses to a stabler one.
+func TestSelect_MeanStd_MinimizeDirection(t *testing.T) {
+	fragile := stat("rf", "fragile", 0.100, 8) // lowest raw mean, high variance
+	fragile.Score.SE = 0.02                    // std = 0.02·√5 ≈ 0.0447 → adj 0.1447
+	stable := stat("rf", "stable", 0.110, 40)  // higher mean, zero variance → adj 0.110
+	stable.Score.SE = 0.0
+	res := SelectConfigs(rule(experiment.Select{MeanStd: &experiment.MeanStd{Lambda: 1.0}}), "minimize", 1, []ConfigStat{fragile, stable})
+	if got := idOf(res.Ship); got != "stable" {
+		t.Errorf("minimize mean-std ship = %q, want stable (fragile's variance penalty pushes its adjusted loss above stable)", got)
+	}
+}
+
 // cross-family: each family selects its own robust winner; the ship pick is
 // argmax-mean over those winners (never a cross-family complexity comparison).
 func TestSelect_CrossFamily_ArgmaxMean(t *testing.T) {

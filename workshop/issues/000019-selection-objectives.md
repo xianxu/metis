@@ -239,7 +239,7 @@ boundaries) + a small atlas note. Impl at 40%-of-v2 (v3.1); +15% thorough-plan b
 Durable plan: **`workshop/plans/000019-selection-objectives-plan.md`** (Core-concepts tables + TDD
 tasks, grounded in code recon; passed a fresh-eyes plan review). Two review boundaries:
 
-- [ ] **M1** — Select rule + sampler evolution: `shape.Select` tagged union (mirrors `driver`) + CUE +
+- [x] **M1** — Select rule + sampler evolution: `shape.Select` tagged union (mirrors `driver`) + CUE +
   shape migrations; pure `SelectConfigs` (group-by-family → band → ε-binned min-complexity → mean
   tie-break; cross-family argmax-mean) + `familyOf`; fold-output widening `float64`→`{score,complexity}`;
   `GridConfigs.Done`→`SweepResult` threaded through the driver. (Complexity wired as 0 e2e; rule
@@ -251,6 +251,9 @@ tasks, grounded in code recon; passed a fresh-eyes plan review). Two review boun
 
 ## Log
 
+
+- 2026-07-09: closed M1 — M1 green: go build+test+vet ./... all ok (incl. hermetic sweep+ship e2e w/ real python steps); objective.select union parses+validates (exactly-one, param bounds); pure SelectConfigs corner-regression TestSelect_PctLoss_TieBreaksToMean passes w/ ε=0.10; drove smoke shape through real binary w/ select:{pct-loss} → per-family winners logreg 0.7935/rf 0.8103, cross-family argmax→rf shipped ok (complexity 0.0 until M2); review verdict: FIX-THEN-SHIP
+- 2026-07-09: M1 FIX-THEN-SHIP applied (0 Critical, 3 Important + minors): (1) updated stale authoring doc `construct/datatype/experiment-shape.md` select→tagged-union (hidden doc consumer — bare scalar now rejected); (2) added minimize-direction tests (`TestSelect_PctLoss_MinimizeDirection` + `TestSelect_MeanStd_MinimizeDirection` — the whole minimize band/parsimony/mean-std-penalty path was unexercised) + `mean-std lambda<0` validation test; (3) plan `## Revisions` reconciling the Core-concepts table with as-built shapes. **Amended plan Task 12 (guard against a silent M2 DRY break):** the offline ledger `Family` MUST match `familyOf`'s path-qualified format `train.model=rf`, not bare `rf`. Guard framing → post-fold/pre-selection. Whole module green after fixes.
 ### 2026-07-07
 - Filed as metis-v2 M2. The **selection** knob (separate from estimation/metis#23). Design in the pensive.
 ### 2026-07-07 (design converged)

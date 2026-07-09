@@ -325,13 +325,13 @@ def complexity(fitted, kind: str) -> float:
 - [ ] **Step 1 — Failing tests:** `pkg/ledger/ledger_test.go` — `AggregateView` over rows carrying `train.fold_score` AND `train.complexity` emits both the score `(mean, se, n)` and a `train.complexity` mean column. `cmd/metis` — `metis ledger select --shape <sweep> --rule pct-loss` over a small fixture ledger prints the per-family winners + ship pick, applying `sampler.SelectConfigs` (DRY reuse).
 - [ ] **Step 2 — Implement:**
   - `AggregateView(l, metric)` → also mean the complexity metric if present (or generalize to aggregate ALL metric columns — smaller, more general: mean every `metric.*` column, keep `.se`/`.n` for the objective metric). Prefer the general form.
-  - Build `[]sampler.ConfigStat` from the aggregated rows: set `Family` **directly from the ledger `fp.train.model` value** (which is literally `"rf"`/`"logreg"` — `shape.go:176-177` records the `$any`-map label as `FreeParam.Value`), NOT by reconstructing a `Point` and calling `familyOf`. Then call `sampler.SelectConfigs`. (Expose a small `SelectConfigs` entry that takes pre-built `[]ConfigStat`, so the offline path supplies `Family` directly — the in-memory path uses `familyOf`; both converge on `SelectConfigs`.)
+  - Build `[]sampler.ConfigStat` from the aggregated rows. **CRITICAL (M1-review finding): the offline `Family` string MUST match `familyOf`'s path-qualified format exactly — `"train.model=rf"`, NOT the bare `"rf"` from `fp.train.model`.** `familyOf` (as-built) emits `<step>.<key>=<label>` joined+sorted; if the offline path sets a bare `"rf"`, the two `SelectConfigs` consumers produce different keys for the same config and the "one rule, two surfaces, identical result" DRY property breaks silently. So reconstruct enough of the `FreeParam`/`With` to call `familyOf` on the ledger row (or replicate its exact `<step>.<key>=<label>` format from the `fp.*` columns). Then call `sampler.SelectConfigs` (which already takes pre-built `[]ConfigStat` — the offline path just supplies `Family` in the matching format).
   - `metis ledger select` command (new): reads shape + ledger, prints the two-level result. `promote --family <name>` promotes that family's robust winner (reuse the same rule).
 - [ ] **Step 3 — Run, pass.** Commit: `#19 M2: ledger complexity column + offline family select (reuses SelectConfigs)`.
 
 ### Task 13: The guard (parsimony rule + unmodeled family → hard error)
 
-**Files:** wherever the rule is dispatched with model metadata — likely a validate step in `cmd/metis/sweep.go` before the sweep, or inside `SelectConfigs` (return an error variant). Prefer a pre-sweep check.
+**Files:** the guard runs **post-fold, pre-selection** (a rule's `HasComplexity` is only knowable after folds run — the metric is emitted, not statically declared; there's no pre-sweep registry to check). Place it at the top of `SelectConfigs` (or a check just before it in `cmd/metis/sweep.go`).
 
 - [ ] **Step 1 — Failing test:** a shape with a parsimony rule (`pct-loss`) + a swept family whose model class has no `complexity()` (simulate with a fake kind, or a `HasComplexity:false` stat) → hard error naming the family + the fix; `argmax-mean`/`mean-std` with the same → no error.
 - [ ] **Step 2 — Implement:** before selection, if the rule is `one-std-err`/`pct-loss` and ANY swept family's stats have `HasComplexity==false` → error "family %q under a parsimony rule reports no complexity; add metis.model.complexity(kind) or use argmax-mean/mean-std". (Check ALL swept families, not just the winner — per the v2 review.)
@@ -359,3 +359,14 @@ def complexity(fitted, kind: str) -> float:
 
 ## Non-goals (carried from the spec)
 Cross-family complexity comparison (unsound — non-parametric RF; #23 estimates); nested-CV `driver:cv` (#23); adaptive samplers (#7); static/pre-training complexity; the #4 collocated-manifest catalog (de-entangled). `one-std-err` ships + is unit-tested only as the labeled Breiman contrast (documented too-tight here) — don't let it grow.
+
+## Revisions
+
+### 2026-07-09 — reconcile Core-concepts table with what M1 shipped (M1-review finding)
+The M1 code is *cleaner* than the drafted table; recording the as-built shapes so an M2 author trusts a current map (no behavior change):
+- **`sampler.FoldOutcome`** lives in `pkg/sampler/folds.go` (table said `aggregate.go`). Shape: `{Score, Complexity float64; HasComplexity bool}`.
+- **`sampler.Winner`** gained **`Family string` only** — complexity is carried in `Winner.Score.MeanComplexity` (no separate `Winner.Complexity` field; ARCH-DRY).
+- **`sampler.ConfigStat`** is `{Point shape.Point; Family string; Score MeanSE}` (embeds `MeanSE`), not the flattened field list the plan drafted. `MeanSE` gained `MeanComplexity float64` + `HasComplexity bool`.
+- **`SelectConfigs`** as-built: `SelectConfigs(rule experiment.Select, direction string, seed int, stats []ConfigStat) SweepResult` (has a `seed` param). **`familyOf(p shape.Point) string`** dropped the drafted `sweptTagPaths` param (derives per-point from `FreeParams`+`With`); it emits **path-qualified** keys `"train.model=rf"` (sorted, comma-joined) — see the Task 12 amendment (offline path must match this format).
+- **Guard placement** (Task 13): post-fold, pre-selection (not pre-sweep) — `HasComplexity` is only known after folds run.
+- `complexityBinRelTol = 0.10` lives in `pkg/sampler/select.go`. If retuned in the M2 acceptance, update `TestSelect_PctLoss_BinnedComplexity` (its arithmetic is pinned to 0.10).
