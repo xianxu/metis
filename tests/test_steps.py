@@ -96,6 +96,21 @@ def test_train_step_accepts_any_map_model_config(tmp_path, monkeypatch):
     assert 0.0 < cv <= 1.0  # a real CV score — the sweep point trains, no unknown-model error
 
 
+def test_train_per_fold_emits_score_and_complexity(tmp_path, monkeypatch):
+    """metis#19: the per-fold branch emits BOTH fold_score and complexity (the realized
+    fitted-model complexity the select rule's parsimony consumes). rf → mean leaves > 0."""
+    run = tmp_path / "runs" / "r-fold"
+    _run_step(monkeypatch, run, "split", {"dataset": "toy", "k": 3, "stratify": True}, cv_split.main)
+    ts = _run_step(monkeypatch, run, "train",
+                   {"dataset": "toy", "folds": "split",
+                    "model": {"rf": {"n_estimators": 20, "max_depth": 3}},
+                    "_fold": {"partition": "p", "idx": 0}}, train.main)
+    metrics = json.loads((ts / "metrics.json").read_text())
+    assert 0.0 <= metrics["fold_score"] <= 1.0
+    assert metrics["complexity"] > 0.0  # rf mean leaves/tree
+    assert (ts / "model.pkl").exists() is False  # per-fold does not persist a model
+
+
 def test_step_context_requires_env(monkeypatch):
     for v in ("METIS_STEP_DIR", "METIS_RUN_DIR", "METIS_STEP_ID", "METIS_EXP_DIR", "METIS_SEED"):
         monkeypatch.delenv(v, raising=False)
