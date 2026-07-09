@@ -48,13 +48,53 @@ type CVResample struct {
 }
 
 // Objective names the metric to optimize, the direction, and the select rule that
-// reduces per-config (mean,SE) → a winner. M1a supports `argmax-mean` only; the
-// 1-standard-error / pct-loss rules (metis#19) are a different `select` over the
-// same cached fold-scores.
+// reduces per-config (mean, SE, complexity) → a winner (metis#19).
 type Objective struct {
 	Metric    string `yaml:"metric"`
-	Direction string `yaml:"direction"`        // "maximize" | "minimize"
-	Select    string `yaml:"select,omitempty"` // "argmax-mean" (M1a); one-std-err | pct-loss later (#19)
+	Direction string `yaml:"direction"` // "maximize" | "minimize"
+	Select    Select `yaml:"select"`
+}
+
+// Select is the tagged-union select rule (metis#19) — exactly one branch is non-nil,
+// mirroring Driver's single|cv (optional pointer fields + a Go "exactly one" count check
+// in ValidateShape; each rule's param is bound to it as a sub-struct field). The parsimony
+// rules (one-std-err/pct-loss) minimize the per-config MEASURED complexity within a band,
+// tie-break by mean; argmax-mean/mean-std ignore complexity.
+type Select struct {
+	ArgmaxMean *ArgmaxMean `yaml:"argmax-mean,omitempty"` // raw cv-max (M1a); mean only
+	OneStdErr  *OneStdErr  `yaml:"one-std-err,omitempty"` // band = 1×SE, then min-complexity
+	PctLoss    *PctLoss    `yaml:"pct-loss,omitempty"`    // band = tolerance %, then min-complexity
+	MeanStd    *MeanStd    `yaml:"mean-std,omitempty"`    // argmax(mean − λ·std); no complexity
+}
+
+type ArgmaxMean struct{}
+type OneStdErr struct{}
+type PctLoss struct {
+	Tolerance float64 `yaml:"tolerance"` // relative fraction of the family-best mean (0.02 = 2%)
+}
+type MeanStd struct {
+	Lambda float64 `yaml:"lambda"`
+}
+
+// Kind returns the single set branch's name and true; "" and false if not exactly one is set.
+func (s Select) Kind() (string, bool) {
+	name, n := "", 0
+	if s.ArgmaxMean != nil {
+		name, n = "argmax-mean", n+1
+	}
+	if s.OneStdErr != nil {
+		name, n = "one-std-err", n+1
+	}
+	if s.PctLoss != nil {
+		name, n = "pct-loss", n+1
+	}
+	if s.MeanStd != nil {
+		name, n = "mean-std", n+1
+	}
+	if n != 1 {
+		return "", false
+	}
+	return name, true
 }
 
 // Driver is the OUTER Sampler — the honest evaluator, and it is optional. `single`
@@ -102,8 +142,8 @@ func ParseShape(content string) (Shape, error) {
 // through Validate (unique ids across all phases, cross-phase needs-resolution, uses
 // format, acyclicity — reusing Validate, ARCH-DRY). Validating each phase in isolation
 // would wrongly reject cross-phase needs. Shape-only checks: a non-empty pipeline, a
-// sampler, a valid inner resample, a valid objective direction, an M1a-supported select
-// rule, and exactly one driver mode (single | cv).
+// sampler, a valid inner resample, a valid objective direction, exactly one select-rule
+// branch (metis#19), and exactly one driver mode (single | cv).
 func ValidateShape(sh Shape) error {
 	combined := Experiment{Header: sh.Header, Steps: combinedSteps(sh)}
 	combined.Type = "experiment"
@@ -137,8 +177,16 @@ func ValidateShape(sh Shape) error {
 	if d := sh.Sweeper.Objective.Direction; d != "maximize" && d != "minimize" {
 		return fmt.Errorf("shape %q: sweeper.objective.direction %q must be maximize|minimize", sh.ID, d)
 	}
-	if s := sh.Sweeper.Objective.Select; s != "argmax-mean" {
-		return fmt.Errorf("shape %q: sweeper.objective.select %q must be argmax-mean (M1a; one-std-err is metis#19)", sh.ID, s)
+	// Exactly one select branch (mirrors the driver count check below). Params bound to
+	// their branch: pct-loss.tolerance > 0, mean-std.lambda >= 0.
+	if _, ok := sh.Sweeper.Objective.Select.Kind(); !ok {
+		return fmt.Errorf("shape %q: sweeper.objective.select must set exactly one of argmax-mean|one-std-err|pct-loss|mean-std", sh.ID)
+	}
+	if p := sh.Sweeper.Objective.Select.PctLoss; p != nil && p.Tolerance <= 0 {
+		return fmt.Errorf("shape %q: sweeper.objective.select.pct-loss.tolerance must be > 0, got %v", sh.ID, p.Tolerance)
+	}
+	if m := sh.Sweeper.Objective.Select.MeanStd; m != nil && m.Lambda < 0 {
+		return fmt.Errorf("shape %q: sweeper.objective.select.mean-std.lambda must be >= 0, got %v", sh.ID, m.Lambda)
 	}
 	n := 0
 	if sh.Driver.Single != nil {

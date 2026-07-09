@@ -40,7 +40,7 @@ ship:
 sweeper:
   sampler: grid
   resample: {cv: {k: 5, stratify: true}}
-  objective: {metric: accuracy, direction: maximize, select: argmax-mean}
+  objective: {metric: accuracy, direction: maximize, select: {argmax-mean: {}}}
 driver:
   single: {}
 `
@@ -64,8 +64,8 @@ func TestParseShape_v2(t *testing.T) {
 	if sh.Sweeper.Sampler != "grid" || sh.Sweeper.Resample.CV.K != 5 || !sh.Sweeper.Resample.CV.Stratify {
 		t.Errorf("sweeper/resample wrong: %+v", sh.Sweeper)
 	}
-	if sh.Sweeper.Objective.Select != "argmax-mean" {
-		t.Errorf("select wrong: %q", sh.Sweeper.Objective.Select)
+	if sh.Sweeper.Objective.Select.ArgmaxMean == nil {
+		t.Errorf("select wrong: %+v", sh.Sweeper.Objective.Select)
 	}
 	if sh.Driver.Single == nil || sh.Driver.CV != nil {
 		t.Errorf("driver:single expected: %+v", sh.Driver)
@@ -73,6 +73,38 @@ func TestParseShape_v2(t *testing.T) {
 	feat, ok := sh.Pipeline[0].With["features"].(map[string]any)
 	if !ok || feat["$any"] == nil {
 		t.Errorf("features $any descriptor not preserved: %#v", sh.Pipeline[0].With["features"])
+	}
+}
+
+// TestSelect_Union: objective.select is a tagged union (metis#19) mirroring driver —
+// exactly one branch, its param bound to it. Each variant parses; the param carries.
+func TestSelect_Union(t *testing.T) {
+	sel := func(inner string) string {
+		return strings.Replace(validShapeV2, "select: {argmax-mean: {}}", "select: "+inner, 1)
+	}
+	// pct-loss carries its tolerance.
+	sh, err := ParseShape(mdOf(sel("{pct-loss: {tolerance: 0.02}}")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sh.Sweeper.Objective.Select.PctLoss == nil || sh.Sweeper.Objective.Select.PctLoss.Tolerance != 0.02 {
+		t.Errorf("pct-loss tolerance not carried: %+v", sh.Sweeper.Objective.Select)
+	}
+	if err := ValidateShape(sh); err != nil {
+		t.Errorf("valid pct-loss shape rejected: %v", err)
+	}
+	// mean-std carries lambda; one-std-err has no params.
+	sh, _ = ParseShape(mdOf(sel("{mean-std: {lambda: 1.5}}")))
+	if sh.Sweeper.Objective.Select.MeanStd == nil || sh.Sweeper.Objective.Select.MeanStd.Lambda != 1.5 {
+		t.Errorf("mean-std lambda not carried: %+v", sh.Sweeper.Objective.Select)
+	}
+	sh, _ = ParseShape(mdOf(sel("{one-std-err: {}}")))
+	if sh.Sweeper.Objective.Select.OneStdErr == nil {
+		t.Errorf("one-std-err not parsed: %+v", sh.Sweeper.Objective.Select)
+	}
+	// Kind() reports the single set branch.
+	if k, ok := sh.Sweeper.Objective.Select.Kind(); !ok || k != "one-std-err" {
+		t.Errorf("Kind() = %q,%v; want one-std-err,true", k, ok)
 	}
 }
 
@@ -110,7 +142,9 @@ func TestValidateShape_v2(t *testing.T) {
 		"missing sampler":            func(s *Shape) { s.Sweeper.Sampler = "" },
 		"resample k<2":               func(s *Shape) { s.Sweeper.Resample.CV.K = 1 },
 		"bad direction":              func(s *Shape) { s.Sweeper.Objective.Direction = "sideways" },
-		"unsupported select":         func(s *Shape) { s.Sweeper.Objective.Select = "one-std-err" },
+		"select none":                func(s *Shape) { s.Sweeper.Objective.Select = Select{} },
+		"select two branches":        func(s *Shape) { s.Sweeper.Objective.Select = Select{ArgmaxMean: &ArgmaxMean{}, PctLoss: &PctLoss{Tolerance: 0.02}} },
+		"pct-loss tolerance <= 0":    func(s *Shape) { s.Sweeper.Objective.Select = Select{PctLoss: &PctLoss{Tolerance: 0}} },
 		"driver none":                func(s *Shape) { s.Driver = Driver{} },
 		"driver both":                func(s *Shape) { s.Driver.CV = &CVDriver{K: 5} },
 		"driver cv (is #23)":         func(s *Shape) { s.Driver = Driver{CV: &CVDriver{K: 5}} },
