@@ -66,6 +66,24 @@ def predict(estimator, X):
     return estimator.predict(X)
 
 
+def complexity(fitted, kind: str) -> float:
+    """Realized complexity of a FITTED model (metis#19) — the select rule's parsimony axis.
+
+    Measured on the fitted object, not predicted from hyperparameters: trees prune and
+    regularization sparsifies, so realized structure is the capacity (cost-complexity
+    pruning penalizes realized leaf count |T|; `2^max_depth` overstates).
+    - rf → MEAN leaves per tree (mean, not total, so it's n_estimators-neutral per
+      Breiman's LLN — more trees reduce variance, not overfitting-capacity).
+    - logreg → coefficient count (L2 zeroes nothing → all non-zero = feature count).
+    """
+    if kind == "rf":
+        leaves = [t.tree_.n_leaves for t in fitted.estimators_]
+        return float(sum(leaves) / len(leaves))
+    if kind == "logreg":
+        return float(fitted.coef_.size)
+    raise ValueError(f"complexity: unknown model kind {kind!r}; want one of {sorted(MODELS)}")
+
+
 def fold_score(X, y, folds, fold_idx: int, kind: str, seed: int, params: dict | None = None) -> float:
     """Validation accuracy for ONE fold (pure, deterministic) — metis#18 M1a.
 

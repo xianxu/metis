@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 from sklearn.datasets import make_classification
 
-from metis.model import cv_score, make_model, parse_model_config, predict, train
+from metis.model import complexity, cv_score, make_model, parse_model_config, predict, train
 from metis.split import cv_folds
 
 
@@ -75,6 +75,34 @@ def test_parse_model_config():
     for bad in ({"a": 1, "b": 2}, 123, {}, None, ["logreg"]):
         with pytest.raises(ValueError):
             parse_model_config(bad)
+
+
+def test_complexity_rf_mean_leaves():
+    """rf complexity = MEAN leaves per tree (metis#19) — the realized capacity, and
+    n_estimators-neutral (mean, not total, per Breiman's LLN)."""
+    X, y = _separable()
+    m = train(X, y, "rf", seed=42, params={"n_estimators": 10, "max_depth": 4})
+    expected = float(np.mean([t.tree_.n_leaves for t in m.estimators_]))
+    assert complexity(m, "rf") == expected
+    # n_estimators-neutral: 10 vs 50 trees on the same data → ~equal mean leaves.
+    m10 = train(X, y, "rf", seed=42, params={"n_estimators": 10, "max_depth": 4})
+    m50 = train(X, y, "rf", seed=42, params={"n_estimators": 50, "max_depth": 4})
+    assert abs(complexity(m10, "rf") - complexity(m50, "rf")) < 1.0
+
+
+def test_complexity_logreg_is_coef_count():
+    """logreg complexity = coefficient count (L2 zeroes nothing → = feature count)."""
+    X, y = _separable()
+    m = train(X, y, "logreg", seed=42)
+    assert complexity(m, "logreg") == float(m.coef_.size)
+    assert complexity(m, "logreg") == 4.0  # _separable has 4 features
+
+
+def test_complexity_unknown_raises():
+    X, y = _separable()
+    m = train(X, y, "rf", seed=0)
+    with pytest.raises(ValueError, match="unknown model kind"):
+        complexity(m, "svm")
 
 
 def test_cv_score_reasonable_and_deterministic():
