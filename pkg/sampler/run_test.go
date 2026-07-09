@@ -3,6 +3,7 @@ package sampler
 import (
 	"testing"
 
+	"github.com/xianxu/metis/pkg/experiment"
 	"github.com/xianxu/metis/pkg/shape"
 )
 
@@ -66,10 +67,12 @@ func TestRun_DrivesAskTellDone(t *testing.T) {
 	}
 }
 
-// configPoint builds a fake config-point identified by its model free-param.
+// configPoint builds a fake config-point identified by its model free-param — a TAGGED
+// sum bundle `{model: {}}` in With (what shape.Expand emits for `model: {$any: {...}}`),
+// so familyOf reads it as the "train.model=<model>" family.
 func configPoint(model string) shape.Point {
 	return shape.Point{
-		With:       map[string]map[string]any{"train": {"model": model}},
+		With:       map[string]map[string]any{"train": {"model": map[string]any{model: map[string]any{}}}},
 		FreeParams: []shape.FreeParam{{Path: "train.model", Value: model}},
 	}
 }
@@ -81,7 +84,7 @@ func configPoint(model string) shape.Point {
 func TestRun_NestedComposition(t *testing.T) {
 	ctx := Ctx{Seed: 42, Partition: "part-abc"}
 	cfgRF, cfgLR := configPoint("rf"), configPoint("logreg")
-	sweeper := GridConfigs{Points: []shape.Point{cfgRF, cfgLR}, Direction: "maximize", Select: "argmax-mean"}
+	sweeper := GridConfigs{Points: []shape.Point{cfgRF, cfgLR}, Direction: "maximize", Select: experiment.Select{ArgmaxMean: &experiment.ArgmaxMean{}}}
 
 	scoreOf := func(p shape.Point) float64 {
 		if p.FreeParams[0].Value == "rf" {
@@ -93,10 +96,11 @@ func TestRun_NestedComposition(t *testing.T) {
 	sweeperRun := func(p shape.Point) MeanSE {
 		return Run(ctx, FixedKFolds{K: 3}, func(FoldPoint) FoldOutcome { return FoldOutcome{Score: scoreOf(p)} })
 	}
-	// driver's runPoint = run the whole sweeper.
-	driverRun := func(SinglePoint) Winner { return Run(ctx, sweeper, sweeperRun) }
+	// driver's runPoint = run the whole sweeper (R = SweepResult).
+	driverRun := func(SinglePoint) SweepResult { return Run(ctx, sweeper, sweeperRun) }
 
-	winner := Run(ctx, SingleDriver{}, driverRun)
+	res := Run(ctx, SingleDriver{}, driverRun)
+	winner := res.Ship // the cross-family ship pick: rf (0.85) beats logreg (0.75)
 
 	if got := winner.Point.FreeParams[0].Value; got != "rf" {
 		t.Fatalf("winner model = %v, want rf", got)
@@ -109,6 +113,9 @@ func TestRun_NestedComposition(t *testing.T) {
 	}
 	if winner.Seed != 42 {
 		t.Errorf("winner seed = %d, want 42", winner.Seed)
+	}
+	if len(res.PerFamily) != 2 {
+		t.Errorf("per-family count = %d, want 2 (rf|logreg)", len(res.PerFamily))
 	}
 	wantKeys := []string{"part-abc#fold0", "part-abc#fold1", "part-abc#fold2"}
 	if len(winner.FoldKeys) != 3 {
