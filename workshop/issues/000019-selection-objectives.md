@@ -307,3 +307,29 @@ tasks, grounded in code recon; passed a fresh-eyes plan review). Two review boun
   plumbed; reduction+selection ripples); **`train.complexity` naming is convention** (schema dropped);
   emission refactors the scoring path to expose the discarded fitted estimator; logreg-vs-rf
   feature-neutrality asymmetry stated. Remaining items are plan-level (M1/M2 sizing around the ripple).
+### 2026-07-09 (M2 built — measured complexity + VERIFIED acceptance)
+M2 landed TDD (Tasks 9–14): `metis.model.complexity` (rf mean leaves/tree via `fold_fit` — one
+fit feeds score+complexity; logreg coef count); `train` emits `complexity` per fold; `runPipelineFold`
+threads it (`FoldOutcome{Score,Complexity,HasComplexity}`); `AggregateView` means every metric column;
+`metis ledger select --rule R` applies the pure `SelectConfigs` OFFLINE (2nd consumer — reuses
+exported `sampler.FamilyOf` by matching each aggregate row to its Expanded Point, so both surfaces key
+families identically `train.model=rf`); `GuardComplexity` (parsimony rule + any swept family lacking
+complexity → hard error) wired into both surfaces.
+
+**VERIFIED acceptance (real 891-row Titanic, re-fit over the warm `.metis-cache` — get-data/adapt/features
+HIT, no creds; 210 train folds re-fit; sweep_sha `4b90538`). Per-rule ship pick over the SAME ledger:**
+
+| rule | ship pick | mean | complexity |
+|---|---|---|---|
+| argmax-mean | rf **md=8** n=500 [title,family,age] | 0.8440 | **cx 66.3** (the overfitter → public 0.770) |
+| one-std-err | rf md=8 (same) | 0.8440 | cx 66.3 |
+| **pct-loss** | rf **md=4** n=200 **[all 6 features]** | 0.8339 | **cx 14.6** (→ public 0.782) |
+| mean-std | rf md=8 (variance penalty insufficient) | 0.8440 | cx 66.3 |
+
+**pct-loss recovered rf md=4 (shallower than argmax-mean's md=8) — and it's the 6-FEATURE config, NOT
+the sparse nfeat=1 corner** (the v1 failure): measured rf complexity is ~feature-independent (leaf count,
+not feature count), so the 2%-band + min-complexity + mean-tie-break lands on the higher-CV 6-feature
+md=4. **No ε-tuning needed** (ε=0.10 held). The 4.5× complexity ratio (66.3 vs 14.6 leaves) is the real
+overfitting-capacity signal; `one-std-err` empirically confirms the "1-SE band too tight" finding (md=4
+at 0.8339 is 2×SE below best → outside the floor → md=8). Reported, not asserted — verified over the
+cached ledger via `metis ledger select`. RUNBOOK de-staled to v2 (kbench 14b6334).

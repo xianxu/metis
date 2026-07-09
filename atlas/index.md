@@ -71,10 +71,18 @@ identical on a non-Kaggle platform?* — if yes, it lives here.
   scores for free). **The select rule (metis#19)** is a pure `SelectConfigs` (`select.go`) that
   `GridConfigs.Done` calls: `objective.select` is a tagged union (`argmax-mean|one-std-err|pct-loss|mean-std`,
   mirroring the `driver` union); it groups configs by **model family** (the tagged-sum `$any`-map branch, read
-  off `Point.With` bundling via `familyOf`), within a family applies a band (SE/%/none) then **minimizes
-  measured complexity** (ε-binned) tie-broken by mean, and picks the cross-family ship by argmax-mean over the
-  per-family winners → `SweepResult{PerFamily, Ship}`. Complexity is **measured on the fitted model** (M2 —
-  each model class reports realized leaves/coef-count, emitted per fold). `Winner` carries the **resolved
+  off `Point.With` bundling via the exported `FamilyOf`), within a family applies a band (SE/%/none) then
+  **minimizes measured complexity** (ε-binned, `complexityBinRelTol`) tie-broken by mean, and picks the
+  cross-family ship by argmax-mean over the per-family winners → `SweepResult{PerFamily, Ship}`. Complexity is
+  **measured on the fitted model** (M2): each model class's `metis.model.complexity(fitted, kind)` reports
+  realized capacity — rf **mean** leaves/tree (n_estimators-neutral per Breiman's LLN), logreg coef count
+  (= feature count) — emitted per fold by `train` (`fold_fit` fits once for both score + complexity),
+  reduced by `Aggregate`. **`GuardComplexity`** rejects a parsimony rule when any swept family lacks measured
+  complexity (post-fold, pre-selection — a silently-dropped axis → a quietly-wrong winner). `SelectConfigs`
+  has **two consumers** (ARCH-DRY): the in-memory `GridConfigs.Done` (the shipped `Winner`) and the offline
+  **`metis ledger select --rule R`** (`select_cmd.go` — re-selects over the cached ledger with no re-run,
+  matching each aggregate row to its Expanded `Point` so `FamilyOf` keys families identically). The real
+  acceptance: `pct-loss` recovers rf md=4 (cx ~15) over argmax-mean's md=8 (cx ~66) on the 891-row Titanic. `Winner` carries the **resolved
   config `Point`** (its per-step `With` + free-params) + its `Family` as reconstructable run-keys → ship/promote
   rebuild the exact run DIRECTLY, not by re-expanding the grid. The **driver** is `cmd/metis`: `metis run` on an experiment-shape
   drives the real three-level loop (`runShapeSweep`: `Run(SingleDriver) ⊃ Run(GridConfigs) ⊃
