@@ -1,12 +1,13 @@
 ---
 id: 000019
-status: working
+status: codecomplete
 deps: []
 github_issue:
 created: 2026-07-07
-updated: 2026-07-08
+updated: 2026-07-09
 estimate_hours: 3.7
 started: 2026-07-08T12:01:41-07:00
+actual_hours: 6.20
 ---
 
 # selection objectives — 1-SE rule + mean-std (configurable sweeper select rule, not raw cv-max)
@@ -312,6 +313,7 @@ tasks, grounded in code recon; passed a fresh-eyes plan review). Two review boun
   emission refactors the scoring path to expose the discarded fitted estimator; logreg-vs-rf
   feature-neutrality asymmetry stated. Remaining items are plan-level (M1/M2 sizing around the ripple).
 ### 2026-07-09 (M2 built — measured complexity + VERIFIED acceptance)
+- 2026-07-09: closed — Issue done: both milestones shipped (M1 select machinery + M2 measured complexity), both Review-Verdict:FIX-THEN-SHIP with fixes applied. go test ./... + go vet green (9 pkgs), pytest 46 + kbench 36. Independently verified acceptance over real Titanic ledger: pct-loss ships rf md=4/6-feat (public 0.782) over argmax-mean md=8 (public 0.770) — the differentiator works. Project row ticked in brain repo (cross-repo; --no-project). est 3.7h/actual 6.20h.; review verdict: SHIP
 - 2026-07-09: closed M2 — M2 DONE + independently verified: go test ./... + go vet ./... green (9 pkgs), uv run pytest 46 + kbench 36 passed. INDEPENDENTLY re-ran acceptance offline via metis ledger select over the real 891-row Titanic ledger (sweep 4b90538): pct-loss ships rf md=4/all-6-features (cx 14.6 -> public 0.782) vs argmax-mean md=8/3-feat (cx 66.3 -> public 0.770) — recovers shallower regime, NOT sparse nfeat=1 corner; one-std-err confirms band-too-tight. Measured complexity (rf mean leaves, logreg coef count) per-fold+cached+reduced; guard hard-errors on parsimony+unmodeled family; SelectConfigs reused by in-memory ship + offline ledger w/ identical path-qualified family keys. Project file updated in brain repo (separate; cross-repo). est 3.7h/actual 6.20h (over: estimate assumed design pre-settled; this session did full design + 2 spec reviews + literature + plan + review).; review verdict: FIX-THEN-SHIP
 - 2026-07-09: M2 FIX-THEN-SHIP applied (0 Critical, 1 Important): the Spec/Plan promised `promote --family` but the offline family-grouped surface shipped as the new `metis ledger select` command instead (purpose met — the acceptance runs over it; `promote` keeps raw `--best`/`--point`). Reconciled: Spec Done-when item note + plan `## Revisions` recording the substitution + atlas/experiment.md now documents `ledger select`. Deferred minor (in lessons + plan Revisions): offline `ledger select` over a >1-`sweep_sha` ledger misdiagnoses the guard error → wants a "multiple cohorts, scope with --sweep" warning (follow-up). Whole module still green.
 M2 landed TDD (Tasks 9–14): `metis.model.complexity` (rf mean leaves/tree via `fold_fit` — one
