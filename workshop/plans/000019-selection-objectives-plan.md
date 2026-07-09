@@ -79,7 +79,7 @@
 
 **Files:**
 - Modify: `pkg/experiment/shape.go:54-58` (`Objective`), `:63-76` (mirror `Driver`), `:140-142` (validation)
-- Test: `pkg/experiment/shape_test.go`
+- Test/migrate: `pkg/experiment/shape_test.go` — the struct change also forces: the in-source fixture `validShapeV2:43` (`select: argmax-mean` scalar → `select: {argmax-mean: {}}`), the string assertion `:67-68`, and the `"unsupported select"` mutator `:113` (sets `Select = "one-std-err"` — now a *valid* rule, so the assignment won't compile *and* the negative test is obsolete → replace with a zero-branch/two-branch invalid case).
 
 - [ ] **Step 1 — Write failing tests** in `shape_test.go`: (a) a shape with `select: {pct-loss: {tolerance: 0.02}}` parses + validates; (b) `select: {}` (zero branches) → error "exactly one"; (c) `select: {pct-loss: {tolerance: 0.02}, argmax-mean: {}}` (two branches) → error; (d) `select: {pct-loss: {tolerance: 0}}` → error (tolerance must be > 0). Use `ParseShape` + `ValidateShape` on inline YAML (follow the existing `shape_test.go` idiom).
 
@@ -149,7 +149,7 @@ objective: {
 - Modify `kbench` (`/Users/xianxu/workspace/kbench/competition/titanic/pipelines/`): `titanic-sweep.md:51` (+ prose 79-82), `titanic-sweep-smoke.md:44` (+ prose 57-58)
 
 - [ ] **Step 1** — `titanic-baseline-shape.md:34`: `select: argmax-mean` → `select: {argmax-mean: {}}` (keep this fixture on argmax-mean — it exercises the M1a-compatible path).
-- [ ] **Step 2** — `titanic-sweep.md:51`: `select: argmax-mean` → `select: {pct-loss: {tolerance: 0.02}}` (the canonical rule); update prose 79-82 to describe pct-loss + the two-level select.
+- [ ] **Step 2** — `titanic-sweep.md:51`: `select: argmax-mean` → `select: {pct-loss: {tolerance: 0.02}}` (the canonical rule); update the prose `argmax-mean` mentions at `:62` and `:79-82` to describe pct-loss + the two-level select.
 - [ ] **Step 3** — `titanic-sweep-smoke.md:44`: → `select: {pct-loss: {tolerance: 0.02}}`; update prose 57-58.
 - [ ] **Step 4 — Run** `go test ./pkg/experiment/ -run Conform -v` → PASS (fixture now conforms). Commit: `#19 M1: migrate shapes to select union`.
 
@@ -158,7 +158,9 @@ objective: {
 **Files:**
 - Modify `pkg/sampler/aggregate.go` (`FoldScore:10-13`, `MeanSE:19-23`, `Aggregate:30-53`)
 - Create/modify `pkg/sampler/folds.go` (`FoldOutcome`; `Tell:50-53`, `Done:56`, instantiation `:58`)
-- Test: `pkg/sampler/aggregate_test.go`, `pkg/sampler/folds_test.go`
+- Test: `pkg/sampler/aggregate_test.go`, `pkg/sampler/folds_test.go` (`:30,39,55,59` bare-float sites), **`pkg/sampler/run_test.go`** (`:94` `func(FoldPoint) float64` — the internal composition proof; a generic `O`-param change is a *signature* change that breaks whole-package compilation, so this MUST migrate here or `go test ./pkg/sampler/` stays red)
+
+> **Module-red window (T4→T7):** widening the fold `O` type breaks `cmd/metis/sweep.go:124` (`func(f FoldPoint) float64`) and the driver chain; `go build ./...` is intentionally **red from Task 4 through Task 7**, restored green at Task 7 Step 4. Within `pkg/sampler` itself, each task keeps the *package* green by migrating its own test files (below).
 
 - [ ] **Step 1 — Failing test** in `aggregate_test.go`: `TestAggregate_Complexity` — feed `[]FoldScore{{Addr:"a",Score:0.8,Complexity:16},{Addr:"b",Score:0.9,Complexity:14}}` → `MeanSE{Mean:0.85, MeanComplexity:15, HasComplexity:true, …}`. Also assert an all-`Complexity:0` input still gives a valid `MeanSE` with `MeanComplexity:0`.
 - [ ] **Step 2 — Run, fail:** `go test ./pkg/sampler/ -run TestAggregate_Complexity -v`.
@@ -167,7 +169,7 @@ objective: {
   - `MeanSE{Mean, SE, MeanComplexity float64; HasComplexity bool; ToldSet []string}`.
   - `Aggregate` also means `Complexity` across folds (same n); set `HasComplexity` true when computed.
   - `FoldOutcome{Score, Complexity float64}` in folds.go; `FixedKFolds.Tell(s, p, out FoldOutcome)` → `FoldScore{Addr:p.Addr(), Score:out.Score, Complexity:out.Complexity}`; instantiation `var _ Sampler[foldState, FoldPoint, FoldOutcome, MeanSE] = FixedKFolds{}`.
-- [ ] **Step 4 — Fix `folds_test.go`** (`:31,39,55,59` pass a bare `0.5`/`func(fp) float64`): change to `FoldOutcome{Score:0.5}` and `func(fp FoldPoint) FoldOutcome`. Run `go test ./pkg/sampler/ -v` → PASS.
+- [ ] **Step 4 — Fix the internal test call sites so the *package* stays green.** `folds_test.go` (`:30,39,55,59` pass a bare `0.5`/`func(fp) float64`) → `FoldOutcome{Score:0.5}` and `func(fp FoldPoint) FoldOutcome`. `run_test.go:94` (`func(FoldPoint) float64`) → `func(FoldPoint) FoldOutcome`. Run `go test ./pkg/sampler/ -v` → PASS. (`go build ./...` remains red — the sweep.go closure lands in Task 7; that's the flagged window.)
 - [ ] **Step 5 — Commit:** `#19 M1: widen fold output to {score, complexity}`.
 
 ### Task 5: The pure select rule (`SelectConfigs` + `familyOf`)
@@ -177,7 +179,7 @@ objective: {
 - [ ] **Step 1 — Failing tests** in `select_test.go` (hand-built `[]ConfigStat`, no IO):
   - `TestSelect_ArgmaxMean` — highest `Mean` wins; `Ship`==that config; `PerFamily` has one entry per family with each family's argmax-mean.
   - `TestSelect_PctLoss_TieBreaksToMean` — **the corner regression**: family `rf` with configs `{depth4,feat6: mean .834, cx 16}`, `{depth4,feat1: mean .827, cx 16}`, `{depth8,feat3: mean .844, cx 40}`, tolerance 0.02. Assert the winner is `{depth4,feat6}` (band floor .827 admits depth4s; both depth4s have cx 16 → tie on complexity → **mean tie-break picks feat6**), NOT the sparse `feat1` and NOT the deep `depth8`.
-  - `TestSelect_PctLoss_BinnedComplexity` — same but `feat1` cx 15, `feat6` cx 16 (within ε) → still ties → feat6 wins; and `feat1` cx 10 (outside ε) → feat1 wins (documents the ε boundary).
+  - `TestSelect_PctLoss_BinnedComplexity` — with ε=0.10: `feat1` cx 15, `feat6` cx 16 (16 ≤ 15·1.10=16.5 → within ε) → tie → feat6 wins; then `feat1` cx 10 (16 > 10·1.10=11 → outside ε) → feat1 wins. (Documents the ε boundary; the arithmetic must match the pinned constant.)
   - `TestSelect_OneStdErr_BandTooTight` — SE .005 band excludes a config .006 below best → not selected (documents 1-SE tightness).
   - `TestSelect_MeanStd_UsesStd_NotComplexity` — `mean − λ·std` argmax; complexity ignored.
   - `TestSelect_CrossFamily_ArgmaxMean` — two families; `Ship` = argmax-mean over the two per-family winners.
@@ -198,9 +200,10 @@ import (
 
 // complexityBinRelTol: two complexities within this relative tolerance are "equally
 // simple" (the same band idea pct-loss applies to the score) — so the mean tie-break
-// can recover a higher-CV config whose realized complexity is ~equal. Plan-pinned;
+// can recover a higher-CV config whose realized complexity is ~equal. 0.10 absorbs a
+// small integer leaf-count difference (e.g. 15 vs 16 leaves = 6.7% ties). Plan-pinned;
 // tuned in the M2 acceptance (Done-when). metis#19.
-const complexityBinRelTol = 0.05
+const complexityBinRelTol = 0.10
 
 type ConfigStat struct {
 	FreeParams     []shape.FreeParam
@@ -234,14 +237,15 @@ func SelectConfigs(rule experiment.Select, direction string, stats []ConfigStat)
 }
 ```
 
-  `familyOf(p shape.Point, sweptTagPaths []string) string` — for each swept tagged-sum path (e.g. `train.model`), read `p.With[step][key]` (a single-key map `{label: sub}`), take the sole key; join `path=label` pairs sorted → the family key. (M1: derive `sweptTagPaths` from the stats' `FreeParams` — a path whose `Value` is a string AND whose `Point.With` at that path is a single-key map. Note the alternative — enrich `shape.Expand` to emit discriminants — as a candidate the reviewer raised; M1 uses the `With` read.)
+  `familyOf(p shape.Point, sweptTagPaths []string) string` — for each swept tagged-sum path (e.g. `train.model`), read `p.With[step][key]` (a single-key map `{label: sub}`), take the sole key; join `path=label` pairs sorted → the family key. (M1: derive `sweptTagPaths` from the stats' `FreeParams` — a path whose `Value` is a string AND whose `Point.With` at that path is a single-key map. Note the alternative — enrich `shape.Expand` to emit discriminants — as a candidate the reviewer raised; M1 uses the `With` read. `familyOf` reads a **2-level** `With[step][key]` — sufficient for `train.model`; a deeper-nested tagged sum is out of M1 scope, worth a one-line limitation comment.)
+  **Band semantics:** `pct-loss.tolerance` is a **relative fraction** of the family-best mean — for `maximize`, floor = `best·(1−tolerance)` (0.02 = 2%); `one-std-err` floor = `best − 1·SE`. (Symmetric for `minimize`.)
 
 - [ ] **Step 4 — Run, verify pass** (`go test ./pkg/sampler/ -run TestSelect -v`). The corner regression (`TestSelect_PctLoss_TieBreaksToMean`) is the load-bearing one.
 - [ ] **Step 5 — Commit:** `#19 M1: pure SelectConfigs rule + familyOf (group-by-family, band, ε-binned parsimony)`.
 
 ### Task 6: `GridConfigs` consumes the rule; `Done`→`SweepResult`; `Winner`+family
 
-**Files:** Modify `pkg/sampler/winner.go:11-16`, `pkg/sampler/configs.go:14-18,50-67,79`, `pkg/sampler/configs_test.go`.
+**Files:** Modify `pkg/sampler/winner.go:11-16`, `pkg/sampler/configs.go:14-18,50-67,79`, `pkg/sampler/configs_test.go`, **`pkg/sampler/run_test.go`** (`:84` `GridConfigs{… Select:"argmax-mean"}` → the struct + `:97` `func(SinglePoint) Winner` → `SweepResult` prep — the driver-facing half lands in Task 7).
 
 - [ ] **Step 1 — Failing test** in `configs_test.go`: reshape `TestGridConfigs_*` to expect `Done` returning `SweepResult` (`.Ship` is the old single-winner assertion; add a `.PerFamily` size check). Add `TestGridConfigs_PerFamily` driving `Run` with two families of fake `MeanSE`.
 - [ ] **Step 2 — Run, fail.**
@@ -254,7 +258,7 @@ func SelectConfigs(rule experiment.Select, direction string, stats []ConfigStat)
 
 ### Task 7: Thread `SweepResult` through the driver + sweep.go
 
-**Files:** Modify `pkg/sampler/driver.go` (`SingleDriver` O/R type), `cmd/metis/sweep.go:119-128` (nested Run), `:165-181` (`shipWinner`), `:324-333` (`reportWinner`), `:40-46`/`:51-54` if needed.
+**Files:** Modify `pkg/sampler/driver.go` (`SingleDriver` O/R type), `pkg/sampler/sampler.go:33` (stale doc comment "R=Winner is the driver's O" → `SweepResult`), **`pkg/sampler/run_test.go`** (`:99` `Run(ctx, SingleDriver{}, driverRun)` + `:101-121` `winner.Point/.Score` → `res.Ship.Point/.Score`), `pkg/sampler/driver_test.go`, `cmd/metis/sweep.go:119-128` (nested Run), `:165-181` (`shipWinner`), `:324-333` (`reportWinner`), `:40-46`/`:51-54` if needed.
 
 - [ ] **Step 1** — `SingleDriver`: `Sampler[driverState, SinglePoint, SweepResult, SweepResult]` (pass-through); update `driver.go` Tell/Done + instantiation + `driver_test.go`.
 - [ ] **Step 2** — `sweep.go:119-128`: the outer `sampler.Run(...SingleDriver...)` now yields `SweepResult`; the middle `GridConfigs{... Select: sh.Sweeper.Objective.Select}` (struct, not string). Bind `res := sampler.Run(...)`.
@@ -321,7 +325,7 @@ def complexity(fitted, kind: str) -> float:
 - [ ] **Step 1 — Failing tests:** `pkg/ledger/ledger_test.go` — `AggregateView` over rows carrying `train.fold_score` AND `train.complexity` emits both the score `(mean, se, n)` and a `train.complexity` mean column. `cmd/metis` — `metis ledger select --shape <sweep> --rule pct-loss` over a small fixture ledger prints the per-family winners + ship pick, applying `sampler.SelectConfigs` (DRY reuse).
 - [ ] **Step 2 — Implement:**
   - `AggregateView(l, metric)` → also mean the complexity metric if present (or generalize to aggregate ALL metric columns — smaller, more general: mean every `metric.*` column, keep `.se`/`.n` for the objective metric). Prefer the general form.
-  - Build `[]sampler.ConfigStat` from the aggregated rows (`FreeParams` → `Point`? — reconstruct enough for `familyOf`; the family label is in `fp.train.model`), call `sampler.SelectConfigs`.
+  - Build `[]sampler.ConfigStat` from the aggregated rows: set `Family` **directly from the ledger `fp.train.model` value** (which is literally `"rf"`/`"logreg"` — `shape.go:176-177` records the `$any`-map label as `FreeParam.Value`), NOT by reconstructing a `Point` and calling `familyOf`. Then call `sampler.SelectConfigs`. (Expose a small `SelectConfigs` entry that takes pre-built `[]ConfigStat`, so the offline path supplies `Family` directly — the in-memory path uses `familyOf`; both converge on `SelectConfigs`.)
   - `metis ledger select` command (new): reads shape + ledger, prints the two-level result. `promote --family <name>` promotes that family's robust winner (reuse the same rule).
 - [ ] **Step 3 — Run, pass.** Commit: `#19 M2: ledger complexity column + offline family select (reuses SelectConfigs)`.
 
@@ -340,7 +344,7 @@ def complexity(fitted, kind: str) -> float:
 - [ ] **Step 1 — Re-fit with complexity:** re-run `metis run titanic-sweep.md` over the warm data cache (get-data HITs; models re-fit cheaply, no creds) so the ledger now carries `train.complexity`. (If the cache invalidates on the train-step code change, that's expected — it re-fits the 42 configs × 5 folds locally; still no creds.)
 - [ ] **Step 2 — Run each rule offline:** `metis ledger select --shape titanic-sweep.md --rule argmax-mean|one-std-err|pct-loss|mean-std` → a **per-rule table** of the selected config (family, depth, features, mean, complexity). **Record the actual picks.**
 - [ ] **Step 3 — Verify the claim:** confirm `pct-loss` selects a **shallower rf config than argmax-mean's md=8**. Report which config (incl. feature count). **If** the pick is the sparse corner (nfeat=1) rather than the higher-CV config, tune `complexityBinRelTol` (Task 5) or document the outcome + choose a fallback — do NOT assert recovery that didn't happen (ARCH-PURPOSE; the v1 corner lesson).
-- [ ] **Step 4 — Fix the RUNBOOK:** `kbench .../RUNBOOK-sweep.md:37` `--sort train.cv_score` → the `metis ledger select`/`--sort train.fold_score` v2 form; sweep the v1-era `cv_score`/`cv-split` refs (`:31,32,39,49,81`). Commit (kbench): `#19 M2: RUNBOOK v2 — fold_score + select rule`.
+- [ ] **Step 4 — Fix the RUNBOOK:** `kbench .../RUNBOOK-sweep.md:37` `--sort train.cv_score` → the `metis ledger select`/`--sort train.fold_score` v2 form; sweep the v1-era `cv_score`/`cv-split` refs (`:30` cv-split, `:32,39,49,81` cv_score). Commit (kbench): `#19 M2: RUNBOOK v2 — fold_score + select rule`.
 - [ ] **Step 5 — Log** the per-rule table + the verified pick in the issue `## Log`.
 
 ### Task 15: Close
