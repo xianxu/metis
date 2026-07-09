@@ -49,6 +49,7 @@ func (f foldFakeExec) Execute(step experiment.Step, runDir string) (experiment.S
 	metrics := map[string]float64{}
 	if step.ID == "train" {
 		metrics["fold_score"] = fakeTrainScore(step.With)
+		metrics["complexity"] = fakeTrainComplexity(step.With)
 	}
 	return experiment.StepResult{Metrics: metrics, Artifacts: []string{art}}, nil
 }
@@ -65,6 +66,14 @@ func fakeTrainScore(with map[string]any) float64 {
 		}
 	}
 	return base + float64(idx)*0.02
+}
+
+// fakeTrainComplexity is a deterministic per-model realized-complexity (metis#19): a
+// fixed value per model, fold-independent (like a tree's realized leaves), so a config's
+// MeanComplexity is stable across folds. Distinct from fakeTrainScore so the tests can tell
+// the two metrics apart.
+func fakeTrainComplexity(with map[string]any) float64 {
+	return map[string]float64{"a": 10, "b": 20, "c": 30}[fmt.Sprint(with["model"])]
 }
 
 // foldShapeMD is a valid metis#18 phase shape: data(get-data,adapt) │ pipeline(features,
@@ -211,6 +220,34 @@ func TestShapeSweep_NestedLoopWinnerAndLedger(t *testing.T) {
 	// The leaderboard + winner are reported to the user.
 	if s := out.String(); !strings.Contains(s, "winner") || !strings.Contains(s, "train.model=b") {
 		t.Errorf("sweep should report the winner (model=b); got:\n%s", s)
+	}
+}
+
+// metis#19 M2: a per-fold `complexity` metric threads fold→config (FoldOutcome.Complexity
+// → Aggregate → MeanSE.MeanComplexity) and surfaces on the winner line. Proves runPipelineFold
+// reads the metric and the reducer carries it (M1 wired it as 0).
+func TestShapeSweep_ComplexityThreadsFoldToConfig(t *testing.T) {
+	ws := t.TempDir()
+	expPath := writeShapeFile(t, ws, foldShapeMD("[a, b]"))
+	var out strings.Builder
+	if err := runFoldSweep(t, expPath, false, nil, &out, nil); err != nil {
+		t.Fatalf("shape sweep should run: %v", err)
+	}
+	// The winner (model=b) line reports a non-zero mean complexity (fake emits cx per model).
+	s := out.String()
+	if !strings.Contains(s, "train.model=b") {
+		t.Fatalf("expected winner model=b; got:\n%s", s)
+	}
+	// The winner line ends with "cx <N>"; N must be > 0 (b's fake complexity = 20).
+	if !strings.Contains(s, "cx 20.0") {
+		t.Errorf("winner line should report the threaded complexity cx 20.0 (model=b); got:\n%s", s)
+	}
+	// The raw ledger rows carry the namespaced per-fold complexity.
+	led := loadLedgerOrFatal(t, expPath)
+	for _, r := range led.Rows {
+		if _, ok := r.Metrics["train.complexity"]; !ok {
+			t.Errorf("each per-fold ledger row must carry train.complexity; got %+v", r.Metrics)
+		}
 	}
 }
 

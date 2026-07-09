@@ -26,6 +26,13 @@ const partitionStepID = "cv-split"
 // (mean, SE). (Kept as the bare name here; run.Metrics is the flat merge.)
 const foldMetric = "fold_score"
 
+// foldComplexityMetric is the bare per-fold metric the train step emits alongside
+// fold_score (metis#19): the fitted model's realized complexity (rf mean leaves / logreg
+// coef count). runPipelineFold reads it into FoldOutcome; absent → HasComplexity stays
+// false (the guard for a parsimony rule keys off this). Ledger-namespaced to
+// `<train-step>.complexity`.
+const foldComplexityMetric = "complexity"
+
 // sweepManifest groups the point-runs an experiment-shape invocation produced. Its
 // identity (ShapeRunID) filters the accumulating ledger (metis#8) by invocation /
 // code-version; each PointRun row is a raw (config, fold) run. metis#18: a "point" is now
@@ -223,9 +230,10 @@ func (ss *shapeSweep) runPipelineFold(c shape.Point, f sampler.FoldPoint) sample
 		Status:     run.Status,
 		Metrics:    run.Metrics,
 	})
-	// M1 wires complexity as absent (HasComplexity stays false); metis#19 M2's train step
-	// emits a `complexity` metric that runPipelineFold reads here.
-	return sampler.FoldOutcome{Score: run.Metrics[foldMetric]}
+	// metis#19 M2: read the train step's realized-complexity metric. Present → the parsimony
+	// rules consume it; absent (HasComplexity false) → the guard rejects a parsimony rule.
+	cx, hasCx := run.Metrics[foldComplexityMetric]
+	return sampler.FoldOutcome{Score: run.Metrics[foldMetric], Complexity: cx, HasComplexity: hasCx}
 }
 
 // buildFoldExperiment reconstructs the runnable per-fold experiment for one (config, fold):
