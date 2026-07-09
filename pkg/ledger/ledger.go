@@ -180,20 +180,21 @@ const (
 	nSuffix  = ".n"
 )
 
-// AggregateView reduces the RAW per-fold rows into one per-config (mean, SE) row —
-// grouping by (free-params, sweep-SHA) over the fold coordinate. metis#18: the ledger
-// stores the raw fold rows (so metis#19's 1-standard-error select re-reduces for free),
-// and this is the read-time reduction the leaderboard + `promote --best` sort over.
-// `metric` is the per-fold metric to reduce (e.g. "train.fold_score"); each aggregate row
-// carries `metric` (the mean) + `metric+".se"` (standard error) + `metric+".n"` (fold
-// count). A group with ANY failed fold is marked failed. Rows with no fold coordinate
-// (Fold==nil — a v1 whole-CV row or an already-aggregated row) pass through unchanged, so
-// the view is idempotent. Grouping + ordering are deterministic (first-seen config order).
+// AggregateView reduces the RAW per-fold rows into one per-config row — grouping by
+// (free-params, sweep-SHA) over the fold coordinate. metis#18: the ledger stores the raw
+// fold rows (so metis#19's select re-reduces for free), and this is the read-time reduction
+// the leaderboard + `promote --best` + `ledger select` read over. EVERY metric column is
+// mean-reduced (so metis#19's `train.complexity` reaches the aggregate row for the select
+// rule), but only the objective `metric` also gets `.se` (standard error) + `.n` (fold
+// count) — a mean is the meaningful reduction for a complexity axis; its spread isn't a
+// selection input. A group with ANY failed fold is marked failed. Rows with no fold
+// coordinate (Fold==nil — a v1 whole-CV row or an already-aggregated row) pass through
+// unchanged, so the view is idempotent. Grouping + ordering are deterministic (first-seen).
 func AggregateView(l Ledger, metric string) Ledger {
 	type agg struct {
-		row    Row
-		scores []float64
-		failed bool
+		row      Row
+		byMetric map[string][]float64 // every metric key → its fold values
+		failed   bool
 	}
 	var order []string
 	groups := map[string]*agg{}
@@ -209,15 +210,15 @@ func AggregateView(l Ledger, metric string) Ledger {
 		//   (a \x00 separator would corrupt any consumer that renders PointAddr, e.g. promote).
 		g := groups[key]
 		if g == nil {
-			g = &agg{row: Row{FreeParams: r.FreeParams, SweepSHA: r.SweepSHA, PointAddr: key, Status: "ok"}}
+			g = &agg{row: Row{FreeParams: r.FreeParams, SweepSHA: r.SweepSHA, PointAddr: key, Status: "ok"}, byMetric: map[string][]float64{}}
 			groups[key] = g
 			order = append(order, key)
 		}
 		if r.Status == "failed" {
 			g.failed = true
 		}
-		if v, ok := r.Metrics[metric]; ok {
-			g.scores = append(g.scores, v)
+		for name, v := range r.Metrics {
+			g.byMetric[name] = append(g.byMetric[name], v)
 		}
 	}
 	for _, key := range order {
@@ -226,12 +227,15 @@ func AggregateView(l Ledger, metric string) Ledger {
 		if g.failed {
 			row.Status = "failed"
 		}
-		if n := len(g.scores); n > 0 {
-			mean, se := meanSE(g.scores)
-			row.Metrics = map[string]float64{
-				metric:            mean,
-				metric + seSuffix: se,
-				metric + nSuffix:  float64(n),
+		if len(g.byMetric) > 0 {
+			row.Metrics = map[string]float64{}
+			for name, vals := range g.byMetric {
+				mean, se := meanSE(vals)
+				row.Metrics[name] = mean
+				if name == metric { // .se/.n only for the objective metric
+					row.Metrics[name+seSuffix] = se
+					row.Metrics[name+nSuffix] = float64(len(vals))
+				}
 			}
 		}
 		out.Append(row)

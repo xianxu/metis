@@ -20,8 +20,11 @@ import (
 // — renders the shape's append-only ledger sidecar as a sorted/filtered VIEW (the CSV
 // stays append-order; sorting is never a storage concern).
 func cmdLedger(args []string) error {
+	if len(args) > 0 && args[0] == "select" {
+		return cmdLedgerSelect(args[1:])
+	}
 	if len(args) == 0 || args[0] != "show" {
-		return fmt.Errorf("usage: metis ledger show <shape.md> [--sweep SHA] [--sort metric] [--top N]")
+		return fmt.Errorf("usage: metis ledger (show | select) <shape.md> [flags]")
 	}
 	fs := flag.NewFlagSet("ledger show", flag.ContinueOnError)
 	sweep := fs.String("sweep", "", "filter to one sweep-SHA (code-version)")

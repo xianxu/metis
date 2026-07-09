@@ -53,7 +53,7 @@ func (g GridConfigs) Tell(s configState, p shape.Point, out MeanSE) configState 
 func (g GridConfigs) Done(s configState) SweepResult {
 	stats := make([]ConfigStat, len(s.results))
 	for i, r := range s.results {
-		stats[i] = ConfigStat{Point: r.point, Family: familyOf(r.point), Score: r.meanSE}
+		stats[i] = ConfigStat{Point: r.point, Family: FamilyOf(r.point), Score: r.meanSE}
 	}
 	return SelectConfigs(g.Select, g.Direction, s.seed, stats)
 }

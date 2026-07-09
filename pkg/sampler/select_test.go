@@ -172,7 +172,7 @@ func TestSelect_NoTaggedSum_OneImplicitFamily(t *testing.T) {
 	}
 }
 
-// familyOf reads the tagged-sum branch label off Point.With's single-key-map bundling
+// FamilyOf reads the tagged-sum branch label off Point.With's single-key-map bundling
 // — and must NOT treat a swept UNTAGGED bare-string alternative (whose With value is a
 // bare string, not a map) as a family. This is the exact tagged-vs-untagged
 // disambiguation the spec flagged as hard.
@@ -182,27 +182,27 @@ func TestFamilyOf(t *testing.T) {
 		With:       map[string]map[string]any{"train": {"model": map[string]any{"rf": map[string]any{"max_depth": 8}}}},
 		FreeParams: []shape.FreeParam{{Path: "train.model", Value: "rf"}},
 	}
-	if got := familyOf(tagged); got != "train.model=rf" {
-		t.Errorf("familyOf(tagged) = %q, want train.model=rf", got)
+	if got := FamilyOf(tagged); got != "train.model=rf" {
+		t.Errorf("FamilyOf(tagged) = %q, want train.model=rf", got)
 	}
 	// untagged bare-string alternative ($any: ["a","b"]): With value is a bare string.
 	bareString := shape.Point{
 		With:       map[string]map[string]any{"features": {"features": "a"}},
 		FreeParams: []shape.FreeParam{{Path: "features.features", Value: "a"}},
 	}
-	if got := familyOf(bareString); got != "" {
-		t.Errorf("familyOf(bare-string) = %q, want \"\" (an untagged string alt is NOT a family)", got)
+	if got := FamilyOf(bareString); got != "" {
+		t.Errorf("FamilyOf(bare-string) = %q, want \"\" (an untagged string alt is NOT a family)", got)
 	}
 	// untagged list alternative ($any: [[], [title]]): Value is a list, not a string.
 	list := shape.Point{
 		With:       map[string]map[string]any{"features": {"features": []any{"title"}}},
 		FreeParams: []shape.FreeParam{{Path: "features.features", Value: []any{"title"}}},
 	}
-	if got := familyOf(list); got != "" {
-		t.Errorf("familyOf(list) = %q, want \"\"", got)
+	if got := FamilyOf(list); got != "" {
+		t.Errorf("FamilyOf(list) = %q, want \"\"", got)
 	}
 	// no free params → implicit single family.
-	if got := familyOf(shape.Point{}); got != "" {
-		t.Errorf("familyOf(empty) = %q, want \"\"", got)
+	if got := FamilyOf(shape.Point{}); got != "" {
+		t.Errorf("FamilyOf(empty) = %q, want \"\"", got)
 	}
 }

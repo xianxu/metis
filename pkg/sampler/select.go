@@ -175,16 +175,21 @@ func toWinner(s ConfigStat, seed int) Winner {
 	}
 }
 
-// familyOf reads a Point's model family — the set of tagged-sum ($any-map) branch
+// FamilyOf reads a Point's model family — the set of tagged-sum ($any-map) branch
 // labels — off its resolved `With` bundling. A tagged sum resolves to a single-key map
 // `{label: sub}` at its step.key path (shape.Expand), so a FreeParam whose Value is the
 // sole key of that map is a family discriminant. An untagged bare-string alternative
 // (`$any: ["a","b"]`) has a bare string in `With`, not a map → NOT a family; a list/range
 // alternative has a non-string Value → skipped. Empty = one implicit family.
 //
+// EXPORTED so BOTH selection surfaces derive the SAME family key: the in-memory
+// GridConfigs.Done and the offline `metis ledger select` path (which matches an aggregate
+// row to its Expanded Point, then calls this) — otherwise the two would key the same config
+// differently and the one-rule-two-surfaces DRY property breaks (metis#19 M1-review).
+//
 // M1 reads a 2-level `With[step][key]` — sufficient for the swept `train.model`; a
 // deeper-nested tagged sum is out of scope.
-func familyOf(p shape.Point) string {
+func FamilyOf(p shape.Point) string {
 	var parts []string
 	for _, fp := range p.FreeParams {
 		label, ok := fp.Value.(string)

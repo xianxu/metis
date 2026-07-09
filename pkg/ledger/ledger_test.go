@@ -185,6 +185,38 @@ func foldRow(sha, addr string, fp map[string]any, fold int, score float64, statu
 		Metrics: map[string]float64{"train.fold_score": score}, Status: status}
 }
 
+// metis#19: AggregateView means EVERY metric column (so train.complexity flows to the
+// aggregate rows for the select rule), keeping .se/.n only for the objective metric.
+func TestAggregateView_MeansAllMetrics(t *testing.T) {
+	var l Ledger
+	cfg := map[string]any{"train.model": "rf"}
+	f0, f1 := 0, 1
+	l.Append(
+		Row{SweepSHA: "s", PointAddr: "r0", FreeParams: cfg, Fold: &f0, Status: "ok",
+			Metrics: map[string]float64{"train.fold_score": 0.80, "train.complexity": 16}},
+		Row{SweepSHA: "s", PointAddr: "r1", FreeParams: cfg, Fold: &f1, Status: "ok",
+			Metrics: map[string]float64{"train.fold_score": 0.90, "train.complexity": 18}},
+	)
+	agg := AggregateView(l, "train.fold_score")
+	if len(agg.Rows) != 1 {
+		t.Fatalf("2 fold rows / 1 config → 1 aggregate row, got %d", len(agg.Rows))
+	}
+	m := agg.Rows[0].Metrics
+	if got := m["train.fold_score"]; got < 0.8499 || got > 0.8501 {
+		t.Errorf("objective mean = %v, want ~0.85", got)
+	}
+	if _, ok := m["train.fold_score.se"]; !ok {
+		t.Errorf(".se present only for the objective metric; missing")
+	}
+	if got := m["train.complexity"]; got != 17 { // mean(16,18)
+		t.Errorf("complexity mean = %v, want 17", got)
+	}
+	// a non-objective metric gets NO .se/.n (only its mean is meaningful for selection).
+	if _, ok := m["train.complexity.se"]; ok {
+		t.Errorf("non-objective metric should not carry .se")
+	}
+}
+
 // AggregateView reduces raw per-fold rows → one per-config (mean, SE, n) row, grouping by
 // (free-params, sweep-SHA). The read-time reduction the leaderboard + promote sort over.
 func TestAggregateView_ReducesPerConfig(t *testing.T) {
