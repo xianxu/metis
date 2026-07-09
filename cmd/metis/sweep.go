@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 
 	"github.com/xianxu/metis/pkg/experiment"
@@ -114,14 +115,16 @@ func runShapeSweep(o runOpts, sh experiment.Shape, now func() time.Time, out io.
 
 	// The three-level nested fold — driver ⊃ sweeper ⊃ resample, each the SAME Sampler node
 	// (metis#18). driver:single (SingleDriver) runs the sweeper once on all data and passes
-	// its Winner through; #23's driver:cv is a one-line swap of this outer Sampler. The
-	// sweeper (GridConfigs) grids over configs; the inner FixedKFolds scores each over k folds.
-	winner := sampler.Run(ctx, sampler.SingleDriver{}, func(sampler.SinglePoint) sampler.Winner {
+	// its SweepResult through; #23's driver:cv is a one-line swap of this outer Sampler. The
+	// sweeper (GridConfigs) grids over configs, Done-selecting via the metis#19 rule → a
+	// per-family winner map + the cross-family ship pick; the inner FixedKFolds scores each
+	// config over k folds → (mean, SE, complexity).
+	res := sampler.Run(ctx, sampler.SingleDriver{}, func(sampler.SinglePoint) sampler.SweepResult {
 		return sampler.Run(ctx,
 			sampler.GridConfigs{Points: configPts, Direction: sh.Sweeper.Objective.Direction, Select: sh.Sweeper.Objective.Select},
 			func(c shape.Point) sampler.MeanSE {
 				ms := sampler.Run(ctx, sampler.FixedKFolds{K: k},
-					func(f sampler.FoldPoint) float64 { return ss.runPipelineFold(c, f) })
+					func(f sampler.FoldPoint) sampler.FoldOutcome { return ss.runPipelineFold(c, f) })
 				ss.configs = append(ss.configs, configScore{point: c, meanSE: ms})
 				return ms
 			})
@@ -144,8 +147,8 @@ func runShapeSweep(o runOpts, sh experiment.Shape, now func() time.Time, out io.
 	if err := writeSweepLedger(o.expPath, ss.man); err != nil {
 		return err
 	}
-	ss.reportWinner(winner)
-	return ss.shipWinner(winner)
+	ss.reportWinner(res)
+	return ss.shipWinner(res.Ship)
 }
 
 // shipWinner runs the driver:single ship: reconstruct the winning config's runnable
@@ -185,23 +188,23 @@ func (ss *shapeSweep) shipWinner(w sampler.Winner) error {
 // the shared cached runner, record the manifest row, and return the fold_score the inner
 // resample Sampler folds. A fatal outcome sets ss.err and returns 0 (the pure Run keeps
 // going; runShapeSweep checks ss.err before using the winner).
-func (ss *shapeSweep) runPipelineFold(c shape.Point, f sampler.FoldPoint) float64 {
+func (ss *shapeSweep) runPipelineFold(c shape.Point, f sampler.FoldPoint) sampler.FoldOutcome {
 	if ss.err != nil {
-		return 0
+		return sampler.FoldOutcome{}
 	}
 	// Detect-and-abort: a mid-sweep HEAD-sha change breaks the shape-run's one-code
 	// identity (per-fold records stay correct). Compares the HEAD sha only, not the dirty
 	// flag — the sweep's own writes (runs/, manifest) dirty the tree (see codeID freeze).
 	if _, s, _ := probeRepo(ss.o.git, filepath.Dir(ss.o.expPath)); s != ss.codeID {
 		ss.err = fmt.Errorf("code changed mid-sweep (%s → %s) — re-run to sweep the new revision", ss.codeID, s)
-		return 0
+		return sampler.FoldOutcome{}
 	}
 
 	exp := ss.buildFoldExperiment(c, f)
 	runID, err := pointAddressOf(exp, ss.repoSHAs)
 	if err != nil {
 		ss.err = fmt.Errorf("config %s fold %d: %w", freeParamStr(c), f.Idx, err)
-		return 0
+		return sampler.FoldOutcome{}
 	}
 	pointOpts := ss.o
 	pointOpts.inSweep = true // metis#14: the sweep captures once (captureSweepCode), not per point
@@ -211,7 +214,7 @@ func (ss *shapeSweep) runPipelineFold(c shape.Point, f sampler.FoldPoint) float6
 	// validation never-start, a persistence error) aborts — surfaced, never a half-scored config.
 	if runErr != nil {
 		ss.err = fmt.Errorf("config %s fold %d (%s): %w", freeParamStr(c), f.Idx, runID, runErr)
-		return 0
+		return sampler.FoldOutcome{}
 	}
 	ss.man.Points = append(ss.man.Points, pointRun{
 		RunID:      runID,
@@ -220,7 +223,9 @@ func (ss *shapeSweep) runPipelineFold(c shape.Point, f sampler.FoldPoint) float6
 		Status:     run.Status,
 		Metrics:    run.Metrics,
 	})
-	return run.Metrics[foldMetric]
+	// M1 wires complexity as absent (HasComplexity stays false); metis#19 M2's train step
+	// emits a `complexity` metric that runPipelineFold reads here.
+	return sampler.FoldOutcome{Score: run.Metrics[foldMetric]}
 }
 
 // buildFoldExperiment reconstructs the runnable per-fold experiment for one (config, fold):
@@ -318,18 +323,31 @@ func pointAddressOf(exp experiment.Experiment, repoSHAs map[string]string) (stri
 	return string(h), err
 }
 
-// reportWinner prints the honest per-config (mean, SE) leaderboard (best-first by the
-// objective) + the selected winner — the metis#18 deliverable. Ship (refit + submission) is
-// metis#18 M1a-5; here we report the selection.
-func (ss *shapeSweep) reportWinner(w sampler.Winner) {
+// reportWinner prints the honest per-config (mean, SE, complexity) leaderboard (best-first
+// by the objective), the per-family robust winners (metis#19), and the cross-family ship
+// pick. Ship (refit + submission) is metis#18 M1a-5; here we report the selection.
+func (ss *shapeSweep) reportWinner(res sampler.SweepResult) {
 	fmt.Fprintf(ss.out, "metis: sweep %s done — %d configs scored (manifest %s)\n", ss.sh.ID, len(ss.configs), ss.man.ShapeRunID[:12])
 	best := betterFirst(ss.configs, ss.sh.Sweeper.Objective.Direction)
-	fmt.Fprintln(ss.out, "  config                          mean      SE")
+	fmt.Fprintln(ss.out, "  config                          mean      SE       cx")
 	for _, cs := range best {
-		fmt.Fprintf(ss.out, "  %-30s  %.4f  %.4f\n", freeParamStr(cs.point), cs.meanSE.Mean, cs.meanSE.SE)
+		fmt.Fprintf(ss.out, "  %-30s  %.4f  %.4f  %6.1f\n", freeParamStr(cs.point), cs.meanSE.Mean, cs.meanSE.SE, cs.meanSE.MeanComplexity)
 	}
-	fmt.Fprintf(ss.out, "metis: winner %s — mean %.4f (SE %.4f) over %d folds\n",
-		freeParamStrFromParams(w.Point.FreeParams), w.Score.Mean, w.Score.SE, len(w.FoldKeys))
+	if len(res.PerFamily) > 1 {
+		fams := make([]string, 0, len(res.PerFamily))
+		for fam := range res.PerFamily {
+			fams = append(fams, fam)
+		}
+		sort.Strings(fams)
+		fmt.Fprintln(ss.out, "  per-family winners (metis#19):")
+		for _, fam := range fams {
+			w := res.PerFamily[fam]
+			fmt.Fprintf(ss.out, "    %-22s %-24s  mean %.4f  cx %.1f\n", fam, freeParamStrFromParams(w.Point.FreeParams), w.Score.Mean, w.Score.MeanComplexity)
+		}
+	}
+	w := res.Ship
+	fmt.Fprintf(ss.out, "metis: winner %s — mean %.4f (SE %.4f, cx %.1f) over %d folds\n",
+		freeParamStrFromParams(w.Point.FreeParams), w.Score.Mean, w.Score.SE, w.Score.MeanComplexity, len(w.FoldKeys))
 }
 
 // betterFirst returns the configs sorted best-first by the objective direction (a stable
