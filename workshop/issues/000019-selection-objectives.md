@@ -21,22 +21,23 @@ the **select rule** is the actual lever.
 ## Spec
 
 metis-v2 M2. Empirically forced by the real Titanic acceptance: `argmax-mean` selected the md=8
-overfitter (cv 0.844 → **public 0.770**); the md=4 counterfactual from the SAME cached ledger →
-**public 0.782**. The honest ledger *contained* the better config; greedy selection walked past it.
-#19 fixes the **selection lever** — and the per-step **complexity schema** the robust rules consume
-(the #4 "collocated step manifests" facet, seeded here for the swept steps).
+overfitter (cv 0.844 → **public 0.770**); a shallower md=4 config from the SAME cached ledger →
+**public 0.782**. The honest ledger *contained* the better config; greedy cv-max walked past it.
+#19 fixes the **selection lever** — the rule that decides *which* config ships — plus the one input
+it needs: a **model-reported complexity** so "prefer the simpler near-winner" is grounded in the
+*fitted* model, not guessed from hyperparameters.
 
 ### Two pieces
 
-1. **The select rule** — a configurable policy over the sweeper's per-config `(mean, SE)` (M1a's
-   read-time reduction), replacing the hard-wired `argmax-mean`.
-2. **The complexity schema** it reads — a per-step-type declaration of each knob's
-   overfitting-capacity, so parsimony ("prefer the simpler near-winner") is grounded in step-owned
-   semantics, not a guess.
+1. **The select rule** — a configurable policy over each config's `(mean_score, SE, mean_complexity)`
+   (M1a's read-time reduction, now reducing a complexity metric too), replacing the hard-wired
+   `argmax-mean`.
+2. **Model-reported complexity** — each model class reports its **fitted** model's realized
+   complexity; the model step emits it as a per-fold metric, and the sweeper reduces + consumes it.
 
 ### A. The select rule
 
-**Config surface — a tagged union (mirrors `driver`).** `objective.select` becomes a labeled sum:
+**Config surface — a tagged union that mirrors `driver`.** `objective.select` becomes a labeled sum:
 exactly one branch, its params bound to it (you cannot set `tolerance` on `argmax-mean`, and
 `pct-loss` cannot omit it):
 
@@ -48,124 +49,137 @@ select:
   # mean-std: {lambda: 1.0}     # mean − λ·std re-score
 ```
 
-CUE (closed disjunction → exactly-one, sharp diagnostics); Go (`Select` struct of
-`*ArgmaxMean|*OneStdErr|*PctLoss|*MeanStd` pointers + an "exactly one set" validate check) — both
-mirror the existing `driver` union (ARCH-DRY: same idiom, not a new pattern).
+This mirrors the **existing `driver` union faithfully**: CUE **optional struct fields**
+(`argmax-mean?: {}`, `pct-loss?: {tolerance: float & >0}`, …) with exactly-one enforced **in Go**
+(a `Select` struct of `*ArgmaxMean|*OneStdErr|*PctLoss|*MeanStd` pointers + an "exactly one set"
+count check, identical to `Driver`'s `single|cv`). The param is bound to its branch because it's a
+field of that branch's sub-struct. (Deliberately *not* a CUE closed disjunction — that would be a
+sharper but *different* idiom than driver; ARCH-DRY favors the one already in the file. A later
+consistency pass could lift both to disjunctions together.)
 
 **Required-explicit; `pct-loss` is canonical.** Validation rejects an omitted `select` (the honesty
 gate — every shape states its rule; matches today's behavior). `pct-loss` is the recommended choice
 authors reach for (argmax-mean overfits); `argmax-mean` stays valid but documented as simplistic —
 kept because the acceptance test *needs* it (show argmax-mean picks md=8 while pct-loss picks a
-simpler config over the same ledger).
+shallower config over the same ledger).
 
 **The rules (within-family selection policy):**
-- `argmax-mean` — highest mean (M1a; mean only).
+- `argmax-mean` — highest mean (M1a; mean only; no complexity).
 - `mean-std` — argmax of `mean − λ·std` (penalize fold-to-fold fragility ≈ overfit; uses std, **not**
-  complexity → never triggers the missing-complexity error).
-- `one-std-err` (Breiman) — contention = configs within **1×SE** of the family best; parsimony picks
-  the simplest. **Band too tight here:** SE≈0.005 but the real cv→public gap was 0.074 (**15×** the
-  SE) → md=4 (0.834) sits below the 1-SE floor (0.839). Inherits the over-confident inner-CV SE.
-- `pct-loss` — contention = configs within **tolerance** (%) of the family best; parsimony picks the
-  simplest. Decoupled from SE (~2% floor 0.827 includes md=4). **The rule that actually recovers
-  today's case.**
+  complexity → never needs the complexity metric).
+- `one-std-err` (Breiman) — contention = configs within **1×SE** of the family best; then **minimize
+  measured complexity**, tie-break by mean. **Band too tight here:** SE≈0.005 but the real cv→public
+  gap was 0.074 (**15×** the SE), so the md=4 config sits below the 1-SE floor. Inherits the
+  over-confident inner-CV SE.
+- `pct-loss` — contention = configs within **tolerance** (%) of the family best; then **minimize
+  measured complexity**, tie-break by mean. Decoupled from SE (~2% floor 0.827 includes the md=4
+  config). **The rule expected to recover today's case** (verified empirically — see Done-when).
 
 **Two-level selection (general, not a model special-case):**
-- **Group by family** = the `$any`-map (tagged-sum) branch discriminant, read straight off
-  `shape.FreeParam` (a tagged coord is the branch label whose deeper coords bundle under
-  `path.label.*`). In `titanic-sweep` the only tagged sum is `train.model` → families `logreg`/`rf`;
-  a shape with no tagged sum is one implicit family.
-- **Within a family** — the `select` rule chooses that family's winner: band (SE / % / none) sets the
-  contention set; **parsimony** picks within it — **Pareto per complexity-axis** (scale-free, so only
-  each axis's monotone *direction* matters), **sum-of-normalized-ranks only to break
-  Pareto-incomparables**.
+- **Group by family** = the `$any`-map (tagged-sum) branch label — the model family. It is recovered
+  from the point's resolved **`With` bundling**: a tagged sum always resolves to a single-key map
+  `{label: sub}` (e.g. `With["train"]["model"] == {"rf": {...}}`), which `shape.Expand` emits
+  unconditionally, even for an empty branch body. (This is the robust signal; `FreeParam` alone can't
+  distinguish a tagged label from an untagged bare-string alternative. The plan may instead enrich
+  `Expand` to emit the discriminants explicitly — decide there.) In `titanic-sweep` the only tagged
+  sum is `train.model` → families `logreg`/`rf`; a shape with no tagged sum is one implicit family.
+- **Within a family** — the `select` rule chooses that family's winner: the band (SE / % / none) sets
+  the contention set; then **minimize the config's one measured-complexity scalar**, tie-break by
+  higher mean, then Expand-order (deterministic). No Pareto, no per-axis anything — one number.
 - **Across families** — **always `argmax-mean` over the (already-robust) per-family winners** for the
-  single ship pick, never a cross-family complexity comparison (no principled currency to compare
-  logreg-C to rf-depth; that's an *estimation* problem → nested-CV #23). This makes `argmax-mean` a
-  true special case: within = argmax-mean, across = argmax-mean ⇒ global argmax-mean (M1a, unchanged).
+  single ship pick, never a cross-family complexity comparison. This is not a shortcut: an RF is
+  non-parametric (no likelihood, no parameter count), so its complexity (realized leaves) is **not
+  commensurable** with a logistic regression's (coefficient count) — cross-family selection is an
+  *estimation* problem (nested-CV, #23), not a complexity one. It also makes `argmax-mean` a true
+  special case: within = argmax-mean, across = argmax-mean ⇒ global argmax-mean (M1a, unchanged).
 
 **Sampler evolution (`pkg/sampler`).** `GridConfigs.Done` returns a **per-family winner map + the
-cross-family ship pick** (evolves M1a's single `Winner`). The per-family set is the honest
-leaderboard #22 (ensembling) blends and #23 (nested-CV) estimates one-per-family — group-by-family is
-the seam the rest of the project already wanted, not a workaround. `promote` gains a family selector;
-`driver:single` ships the cross-family pick. Pure: a DIFFERENT `Done` over the SAME cached
-`(mean, SE)` — no re-run (the M1a cache makes offline rule-testing free).
+cross-family ship pick** (evolves M1a's single `Winner`), reading each config's
+`(mean_score, SE, mean_complexity)`. The per-family set is the honest leaderboard #22 (ensembling)
+blends and #23 (nested-CV) estimates one-per-family — group-by-family is the seam the rest of the
+project already wanted, not a workaround. `promote` gains a family selector; `driver:single` ships the
+cross-family pick. Pure: a DIFFERENT `Done` over the SAME cached fold records — no re-run once
+complexity is emitted (the M1a cache makes offline rule-testing free).
 
-### B. The complexity schema (the #4 facet, seeded here)
+### B. Model-reported complexity
 
-**Central CUE `#StepManifest`** in `construct/vocabulary/step-manifest.cue` (sibling to
-`#ExperimentShape`): `knobs: [path]: {type, domain, complexity}` plus #4's
-`summary`/`inputs`/`outputs`/`learn-notes`.
+**Complexity is measured on the *fitted* model, not predicted from hyperparameters.** The literature
+is clear (cost-complexity pruning penalizes realized terminal-node count `|T|`; `2^max_depth`
+*overstates* — real trees rarely fill and `min_samples_leaf`/data cap leaves; "effective degrees of
+freedom" is a flawed metaphor for adaptive models — Breiman 1984/2001, Janson-Fithian-Hastie 2015,
+Leboeuf et al. 2020). Trees prune, linear models regularize, NNs sparsify — so the *realized*
+structure is the capacity, and it's only knowable after training.
 
-**Per-step `.md` sidecar** next to each executable (`steps/metis/train.md`,
-`kbench/steps/titanic/features.md`), frontmatter conforms to `#StepManifest`, drift-guarded by a
-merge-check (as shapes conform to `#ExperimentShape`). **Steps stay files** (not promoted to dirs).
+- **Each model class implements `complexity(fitted_model) → float`** reporting realized complexity:
+  `rf` → total (or mean) realized leaf count over its trees (`tree_.n_leaves`); `logreg` → coefficient
+  count (L2 zeroes nothing, so = feature count); GBM (#21) → total leaves; NN → non-zero params. The
+  **model step owns this** (layer-appropriate: the model class knows how to introspect its fitted
+  object).
+- **Emitted as a per-fold metric** by `metis/train` alongside `fold_score`, captured in the fold
+  record, **cached**, and **reduced (mean across folds)** by the read-time reducer — one more reduced
+  quantity next to `(mean, SE)`. Deterministic given `(config, data, seed)`, so cache-sound.
+- **The parsimony rules minimize this scalar within the band.** One measured number per config
+  collapses the earlier Pareto/rank/`{form,basis}`/`2^depth` machinery entirely — and it likely
+  **auto-resolves the feature-count question**: for continuous features a tree fills to its
+  depth/leaf-size limit regardless of feature count, so realized leaves are ~feature-independent →
+  among equally-shallow configs the mean tie-break selects the higher-CV (more-features) config, with
+  no hand-declared axis exclusion. (Expected, not asserted — verified in Done-when.)
+- **Guard (LOUD, hard error):** a parsimony rule (`one-std-err`/`pct-loss`) is active but the winning
+  family's model class does not report complexity → halt with a next-action message. Per-model-class,
+  not per-knob. `argmax-mean`/`mean-std` never read complexity, so they never trip it.
 
-**Complexity = a per-knob value-function** `{form: const|linear|log, basis: value|count|inverse}`,
-higher = more overfitting-capacity:
-- `metis/train`: `max_depth` → `linear·value`; `C` → `linear·value` **[correction, below]**;
-  `n_estimators` → **`const`** (more trees ≠ more overfit capacity — complexity means
-  overfitting-capacity, not resource size).
-- `titanic/features`: feature-set → `linear·count` (more features = more capacity).
-
-**Correction from the pensive shorthand.** The pensive labeled `C` as `linear·inverse (more reg =
-simpler)`. Taken literally that inverts it — sklearn's `C` is the *inverse* of regularization
-strength, so **small C = strong reg = simpler**, i.e. complexity must *increase* with C
-(`basis: value`). `basis: inverse` (complexity ↓ as knob ↑) is retained in the vocabulary for a
-genuine penalty-weight knob (an explicit `alpha`/`lambda`), but C is the classic trap — precisely why
-the step owns its knob semantics: `metis/train` declares C's direction correctly once, engine never
-guesses.
-
-**What the rules consume today = the monotone direction only.** Pareto + rank-tie-break are invariant
-to any monotone transform, so `form: linear|log` and the exact scale do **not** affect selection yet —
-only each axis's direction does. `form`/scale is declared for a future complexity-penalty rule and to
-document intent (declared-not-yet-consumed; the *direction* IS consumed now — not aspirational status).
-
-**LOUD on an undeclared swept knob — a hard error.** When a **parsimony-consuming rule**
-(`one-std-err`/`pct-loss`) is active and a **swept free parameter** lacks a complexity declaration,
-halt with a next-action message (name the knob + the fix) — a silently-dropped parsimony axis gives a
-quietly-wrong winner. `const` is the explicit "swept but complexity-neutral" declaration
-(n_estimators) — distinct from omission (= undeclared = error). `argmax-mean`/`mean-std` never read
-complexity, so they never trigger it. Steps with no swept free parameters (get-data, submission, …)
-are never implicated — their manifests are #4's tail.
-
-**First manifests (in #19's scope): only the swept step-types** — `metis/train` + `titanic/features`.
-The full per-step catalog / learn-notes stays #4.
+**Dropped vs the earlier draft:** the CUE per-knob `#StepManifest` complexity schema, `{form, basis}`
+value-functions, the `2^max_depth` magnitude, and Pareto/rank selection — all replaced by one measured
+scalar. This **de-entangles #4**: collocated step manifests remain #4's for docs/learn-notes, not
+load-bearing for selection.
 
 ### Config-surface churn
-- `construct/vocabulary/experiment.cue` — `#ExperimentShape.sweeper.objective.select` → the union.
-- `pkg/experiment/shape.go` — `Objective.Select string` → the `Select` struct + validate.
-- `pkg/sampler` — `GridConfigs.Done`/`Winner` → per-family map + cross-family pick; the new rules.
+- `construct/vocabulary/experiment.cue` — `#ExperimentShape.sweeper.objective.select` → the union
+  (optional fields, mirroring `driver`).
+- `pkg/experiment/shape.go` — `Objective.Select string` → the `Select` struct + exactly-one validate.
+- `pkg/sampler` — `GridConfigs.Done`/`Winner` → per-family map + cross-family pick; read-time reducer
+  aggregates a complexity metric; the four rules.
+- `metis/train` step + model classes — emit per-fold `complexity`; a `complexity(fitted) → float` per
+  model class (rf, logreg now).
 - Shapes: `select: argmax-mean` → the union — `metis/testdata/experiment/titanic-baseline-shape.md`;
   `kbench .../titanic-sweep.md` (→ `pct-loss: {tolerance}`) + `titanic-sweep-smoke.md`.
 - Docs: `kbench .../titanic-sweep.md` prose + `RUNBOOK-sweep.md` (STALE for v2: `--sort
   train.cv_score` → `train.fold_score` + the select rule).
 
 ### Scope boundaries (non-goals)
-Cross-family complexity scalar (no currency — #23 estimates instead); the full #4 step catalog (#4
-tail); nested-CV `driver:cv` (#23); adaptive samplers (the ask/tell seam, #7); a complexity-penalty
-select rule that consumes `form`/scale (forward).
+Cross-family complexity comparison (unsound — non-parametric RF, incommensurable units; #23 estimates
+instead); nested-CV `driver:cv` (#23); adaptive samplers (the ask/tell seam, #7); static/pre-training
+complexity estimation (YAGNI — the grid trains every config anyway, so measured suffices); the #4
+collocated-manifest catalog (de-entangled — docs/learn-notes stay #4).
 
 ### ARCH
-Pure `pkg/sampler` + CUE + manifests, no new IO in the hot path (**ARCH-PURE**); the CUE
-`#StepManifest` is the single source — Go, Python, and the merge-check derive from it (**ARCH-DRY** /
-single-source); `select` reuses the `driver` tagged-union idiom (consistency).
+Pure `pkg/sampler` (**ARCH-PURE**): the select rule is a re-reduction over cached fold records —
+complexity is just another cached metric, no new IO in the hot path. **ARCH-simplicity:** one measured
+scalar per config collapses the per-knob/Pareto/magnitude machinery into "minimize one number." The
+`select` union reuses the `driver` idiom (consistency). Grounded in the model-selection literature
+(realized `|T|`, Breiman's LLN for n_estimators-neutrality, cross-family incommensurability).
 
 ## Done when
 
 - `objective.select` is a **required tagged union** (argmax-mean | one-std-err | pct-loss | mean-std),
   params bound per branch; validate rejects omission + multi-branch (mirrors driver).
-- Over the **cached** `titanic-sweep.ledger.csv` (no re-run), `pct-loss` **demonstrably selects a
-  lower-complexity config** (shallower rf depth) than `argmax-mean`'s md=8 — the offline
-  counterfactual, reported per-rule (the mechanism, not a hard-coded config).
+- Each swept model class reports its fitted complexity (`rf` realized leaves, `logreg` feature count);
+  `metis/train` emits it per fold; the reducer aggregates it; it round-trips through the cache.
+- Over the ledger **with complexity emitted** (re-fit over the warm data cache — cheap, no creds),
+  `pct-loss` **selects a shallower rf config than `argmax-mean`'s md=8**, and the specific pick (incl.
+  its feature count) is **reported and verified against the ledger, not asserted** (per-rule table).
 - `GridConfigs.Done` returns the per-family leaderboard + the cross-family ship pick.
-- A parsimony rule with a swept-but-undeclared knob **hard-errors** with a next-action message;
-  `const` (n_estimators) passes.
-- `#StepManifest` + sidecars for `metis/train` + `titanic/features`, drift-guarded; each rule
-  unit-tested.
+- A parsimony rule + a model class that does not report complexity → **hard error** with a next-action
+  message.
+- Each rule unit-tested; `complexity()` per model class tested.
 
 ## Plan
 
-- [ ] (spec at claim) select rule as a pluggable reducer over the sweeper's per-config `(mean, SE)`; 1-SE + mean−std; test that a simpler within-1-SE config is chosen.
+- [ ] Durable plan pending (`superpowers-writing-plans`) — likely ≥2 boundaries: (M1) the select
+  rule + sampler evolution (union, group-by-family, within-band + tie-break, Done → per-family map);
+  (M2) model-reported complexity (per-class `complexity()`, per-fold emit + cache + reduce, the guard,
+  the verified acceptance counterfactual). Supersedes the claim-time line (which assumed 1-SE recovers
+  the case — it does not; the band is 15× too tight).
 
 ## Log
 
@@ -190,3 +204,21 @@ single-source); `select` reuses the `driver` tagged-union idiom (consistency).
 - Full converged design: `workshop/pensive/2026-07-08-select-rule-step-param-schema.md` (see its
   `## Revisions`). Spec written this session; next gate is the durable plan (writing-plans) then
   `sdlc change-code`.
+### 2026-07-08 (spec v2 — measured complexity, after spec-review + RF-literature research)
+- **Fresh-eyes spec review traced the rule over the real cached ledger** and found the drafted
+  mechanism shipped an unvalidated corner (md=4/nfeat=1), not the 0.782 config — because feature-count
+  was a 2nd complexity axis and multi-axis Pareto drove to the joint corner. It also caught: "mirrors
+  driver" was false at the CUE layer (driver is optional-fields + Go check, not a disjunction); the
+  family discriminant is not cleanly recoverable from `FreeParam` (use `With` bundling); the
+  per-knob undeclared-knob guard was under-specified (path mapping, family-axis exemption).
+- **RF-complexity literature research** (Breiman 1984/2001, Probst-Wright-Boulesteix 2019,
+  Janson-Fithian-Hastie 2015, Leboeuf et al. 2020, tidymodels): tree complexity = realized leaf count
+  (`2^depth` overstates); n_estimators capacity-neutral (LLN); feature-count dominated by tree size
+  (near-neutral for continuous features); cross-family param-count **unsound** (RF non-parametric);
+  tidymodels doesn't compute complexity — you *declare the ordering*.
+- **Pivot (operator-led): complexity is MEASURED on the fitted model, not declared per-knob.** Each
+  model class reports `complexity(fitted) → float` (rf realized leaves; logreg feature count); emitted
+  per-fold, cached, reduced; the select rule minimizes it within the band, tie-break mean. This drops
+  the whole CUE per-knob schema / `{form,basis}` / `2^depth` / Pareto machinery (one scalar), fixes
+  the corner for the right reason, de-entangles #4, and keeps cross-family = argmax-mean (units
+  incommensurable). Spec rewritten (v2). Re-running the fresh-eyes review next.

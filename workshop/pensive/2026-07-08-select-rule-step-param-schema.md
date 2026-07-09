@@ -98,3 +98,16 @@ single source, Go + Python + the merge-check derive from it (ARCH-DRY / single-s
   NOT consumed by the current rules. Documented as declared-not-yet-consumed (the direction IS used).
 - **3 open knobs settled** (see the issue Log): tagged-union `select` mirroring `driver`; first
   manifests = swept step-types only; select required-explicit with `pct-loss` canonical.
+
+### 2026-07-08 — measured-complexity pivot (SUPERSEDES the declared-complexity design above)
+The issue `## Spec` (v2) is now the record of truth; the "complexity substrate" / per-knob
+`{form,basis}` / `#StepManifest` design in this pensive's body is **superseded**. After a fresh-eyes
+spec review (traced the rule over the real ledger → the drafted Pareto parsimony shipped an
+unvalidated md=4/nfeat=1 corner, not 0.782) and an RF-complexity literature pass (realized leaves, not
+`2^depth`; n_estimators-neutral; feature-count dominated; cross-family param-count unsound; tidymodels
+declares-not-computes), the design pivoted to: **complexity is MEASURED on the fitted model** — each
+model class reports `complexity(fitted) → float` (rf realized leaves; logreg feature count), emitted
+per-fold, cached, reduced; the select rule minimizes that one scalar within the band, tie-break mean.
+Drops the CUE per-knob schema, `{form,basis}`, `2^depth`, and Pareto/rank entirely; de-entangles #4;
+keeps cross-family = argmax-mean (incommensurable units). See the issue `## Spec` + Log for the full
+converged design.
