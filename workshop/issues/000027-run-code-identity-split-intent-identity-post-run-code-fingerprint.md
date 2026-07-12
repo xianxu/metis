@@ -1,11 +1,12 @@
 ---
 id: 000027
-status: open
-deps: [000028]
+status: working
+deps: []
 github_issue:
 created: 2026-07-11
 updated: 2026-07-11
 estimate_hours:
+started: 2026-07-11T20:25:34-07:00
 ---
 
 # run/code identity split: intent-identity + post-run code fingerprint
@@ -45,9 +46,17 @@ Split the single conflated identity into two:
    run."
 
 2. **Realized-code fingerprint (post-run, recorded in the row/record).**
-   `code_fingerprint = CanonicalHash` of the run's **full, consistent `D` closure** (every step's
-   `{repo,path,blob_hash}`), well-defined **only if** the closure is internally consistent (one blob
-   per path across all steps — the metis#28 consistency check). "What code actually ran."
+   `code_fingerprint = CanonicalHash` of the run's **run-end `D` closure** — the union of every step's
+   read-set paths → their working-tree blob-hashes at capture time (the closure `captureRunCode`
+   already produces, `capture.go:141`). "What code actually ran." This **achieves the identity goal**:
+   two runs with different code (each stable *within* its run — the normal case) get different
+   fingerprints → distinct rows, no collision.
+   - **Scope boundary (recon finding):** #27 does **not verify within-run consistency**. Blobs are
+     hashed once at capture (post-run), and `backfillCodeManifest` writes one run-wide `D` to every
+     step (`capture.go:308-313`) — so a *mid-run* code change (step A read v1, step B read v2) is
+     invisible here; the fingerprint hashes the final state. Detecting/refusing that needs per-step
+     *step-time* blobs (not recorded today) → **that + the reproduce verbs are metis#28.** #27 assumes
+     within-run consistency (true in the common case); #28 verifies it.
 
 3. **Ledger dedup key = (intent, code_fingerprint).**
    Same config+shape, different code → same `intent`, *different* `fingerprint` → **both rows kept**
@@ -59,6 +68,22 @@ Note the decoupling this enables: the **run-dir name** (intent, pre-run) no long
 identity, so the dir can be minted upfront while the *reproducibility* identity (fingerprint) is
 finalized post-run — the row is written after the run anyway.
 
+### Decisions (2026-07-11)
+
+- **`repo_shas` dropped ENTIRELY** — not just from `point_address`, but from `shape_run_id`
+  (`sweep.go:401`) and from `record.json` altogether. The code identity lives in each step's
+  `code.commit` (the side-ref, HEAD if clean) + its read-set `D`; repo HEAD adds nothing and misleads
+  once dirty sweeps are allowed. `shape_run_id` recomposes over `(shape structure, shape_blob_hash,
+  seed)`.
+- **Single-pass** (no `Mx` milestone split) — the fingerprint and the dedup that consumes it are
+  tightly coupled; one review boundary at `sdlc close`. Plain checkboxes in the Plan.
+- **Migration = accept the identity/cache version bump** (like metis#24): the recomposed
+  `point_address` orphans old cache/ledger entries; no migration of old rows (the sweep ledgers are
+  gitignored + regenerable). Document the bump.
+- **Fingerprint = run-end closure hash (no within-run consistency verification)** — the mid-run
+  consistency *detection* (needs per-step step-time blobs) + the `reproduce`/`verify` verbs are
+  metis#28. #27 fixes the identity collision; #28 verifies + refuses mid-run drift.
+
 ## Done when
 
 - `point_address`/run identity is derived from `(resolved_with, shape_blob_hash, seed)` — no
@@ -68,11 +93,35 @@ finalized post-run — the row is written after the run anyway.
 - A test: two runs, identical config+shape+seed, a changed `.py` between them → two distinct ledger
   rows (distinct fingerprints), neither overwritten.
 
+## Estimate
+
+*Produced via `brain/data/life/42shots/velocity/estimate-logic-v3.1.md` against `baseline-v3.1.md`. Method A only.*
+
+```estimate
+model: estimate-logic-v3.1
+familiarity: 1.0
+item: greenfield-go-module   design=0.3 impl=0.4
+item: smaller-go-module      design=0.2 impl=0.3
+item: smaller-go-module      design=0.2 impl=0.4
+item: smaller-go-module      design=0.2 impl=0.4
+item: smaller-go-module      design=0.2 impl=0.4
+item: milestone-review       design=0.0 impl=0.2
+item: atlas-docs             design=0.05 impl=0.05
+design-buffer: 0.15
+total: 3.47
+```
+
+Design pre-settled (this session's walkthrough + thorough plan) → design near the floor. Keystone =
+the pure `PointAddress` recompose + `CodeFingerprint` (`pkg/record`). Four `smaller` refactors:
+`RunRecord`+CUE lockstep; `buildRecord`+`shapeBlobHash`+single-run naming; sweep wiring (drop
+`repoSHAs`); ledger dedup+columns. One `milestone-review` (single boundary) + atlas. Impl at 40%-of-v2
+(v3.1); +15% thorough-plan buffer. (Calibration note: metis#19 ran ~1.7× over a similar-breadth
+estimate — the test-migration surface here is broad; watch at close.)
+
 ## Plan
 
-- [ ] (spec/brainstorm) design the fingerprint + dedup-key change; coordinate with metis#26 (shape
-  blob-hash) and metis#28 (consistency guard, which defines "well-defined fingerprint"). Then plan +
-  implement.
+Durable plan: `workshop/plans/000027-run-code-identity-split-plan.md`. Single-pass (plain checkboxes,
+one review boundary at close).
 
 ## Log
 

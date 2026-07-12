@@ -1,7 +1,7 @@
 ---
 id: 000028
 status: open
-deps: []
+deps: [000027]
 github_issue:
 created: 2026-07-11
 updated: 2026-07-11
@@ -33,11 +33,18 @@ Two subtleties make "just restore one state and run" **incorrect in general**:
 
 **Detect-and-refuse, don't silently mis-reproduce.**
 
+- **Prerequisite — per-step step-time blobs (recon finding).** Detecting a mid-run change requires each
+  step's blobs captured **at that step's execution time**, not once at run-end. Today
+  `backfillCodeManifest` writes one run-wide `D` to every step (`capture.go:308-313`) and blobs are
+  hashed once at capture, so mid-run drift is invisible. This issue must first make the tracer/executor
+  record per-step step-time blobs (the cache's per-step `transitiveD` is the closest existing carrier,
+  but it's cache-on-only + cache-internal). metis#27's `code_fingerprint` deliberately does NOT do this
+  (it hashes the run-end closure, assuming within-run consistency).
 - **Consistency check (the primitive).** At a chosen root level (`run` | `sweep`), verify **every path
-  in the aggregated `D` closure has exactly one blob-hash** across all steps (a run) / all runs (a
-  sweep). Consistent → a single restorable tree exists. Conflict → **loud error** naming the
-  offending file + the two blobs ("code changed mid-{run,sweep}; not reproducible as a single state").
-  This same primitive defines the "well-defined `code_fingerprint`" metis#27 needs.
+  in the aggregated per-step-time `D` closure has exactly one blob-hash** across all steps (a run) /
+  all runs (a sweep). Consistent → a single restorable tree exists. Conflict → **loud error** naming
+  the offending file + the two blobs ("code changed mid-{run,sweep}; not reproducible as a single
+  state").
 
 - **`metis reproduce --at {run|sweep} <id>`.** Run the consistency check; if consistent, restore the
   recorded closure (checkout each repo's side-ref / `Code.Commit` into a scratch worktree — NOT a bare
