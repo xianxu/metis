@@ -51,7 +51,7 @@ func writeTaggedSelectLedger(t *testing.T, dir string) string {
 	}
 	row := func(addr string, fp map[string]any, fold int, score, cx float64) ledger.Row {
 		ff := fold
-		return ledger.Row{SweepSHA: "sha", PointAddr: addr, FreeParams: fp, Fold: &ff,
+		return ledger.Row{CodeFingerprint: "cf", PointAddr: addr, FreeParams: fp, Fold: &ff,
 			Metrics: map[string]float64{"train.fold_score": score, "train.complexity": cx}, Status: "ok"}
 	}
 	lr01 := map[string]any{"train.model": "logreg", "train.model.logreg.C": 0.1}

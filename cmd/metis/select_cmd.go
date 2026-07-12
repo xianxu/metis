@@ -15,7 +15,7 @@ import (
 )
 
 // cmdLedgerSelect handles `metis ledger select <shape.md> [--rule R] [--tolerance T]
-// [--lambda L] [--sweep SHA]` — applies the select rule OFFLINE over the shape's cached
+// [--lambda L] [--fingerprint HASH]` — applies the select rule OFFLINE over the shape's cached
 // ledger (no re-run) and prints the per-family robust winners + the cross-family ship pick.
 // The SECOND consumer of sampler.SelectConfigs (the in-memory sweep is the first) — the same
 // pure rule, so an offline `select` and the live ship agree by construction (metis#19).
@@ -24,26 +24,26 @@ func cmdLedgerSelect(args []string) error {
 	rule := fs.String("rule", "", "select rule: argmax-mean | one-std-err | pct-loss | mean-std (default: the shape's rule)")
 	tolerance := fs.Float64("tolerance", 0, "pct-loss band tolerance (default: the shape's, or 0.02)")
 	lambda := fs.Float64("lambda", 0, "mean-std penalty λ (default: the shape's, or 1.0)")
-	sweep := fs.String("sweep", "", "restrict to one sweep-SHA")
+	fingerprint := fs.String("fingerprint", "", "restrict to one code-fingerprint (metis#27)")
 	shapePath, flags, err := hoistShapePath(args)
 	if err != nil {
-		return fmt.Errorf("ledger select: %w (usage: metis ledger select <shape.md> [--rule R] [--tolerance T] [--lambda L] [--sweep SHA])", err)
+		return fmt.Errorf("ledger select: %w (usage: metis ledger select <shape.md> [--rule R] [--tolerance T] [--lambda L] [--fingerprint HASH])", err)
 	}
 	if err := fs.Parse(flags); err != nil {
 		return err
 	}
 	return runLedgerSelect(selectOpts{
-		shapePath: shapePath, rule: *rule, tolerance: *tolerance, lambda: *lambda, sweep: *sweep, out: os.Stdout,
+		shapePath: shapePath, rule: *rule, tolerance: *tolerance, lambda: *lambda, fingerprint: *fingerprint, out: os.Stdout,
 	})
 }
 
 type selectOpts struct {
-	shapePath string
-	rule      string  // "" → the shape's objective.select
-	tolerance float64 // pct-loss (0 → shape's, then 0.02)
-	lambda    float64 // mean-std (0 → shape's, then 1.0)
-	sweep     string
-	out       io.Writer
+	shapePath   string
+	rule        string  // "" → the shape's objective.select
+	tolerance   float64 // pct-loss (0 → shape's, then 0.02)
+	lambda      float64 // mean-std (0 → shape's, then 1.0)
+	fingerprint string
+	out         io.Writer
 }
 
 // runLedgerSelect is the testable core: load shape + ledger, reduce, group by family, apply
@@ -66,7 +66,7 @@ func runLedgerSelect(o selectOpts) error {
 	if err != nil {
 		return err
 	}
-	led = ledger.Filter(led, o.sweep)
+	led = ledger.Filter(led, o.fingerprint)
 	metric := sh.Sweeper.Objective.Metric
 	agg := ledger.AggregateView(led, metric)
 

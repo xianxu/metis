@@ -23,8 +23,8 @@ import (
 	"strings"
 )
 
-// Row is one ledger entry: the free-param tuple + sweep-SHA + point-address (identity)
-// + namespaced metrics + status. The raw recipe + result.
+// Row is one ledger entry: the free-param tuple + code-fingerprint + point-address
+// (the (point-address, fingerprint) pair is the identity) + namespaced metrics + status.
 //
 // metis#18 (M1a): a Row is now a RAW per-fold row — one (config, fold) run's fold_score.
 // Fold is the resample-fold coordinate (nil = a non-fold row, e.g. a v1 whole-CV row or
@@ -32,35 +32,42 @@ import (
 // lets metis#19's 1-standard-error select re-reduce for free — AggregateView groups them
 // read-time into per-config (mean, SE) without a re-run.
 type Row struct {
-	FreeParams map[string]any
-	SweepSHA   string
-	PointAddr  string // the metis#3 point content-address — row identity for dedup
-	Fold       *int   // metis#18: the resample-fold index (nil = not a per-fold row)
-	Metrics    map[string]float64
-	Status     string // "ok" | "failed"
+	FreeParams      map[string]any
+	CodeFingerprint string // metis#27: the run's realized code identity (over its D closure)
+	PointAddr       string // the metis#3 point INTENT-address — half the dedup identity
+	Fold            *int   // metis#18: the resample-fold index (nil = not a per-fold row)
+	Metrics         map[string]float64
+	Status          string // "ok" | "failed"
 }
 
 // Ledger is an ordered, append-only set of rows (CSV-backed by the caller).
 type Ledger struct {
 	Rows []Row
-	seen map[string]bool // point-addresses already present (dedup)
+	seen map[string]bool // (point-address, code-fingerprint) pairs already present (dedup)
 }
 
-// Append adds rows in order, skipping any whose point-address is already present
-// (append-only + idempotent: re-running the same code re-produces the same addresses →
-// no growth; a new code-version's rows carry new addresses → they append).
+// dedupKey is the metis#27 composite row identity: the intent (point-address) AND the
+// realized code (fingerprint). NUL-separated (neither half contains NUL — both are hex
+// hashes or a config-group id). Same config + different code → distinct key → both kept.
+func dedupKey(r Row) string { return r.PointAddr + "\x00" + r.CodeFingerprint }
+
+// Append adds rows in order, skipping any whose (point-address, code-fingerprint) is
+// already present (append-only + idempotent: re-running the SAME code re-produces the same
+// pairs → no growth; a new code-version's rows carry a new fingerprint → they append,
+// preserving both variations even at the same config).
 func (l *Ledger) Append(rows ...Row) {
 	if l.seen == nil {
 		l.seen = make(map[string]bool, len(l.Rows)+len(rows))
 		for _, r := range l.Rows {
-			l.seen[r.PointAddr] = true
+			l.seen[dedupKey(r)] = true
 		}
 	}
 	for _, r := range rows {
-		if l.seen[r.PointAddr] {
+		k := dedupKey(r)
+		if l.seen[k] {
 			continue
 		}
-		l.seen[r.PointAddr] = true
+		l.seen[k] = true
 		l.Rows = append(l.Rows, r)
 	}
 }
@@ -72,7 +79,7 @@ const (
 )
 
 // Encode renders the ledger as append-order CSV. The header is the fixed keys
-// (sweep_sha, point_addr, status) plus the sorted UNION of every row's free-param and
+// (code_fingerprint, point_addr, status) plus the sorted UNION of every row's free-param and
 // metric columns; a row blanks the columns it lacks (ragged). Sorting/filtering is a
 // view (Decode → Filter/TopN), never a storage concern — the file stays append-order.
 func Encode(l Ledger) ([]byte, error) {
@@ -86,7 +93,7 @@ func Encode(l Ledger) ([]byte, error) {
 			break
 		}
 	}
-	header := append([]string{"sweep_sha", "point_addr", "status"}, fpCols...)
+	header := append([]string{"code_fingerprint", "point_addr", "status"}, fpCols...)
 	if hasFold {
 		header = append(header, "fold")
 	}
@@ -99,7 +106,7 @@ func Encode(l Ledger) ([]byte, error) {
 	}
 	for _, r := range l.Rows {
 		rec := make([]string, 0, len(header))
-		rec = append(rec, r.SweepSHA, r.PointAddr, r.Status)
+		rec = append(rec, r.CodeFingerprint, r.PointAddr, r.Status)
 		for _, c := range fpCols {
 			rec = append(rec, cell(r.FreeParams[strings.TrimPrefix(c, fpPrefix)]))
 		}
@@ -144,8 +151,8 @@ func Decode(b []byte) (Ledger, error) {
 				continue
 			}
 			switch {
-			case col == "sweep_sha":
-				row.SweepSHA = rec[i]
+			case col == "code_fingerprint":
+				row.CodeFingerprint = rec[i]
 			case col == "point_addr":
 				row.PointAddr = rec[i]
 			case col == "status":
@@ -181,7 +188,7 @@ const (
 )
 
 // AggregateView reduces the RAW per-fold rows into one per-config row — grouping by
-// (free-params, sweep-SHA) over the fold coordinate. metis#18: the ledger stores the raw
+// (free-params, code-fingerprint) over the fold coordinate. metis#18: the ledger stores the raw
 // fold rows (so metis#19's select re-reduces for free), and this is the read-time reduction
 // the leaderboard + `promote --best` + `ledger select` read over. EVERY metric column is
 // mean-reduced (so metis#19's `train.complexity` reaches the aggregate row for the select
@@ -205,12 +212,12 @@ func AggregateView(l Ledger, metric string) Ledger {
 			continue
 		}
 		fpb, _ := json.Marshal(r.FreeParams)  // Go sorts map keys → canonical group key
-		key := r.SweepSHA + "|" + string(fpb) // NUL-free: an aggregate row is not a content-
+		key := r.CodeFingerprint + "|" + string(fpb) // NUL-free: an aggregate row is not a content-
 		//   address (no single point ran it) — the key is a config-grouping id, kept printable
 		//   (a \x00 separator would corrupt any consumer that renders PointAddr, e.g. promote).
 		g := groups[key]
 		if g == nil {
-			g = &agg{row: Row{FreeParams: r.FreeParams, SweepSHA: r.SweepSHA, PointAddr: key, Status: "ok"}, byMetric: map[string][]float64{}}
+			g = &agg{row: Row{FreeParams: r.FreeParams, CodeFingerprint: r.CodeFingerprint, PointAddr: key, Status: "ok"}, byMetric: map[string][]float64{}}
 			groups[key] = g
 			order = append(order, key)
 		}
@@ -330,12 +337,12 @@ func SortAll(l Ledger, metric, direction string) []Row {
 	return append(qualified, rest...)
 }
 
-// Filter returns the sub-ledger of rows at a given sweep-SHA (an invocation / code-
-// version view). Empty sweepSHA returns the whole ledger.
-func Filter(l Ledger, sweepSHA string) Ledger {
+// Filter returns the sub-ledger of rows at a given code-fingerprint (a code-version
+// view). Empty fingerprint returns the whole ledger.
+func Filter(l Ledger, fingerprint string) Ledger {
 	var out Ledger
 	for _, r := range l.Rows {
-		if sweepSHA == "" || r.SweepSHA == sweepSHA {
+		if fingerprint == "" || r.CodeFingerprint == fingerprint {
 			out.Append(r)
 		}
 	}

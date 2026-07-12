@@ -17,20 +17,20 @@ import (
 // rowsFromManifest turns a sweep manifest + the per-point records into ledger rows —
 // PURE (the caller reads the record.json files). The metric collision fix lives here:
 // each row's metrics are NAMESPACED per step (train.fold_score, not a flat fold_score that
-// v0's merge collided). Keys: point-address (manifest run-id) + sweep-SHA (the
-// manifest's repo SHA, read from any point's record).
+// v0's merge collided). Keys: point-address (manifest run-id) + code-fingerprint (the
+// realized code identity, read from the point's record — metis#27).
 func rowsFromManifest(man sweepManifest, records map[string]record.RunRecord) []ledger.Row {
 	rows := make([]ledger.Row, 0, len(man.Points))
 	for _, p := range man.Points {
 		rec := records[p.RunID]
 		fold := p.Fold // fresh per-iteration var → &fold is the row's own fold coordinate
 		rows = append(rows, ledger.Row{
-			FreeParams: p.FreeParams,
-			SweepSHA:   sweepSHAOf(rec),
-			PointAddr:  p.RunID,
-			Fold:       &fold, // metis#18: a RAW per-fold row (AggregateView reduces read-time)
-			Metrics:    namespacedMetrics(rec),
-			Status:     p.Status,
+			FreeParams:      p.FreeParams,
+			CodeFingerprint: string(rec.CodeFingerprint), // metis#27: the realized code identity
+			PointAddr:       p.RunID,
+			Fold:            &fold, // metis#18: a RAW per-fold row (AggregateView reduces read-time)
+			Metrics:         namespacedMetrics(rec),
+			Status:          p.Status,
 		})
 	}
 	return rows
@@ -49,15 +49,6 @@ func namespacedMetrics(rec record.RunRecord) map[string]float64 {
 		return nil
 	}
 	return m
-}
-
-// sweepSHAOf returns the code-version SHA from a record's repo-SHAs (the single repo in
-// v1). Empty if none (a no-git run).
-func sweepSHAOf(rec record.RunRecord) string {
-	for _, sha := range rec.RepoSHAs {
-		return sha
-	}
-	return ""
 }
 
 // promotedExperiment reconstructs the winner's runnable experiment for a ledger row by

@@ -23,16 +23,16 @@ func TestRowsFromManifest_NamespacedMetrics(t *testing.T) {
 	// Per-point records carry per-STEP metrics (the namespacing fix — train.cv_score,
 	// not a flat cv_score that would collide across steps).
 	records := map[string]record.RunRecord{
-		"addr-a": {PointAddress: "addr-a", RepoSHAs: map[string]string{"kbench": "sha1"}, Steps: []record.StepRecord{
+		"addr-a": {PointAddress: "addr-a", CodeFingerprint: "cf1", Steps: []record.StepRecord{
 			{StepID: "train", Metrics: map[string]float64{"cv_score": 0.81}},
 		}},
-		"addr-b": {PointAddress: "addr-b", RepoSHAs: map[string]string{"kbench": "sha1"}, Steps: []record.StepRecord{}},
+		"addr-b": {PointAddress: "addr-b", CodeFingerprint: "cf1", Steps: []record.StepRecord{}},
 	}
 	rows := rowsFromManifest(man, records)
 	if len(rows) != 2 {
 		t.Fatalf("want 2 rows, got %d", len(rows))
 	}
-	if rows[0].PointAddr != "addr-a" || rows[0].SweepSHA != "sha1" {
+	if rows[0].PointAddr != "addr-a" || rows[0].CodeFingerprint != "cf1" {
 		t.Errorf("row 0 keys wrong: %+v", rows[0])
 	}
 	if rows[0].Metrics["train.cv_score"] != 0.81 {

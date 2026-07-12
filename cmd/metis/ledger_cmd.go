@@ -16,7 +16,7 @@ import (
 	"github.com/xianxu/metis/pkg/ledger"
 )
 
-// cmdLedger handles `metis ledger show <shape.md> [--sweep SHA] [--sort metric] [--top N]`
+// cmdLedger handles `metis ledger show <shape.md> [--fingerprint HASH] [--sort metric] [--top N]`
 // — renders the shape's append-only ledger sidecar as a sorted/filtered VIEW (the CSV
 // stays append-order; sorting is never a storage concern).
 func cmdLedger(args []string) error {
@@ -27,13 +27,13 @@ func cmdLedger(args []string) error {
 		return fmt.Errorf("usage: metis ledger (show | select) <shape.md> [flags]")
 	}
 	fs := flag.NewFlagSet("ledger show", flag.ContinueOnError)
-	sweep := fs.String("sweep", "", "filter to one sweep-SHA (code-version)")
+	fingerprint := fs.String("fingerprint", "", "filter to one code-fingerprint (code-version, metis#27)")
 	sortMetric := fs.String("sort", "", "sort by this namespaced metric (e.g. train.fold_score)")
 	direction := fs.String("dir", "", "sort direction: maximize | minimize (default: the shape's objective direction)")
 	top := fs.Int("top", 0, "show only the top N (0 = all)")
 	shapePath, flags, err := hoistShapePath(args[1:])
 	if err != nil {
-		return fmt.Errorf("ledger show: %w (usage: metis ledger show <shape.md> [--sweep SHA] [--sort metric] [--top N])", err)
+		return fmt.Errorf("ledger show: %w (usage: metis ledger show <shape.md> [--fingerprint HASH] [--sort metric] [--top N])", err)
 	}
 	if err := fs.Parse(flags); err != nil {
 		return err
@@ -49,17 +49,17 @@ func cmdLedger(args []string) error {
 			}
 		}
 	}
-	return showLedger(shapePath, *sweep, *sortMetric, dir, *top, os.Stdout)
+	return showLedger(shapePath, *fingerprint, *sortMetric, dir, *top, os.Stdout)
 }
 
 // showLedger is the testable core of `ledger show`: load, filter, sort/top, render — to
 // any io.Writer (so the rendered table can be asserted against a buffer).
-func showLedger(shapePath, sweep, sortMetric, direction string, top int, out io.Writer) error {
+func showLedger(shapePath, fingerprint, sortMetric, direction string, top int, out io.Writer) error {
 	led, err := loadLedger(shapePath)
 	if err != nil {
 		return err
 	}
-	led = ledger.Filter(led, sweep)
+	led = ledger.Filter(led, fingerprint)
 	rows := led.Rows
 	if sortMetric != "" {
 		// metis#18: the sidecar holds RAW per-fold rows — reduce to per-config (mean, SE)
@@ -96,7 +96,7 @@ func hoistShapePath(args []string) (shapePath string, flags []string, err error)
 	return shapePath, flags, nil
 }
 
-// renderLedger prints rows as a table (a header row + sweep-SHA short, status,
+// renderLedger prints rows as a table (a header row + code-fingerprint short, status,
 // free-params, metrics) to any io.Writer.
 func renderLedger(out io.Writer, rows []ledger.Row) {
 	if len(rows) == 0 {
@@ -114,9 +114,9 @@ func renderLedger(out io.Writer, rows []ledger.Row) {
 		mCols = append(mCols, k)
 	}
 	sort.Strings(mCols)
-	fmt.Fprintln(out, strings.Join(append([]string{"sweep", "status", "free_params"}, mCols...), "  "))
+	fmt.Fprintln(out, strings.Join(append([]string{"code", "status", "free_params"}, mCols...), "  "))
 	for _, r := range rows {
-		parts := []string{short(r.SweepSHA), r.Status, freeParamTuple(r)}
+		parts := []string{short(r.CodeFingerprint), r.Status, freeParamTuple(r)}
 		for _, c := range mCols {
 			if v, ok := r.Metrics[c]; ok {
 				parts = append(parts, fmt.Sprintf("%s=%g", c, v))
@@ -128,27 +128,27 @@ func renderLedger(out io.Writer, rows []ledger.Row) {
 	}
 }
 
-// cmdPromote handles `metis promote <shape.md> (--best | --point 'k=v,...') [--sweep SHA]
+// cmdPromote handles `metis promote <shape.md> (--best | --point 'k=v,...') [--fingerprint HASH]
 // --name X` — selects a ledger row, reconstructs its all-singleton experiment, writes
 // <name>.md with a back-link, and commits it at the code SHA (warns if dirty).
 func cmdPromote(args []string) error {
 	fs := flag.NewFlagSet("promote", flag.ContinueOnError)
 	best := fs.Bool("best", false, "promote the whole-ledger champion by the shape's objective")
 	point := fs.String("point", "", "promote the row matching these free-params (e.g. 'train.model=rf')")
-	sweep := fs.String("sweep", "", "restrict selection to one sweep-SHA")
+	fingerprint := fs.String("fingerprint", "", "restrict selection to one code-fingerprint (metis#27)")
 	name := fs.String("name", "", "output experiment name (writes <name>.md)")
 	shapePath, flags, err := hoistShapePath(args)
 	if err != nil {
-		return fmt.Errorf("promote: %w (usage: metis promote <shape.md> (--best | --point 'k=v,..') [--sweep SHA] --name X)", err)
+		return fmt.Errorf("promote: %w (usage: metis promote <shape.md> (--best | --point 'k=v,..') [--fingerprint HASH] --name X)", err)
 	}
 	if err := fs.Parse(flags); err != nil {
 		return err
 	}
 	if *name == "" || (!*best && *point == "") {
-		return fmt.Errorf("usage: metis promote <shape.md> (--best | --point 'k=v,..') [--sweep SHA] --name X")
+		return fmt.Errorf("usage: metis promote <shape.md> (--best | --point 'k=v,..') [--fingerprint HASH] --name X")
 	}
 	return runPromote(promoteOpts{
-		shapePath: shapePath, best: *best, point: *point, sweep: *sweep, name: *name,
+		shapePath: shapePath, best: *best, point: *point, fingerprint: *fingerprint, name: *name,
 		out: os.Stdout, git: gitCLI{}, commit: gitCLICommitter{},
 	})
 }
@@ -167,14 +167,14 @@ func (gitCLICommitter) Commit(dir, msg string) error {
 }
 
 type promoteOpts struct {
-	shapePath string
-	best      bool
-	point     string
-	sweep     string
-	name      string
-	out       io.Writer
-	git       gitProbe
-	commit    gitCommitter // nil → skip the commit (tests without a repo); cmdPromote injects the real one
+	shapePath   string
+	best        bool
+	point       string
+	fingerprint string
+	name        string
+	out         io.Writer
+	git         gitProbe
+	commit      gitCommitter // nil → skip the commit (tests without a repo); cmdPromote injects the real one
 }
 
 // gitCommitter commits a file at the current SHA (injected so promote is testable
@@ -197,7 +197,7 @@ func runPromote(o promoteOpts) error {
 	if err != nil {
 		return err
 	}
-	led = ledger.Filter(led, o.sweep)
+	led = ledger.Filter(led, o.fingerprint)
 	// metis#18: reduce the raw per-fold rows to per-config (mean, SE) BEFORE selecting, so
 	// BOTH --best and --point promote a CONFIG by its honest estimate — not a single fold's
 	// row. AggregateView is a no-op on a v1 non-fold ledger (rows pass through untouched), so
@@ -219,12 +219,13 @@ func runPromote(o promoteOpts) error {
 		row = r
 	}
 
-	// A promoted winner from an OLDER code-version (its sweep-SHA ≠ HEAD) would be
-	// committed at HEAD, so its code isn't the code it was measured under — the promoted
-	// experiment wouldn't reproduce the row without `git checkout <its sweep-SHA>` first
-	// (the design's deliberate "go back"). Warn loudly rather than silently mis-attribute.
-	if _, headSHA, _ := probeRepo(o.git, filepath.Dir(o.shapePath)); row.SweepSHA != "" && headSHA != "" && row.SweepSHA != headSHA {
-		fmt.Fprintf(o.out, "metis: warning: the selected row ran at code %s but HEAD is %s — the promoted %s is committed at HEAD, so it reproduces only after `git checkout %s`\n", short(row.SweepSHA), short(headSHA), o.name, short(row.SweepSHA))
+	// The promoted .md runs against CURRENT code, which may differ from the code the row
+	// was measured under (its code_fingerprint). metis#27 no longer carries a repo HEAD to
+	// compare against — exact reproduction of the recorded run is via the recorded side-ref
+	// (metis#28's `reproduce`), not a repo checkout. Surface the row's code identity so the
+	// operator knows which code version the estimate came from.
+	if row.CodeFingerprint != "" {
+		fmt.Fprintf(o.out, "metis: note: %s records code_fingerprint %s (the code the estimate was measured under); it runs against CURRENT code — exact reproduction of that run is `metis reproduce` (metis#28)\n", o.name, short(row.CodeFingerprint))
 	}
 
 	exp, err := promotedExperiment(sh, row.FreeParams)
@@ -294,10 +295,10 @@ func parsePointSelector(s string) map[string]any {
 
 // renderPromoted writes the all-singleton experiment markdown with a back-link that
 // records the FULL origin provenance — the shape, the row's point-address, its
-// sweep-SHA (the code-version it was measured under), the free-param tuple, and the honest
-// (mean, SE) sweep estimate the config was selected on — so the promoted experiment can be
-// checked against (and recovered to) its origin row. `metric` is the objective's namespaced
-// metric (e.g. train.fold_score); the aggregated row carries `<metric>{,.se,.n}`.
+// code-fingerprint (the code-version it was measured under, metis#27), the free-param tuple,
+// and the honest (mean, SE) sweep estimate the config was selected on — so the promoted
+// experiment can be checked against (and recovered to) its origin row. `metric` is the
+// objective's namespaced metric (e.g. train.fold_score); the row carries `<metric>{,.se,.n}`.
 func renderPromoted(exp experiment.Experiment, fromShape string, row ledger.Row, metric string) string {
 	var b strings.Builder
 	b.WriteString("---\n")
@@ -306,7 +307,7 @@ func renderPromoted(exp experiment.Experiment, fromShape string, row ledger.Row,
 		fmt.Fprintf(&b, "competition: %s\n", exp.Competition)
 	}
 	fmt.Fprintf(&b, "seed: %d\nstatus: active\n", exp.Seed)
-	fmt.Fprintf(&b, "promoted_from: %s @ %s (sweep %s) %s\n", fromShape, row.PointAddr, short(row.SweepSHA), freeParamTupleMap(row.FreeParams))
+	fmt.Fprintf(&b, "promoted_from: %s @ %s (code %s) %s\n", fromShape, row.PointAddr, short(row.CodeFingerprint), freeParamTupleMap(row.FreeParams))
 	// The honest per-config estimate the winner was selected on (mean ± SE over n folds) —
 	// NOT a resubstitution number: this is the sweep's inner-CV estimate, recorded as
 	// provenance so the promotion carries WHY this config won. `.se`/`.n` are the ledger's

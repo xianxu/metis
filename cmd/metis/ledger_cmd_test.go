@@ -44,10 +44,10 @@ func writePerFoldLedger(t *testing.T, dir string) string {
 	f0, f1 := 0, 1
 	var led ledger.Ledger
 	led.Append(
-		ledger.Row{SweepSHA: "sha", PointAddr: "a0", FreeParams: map[string]any{"train.model": "a"}, Fold: &f0, Metrics: map[string]float64{"train.fold_score": 0.80}, Status: "ok"},
-		ledger.Row{SweepSHA: "sha", PointAddr: "a1", FreeParams: map[string]any{"train.model": "a"}, Fold: &f1, Metrics: map[string]float64{"train.fold_score": 0.90}, Status: "ok"},
-		ledger.Row{SweepSHA: "sha", PointAddr: "b0", FreeParams: map[string]any{"train.model": "b"}, Fold: &f0, Metrics: map[string]float64{"train.fold_score": 0.70}, Status: "ok"},
-		ledger.Row{SweepSHA: "sha", PointAddr: "b1", FreeParams: map[string]any{"train.model": "b"}, Fold: &f1, Metrics: map[string]float64{"train.fold_score": 0.72}, Status: "ok"},
+		ledger.Row{CodeFingerprint: "cf", PointAddr: "a0", FreeParams: map[string]any{"train.model": "a"}, Fold: &f0, Metrics: map[string]float64{"train.fold_score": 0.80}, Status: "ok"},
+		ledger.Row{CodeFingerprint: "cf", PointAddr: "a1", FreeParams: map[string]any{"train.model": "a"}, Fold: &f1, Metrics: map[string]float64{"train.fold_score": 0.90}, Status: "ok"},
+		ledger.Row{CodeFingerprint: "cf", PointAddr: "b0", FreeParams: map[string]any{"train.model": "b"}, Fold: &f0, Metrics: map[string]float64{"train.fold_score": 0.70}, Status: "ok"},
+		ledger.Row{CodeFingerprint: "cf", PointAddr: "b1", FreeParams: map[string]any{"train.model": "b"}, Fold: &f1, Metrics: map[string]float64{"train.fold_score": 0.72}, Status: "ok"},
 	)
 	b, err := ledger.Encode(led)
 	if err != nil {
