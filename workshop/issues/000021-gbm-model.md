@@ -1,11 +1,12 @@
 ---
 id: 000021
-status: open
+status: working
 deps: []
 github_issue:
 created: 2026-07-07
-updated: 2026-07-07
+updated: 2026-07-11
 estimate_hours:
+started: 2026-07-11T21:50:20-07:00
 ---
 
 # GBM model branch — HistGradientBoosting model step-type
