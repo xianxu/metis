@@ -69,7 +69,11 @@ identical on a non-Kaggle platform?* — if yes, it lives here.
   `shape.Expand` config), `FixedKFolds` (the inner resample — k folds over the materialized partition),
   `SingleDriver` (the degenerate outer driver:single). Adaptive Samplers use the feedback edge and are
   later impls against the SAME node: metis#23 nested-CV = an outer resample Sampler swapping `SingleDriver`,
-  racing/Bayesian = feedback-driven `Ask`. `Aggregate` → `MeanSE` (the honest per-config
+  racing/Bayesian = feedback-driven `Ask`. **metis#23 M1 (landed)** is the outer-fold **sealing spine** the
+  driver builds on: `outer-split` materializes k `analysis_i/` **subset dataset dirs** (L1 structural — assessment
+  rows physically absent from selection) + a `METIS_READ_ROOT` confinement asserted at `metis/io.py:exp_path`
+  (L2 chokepoint — a base-dataset read outside the analysis root is a loud error; handoffs bypass it). Shared by
+  #20/kbench#8. `Aggregate` → `MeanSE` (the honest per-config
   `(mean, SE, meanComplexity)`, keyed on the sorted told-set — an adaptive `Done` re-reduces the same
   scores for free). **The select rule (metis#19)** is a pure `SelectConfigs` (`select.go`) that
   `GridConfigs.Done` calls: `objective.select` is a tagged union (`argmax-mean|one-std-err|pct-loss|mean-std`,

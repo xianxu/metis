@@ -136,12 +136,27 @@ wrapped by **thin step-executables** honoring the contract above. Hermetic via *
   `upstream_path` (`$METIS_RUN_DIR/<step-id>/<file>`), `out_path`, `write_metrics`, plus
   Dataset `load_dataset`/`save_dataset` (parquet canonical; CSV also read, so fixtures stay
   git-legible).
-- **Step entrypoints — `metis/steps/{cv_split,train,predict}.py`:** thin `io → pure core → io`.
+- **Read confinement (metis#23 nested-CV, L2 chokepoint) — `metis/io.py`:** `within_root` +
+  `assert_within_read_root` wired into **`exp_path`** — the single base-dataset resolver
+  (`cv_split` direct + `dataset_dir`'s exp-relative fallback). When `METIS_READ_ROOT` is set
+  (an outer-fold sweep runs sealed on its `analysis_i/`), every exp-relative data read is
+  asserted within that root; a violation is a loud `RuntimeError` naming the file. Upstream
+  run-dir **handoffs** (`dataset_dir`'s upstream branch) bypass `exp_path` → never confined, so
+  a legit `features→train` handoff isn't flagged. Var unset (flat `driver:single`) → no-op.
+  Injected by `execStep` (`exec.go`, iff `readRoot` non-empty) from `runOpts.readRoot`; decoded
+  into `StepContext.read_root`. **Deferred (documented):** syscall-level airtightness (rogue
+  non-`metis.io` opens, parquet-via-C bypass of the audit hook) — the airtight version is a
+  syscall sensor swap. Pairs with the **L1 structural** seal (`outer-split` subset dirs).
+- **Step entrypoints — `metis/steps/{cv_split,train,predict,outer_split}.py`:** thin `io → pure core → io`.
   - `cv-split`: load Dataset (`with.dataset`, exp-relative) → `cv_folds` → `folds.json` + `{k,n}`.
   - `train`: load Dataset + upstream `folds.json` → `cv_score` + fit-on-all → `model.pkl` + `{cv_score}`.
   - `predict`: load Dataset + upstream `model.pkl` → predict test rows → `predictions.csv` + `{n_predictions}`.
-- **Wrappers — `steps/metis/{cv-split,train,predict}`:** bash bridges that `exec uv run
-  --project <root> python -m metis.steps.<type>`, resolving `<root>` from `$0` (cwd is the
+  - `outer-split` (metis#23, L1 structural seal): read the FULL dataset (**unconfined** — it must
+    see all rows to split them) → `cv_folds` → k `analysis_i/` **subset dataset dirs** (train where
+    `outer_fold != i`; assessment rows physically absent) + `outer_folds.json`. The sealing spine
+    **#20 (leakage-safe features) + kbench#8 (ticket-group survival) inherit.**
+- **Wrappers — `steps/metis/{cv-split,train,predict,outer-split}`:** bash bridges that `exec uv run
+  --project <root> python -m metis.trace metis.steps.<type>`, resolving `<root>` from `$0` (cwd is the
   step dir, not the root).
 - **Data-flow:** the dataset is referenced experiment-relative (`METIS_EXP_DIR`); `folds` and
   `model` flow between steps via the upstream-artifact convention (the step id is named in the
