@@ -5,7 +5,7 @@ deps: []
 github_issue:
 created: 2026-07-11
 updated: 2026-07-11
-estimate_hours:
+estimate_hours: 3.47
 started: 2026-07-11T20:25:34-07:00
 ---
 
