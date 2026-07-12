@@ -2,14 +2,15 @@
 // sweep's per-point results into a navigable, promotable table, so an engineer picks
 // the winner by sorting rather than scrolling logs. It is an APPEND-ONLY aggregation
 // VIEW over the per-run records (metis#3) — not a competing run store: a Row is the raw
-// reconstructable recipe (free-param tuple + code SHA + seed) plus the result. Pure —
+// reconstructable recipe (free-param tuple + code_fingerprint + seed) plus the result. Pure —
 // the CSV codec, dedup, and pick-best have no IO; reading the manifest/record.json and
 // committing the sidecar are the cmd/metis shell.
 //
-// Three keys per row: the free-param tuple (human navigation, ragged/sparse — columns
-// are the union of all branches' free-params, blank where inactive), the sweep-SHA (the
-// code-version, git short-SHA human address), and the point-address (global content
-// identity, used for append dedup).
+// Keys per row (metis#27): the free-param tuple (human navigation, ragged/sparse — columns
+// are the union of all branches' free-params, blank where inactive), the code_fingerprint (the
+// realized code identity over the run's D closure), and the point-address (intent identity).
+// Append dedup keys on (point_address, code_fingerprint) so same-config-different-code runs are
+// both kept.
 package ledger
 
 import (

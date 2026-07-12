@@ -225,7 +225,7 @@ func runPromote(o promoteOpts) error {
 	// (metis#28's `reproduce`), not a repo checkout. Surface the row's code identity so the
 	// operator knows which code version the estimate came from.
 	if row.CodeFingerprint != "" {
-		fmt.Fprintf(o.out, "metis: note: %s records code_fingerprint %s (the code the estimate was measured under); it runs against CURRENT code — exact reproduction of that run is `metis reproduce` (metis#28)\n", o.name, short(row.CodeFingerprint))
+		fmt.Fprintf(o.out, "metis: note: %s records code_fingerprint %s (the code that run used); the promoted config runs against CURRENT code — to reproduce that exact run, restore the recorded code closure from its side-ref (a `metis reproduce` verb is planned, metis#28)\n", o.name, short(row.CodeFingerprint))
 	}
 
 	exp, err := promotedExperiment(sh, row.FreeParams)

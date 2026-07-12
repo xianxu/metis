@@ -211,6 +211,14 @@ func TestShapeSweep_NestedLoopWinnerAndLedger(t *testing.T) {
 		if r.Fold == nil {
 			t.Errorf("a swept ledger row must carry a fold coordinate; got %+v", r)
 		}
+		// metis#27: the code_fingerprint must reach the PERSISTED row via the real
+		// runShapeSweep orchestration — captureSweepCode → backfillCodeManifest (sets the
+		// fingerprint on the record) MUST run before writeSweepLedger reads it back. A reorder
+		// would silently yield empty-fingerprint rows (re-opening the same-config-different-code
+		// collision) yet leave every other assertion green — this guards that ordering.
+		if r.CodeFingerprint == "" {
+			t.Errorf("a swept ledger row must carry a non-empty code_fingerprint (capture-before-ledger ordering); got %+v", r)
+		}
 	}
 	agg := ledger.AggregateView(led, "train.fold_score")
 	if len(agg.Rows) != 2 {

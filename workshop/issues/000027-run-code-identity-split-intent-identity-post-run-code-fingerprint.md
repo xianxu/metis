@@ -1,12 +1,13 @@
 ---
 id: 000027
-status: working
+status: codecomplete
 deps: []
 github_issue:
 created: 2026-07-11
 updated: 2026-07-11
 estimate_hours: 3.47
 started: 2026-07-11T20:25:34-07:00
+actual_hours: N/A
 ---
 
 # run/code identity split: intent-identity + post-run code fingerprint
@@ -133,6 +134,7 @@ review boundary at `sdlc close`.
 ## Log
 
 ### 2026-07-11
+- 2026-07-11: closed — Independently verified: go build ./... + go test ./... (9 pkgs) + go vet ./... all green. Acceptance TestCodeIdentity_TwoRowsOnCodeChange PASS (same point_addr, in-closure model.py edit -> distinct code_fingerprints -> two ledger rows, neither overwritten) + TestSingleRun_ContentAddressedDir PASS (dir = 64-hex point_address). Real-binary drive: record.json has point_address + code_fingerprint (2eb0e91a...), repo_shas ABSENT; CUE #RunRecord has code_fingerprint (repo_shas dropped). repo_shas/sweep_sha/repoSHAsOf/sweepSHAOf gone from non-test Go (only explanatory comments remain). ACTUAL=N/A: measured window (1.06h) EXCLUDES the pre-claim design walkthrough (the 3.47h estimate includes design) AND under-counts the fork-implemented build (active-time-v3 misses fork wall-time, interleaved-sessions caveat) -> recording it would pollute velocity toward under-estimating.; review verdict: FIX-THEN-SHIP
 - **`deps: []` is intentional.** The Log/Spec reference to metis#28 is a *conceptual* dependency (the
   "consistent D closure" definition), NOT a blocking code dep: #27 explicitly scopes out consistency
   *verification* and assumes within-run consistency (hashing the run-end closure). #28 depends on #27,
@@ -142,3 +144,4 @@ review boundary at `sdlc close`.
   intent-identity (shape blob-hash) + a post-run code fingerprint, so dropping `sweep_sha` doesn't
   collapse same-config-different-code runs. Folds in the "single-run dir should be content-addressed
   too" symmetry fix. Depends on metis#28 for the "consistent D closure" definition.
+- **FIX-THEN-SHIP applied** (close-review: 0 Critical, 2 Important): (1) `atlas/experiment.md` `PointAddress`/`CodeFingerprint` signatures corrected (base-layer API doc was misstating the changed surface); (2) `TestShapeSweep_NestedLoopWinnerAndLedger` now asserts a non-empty `code_fingerprint` in the persisted ledger — guards the load-bearing capture-before-`writeSweepLedger` ordering (a reorder would silently yield empty-fingerprint rows, re-opening the collision, with every other test still green). Minors: ledger package header + promote note de-staled. **Follow-up (minor, deferred):** `shapeBlobHash` duplicates `addSpecToClosure`'s abs→symlink→toplevel→Rel prologue — extract a shared `specRepoRel` helper (ARCH-DRY, cosmetic).
