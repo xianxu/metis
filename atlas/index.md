@@ -14,15 +14,18 @@ identical on a non-Kaggle platform?* — if yes, it lives here.
 - **`pkg/record`** (the L0 provenance record) — the unified per-step record (metis#3), the
   reproducibility atom the v1 cache/ledger chain keys off. Pure leaf over `pkg/cas`: `RunRecord`/
   `StepRecord` (emitted as `runs/<id>/record.json`, CUE-drift-guarded), `PointAddress` (the L0
-  run-identity: config+repo-SHAs+seed content-address), `OutputHash` (multi-file output reduction).
+  INTENT-identity: config+**shape-blob-hash**+seed content-address — metis#27 dropped repo_shas),
+  `CodeFingerprint` (the realized code identity over the run's D closure — metis#27), `OutputHash`
+  (multi-file output reduction).
   `Runner.Run` returns per-step `[]StepRun` so `cmd/metis` can assemble the record (git provenance
   via an injected `gitProbe`) and write `record.json` (the experiment `.md` is immutable input, #13 —
   no `## Runs` write-back). Scope
   line: #3 owns the record + point-address; the trace/cache-key are #2, side-ref code capture #7/#8.
   See [experiment.md](experiment.md). [metis#3]
 - **`pkg/ledger`** (the shape-run ledger) — metis#8, the L1 tracking layer: a pure append-only,
-  **point-address-deduped** table (`Row` = free-param tuple / sweep-SHA / point-address / namespaced
-  metrics / status) with a **ragged** CSV codec (union columns, blank where absent), objective-driven
+  **(point-address, code-fingerprint)-deduped** table (`Row` = free-param tuple / code-fingerprint /
+  point-address / namespaced metrics / status — metis#27: same config + different code → both rows
+  kept) with a **ragged** CSV codec (union columns, blank where absent), objective-driven
   `Best`/`TopN`, and `Filter`. It is an *aggregation view* over #3's per-run records, not a second run
   store. The driver (`cmd/metis/ledger.go`): after a sweep, `rowsFromManifest` (pure) turns #7's
   manifest + the per-point `record.json`s (namespaced per-step metrics — the collision fix) into rows,
@@ -31,7 +34,7 @@ identical on a non-Kaggle platform?* — if yes, it lives here.
   **metis#18:** a `Row` is now a **raw per-fold** row (a `Fold` coordinate); `AggregateView(l, metric)`
   reduces them read-time → per-config `(mean, SE)` (`<metric>{,.se,.n}`) — the leaderboard `ledger show
   --sort` and `promote` sort over (metis#19's 1-SE select re-reduces the same rows, no re-run). A v1
-  non-fold row passes through untouched (idempotent). **`metis ledger show <shape> [--sweep|--sort|--top]`**
+  non-fold row passes through untouched (idempotent). **`metis ledger show <shape> [--fingerprint|--sort|--top]`**
   renders sorted/filtered views. **`metis promote <shape> (--best|--point 'k=v') --name X`** aggregates the
   raw fold rows to per-config `(mean,SE)` FIRST (so both `--best` and `--point` promote a *config* by its
   honest estimate, not one fold's row), then reconstructs the winner as a runnable experiment (pure
