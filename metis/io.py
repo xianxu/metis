@@ -126,8 +126,15 @@ def read_with(ctx: StepContext) -> dict:
 
 
 def exp_path(ctx: StepContext, rel: str) -> str:
-    """Resolve an experiment-relative path (e.g. a committed dataset dir)."""
-    return os.path.normpath(os.path.join(ctx.exp_dir, rel))
+    """Resolve an experiment-relative path (e.g. a committed dataset dir).
+
+    This is the confinement chokepoint (metis#23): base-dataset reads resolve here
+    (cv_split direct + dataset_dir's fallback), so an outer-fold sweep's reads are
+    asserted within METIS_READ_ROOT. Upstream run-dir handoffs bypass this (they take
+    dataset_dir's upstream branch), so a legitimate handoff is never confined."""
+    resolved = os.path.normpath(os.path.join(ctx.exp_dir, rel))
+    assert_within_read_root(resolved)
+    return resolved
 
 
 def upstream_path(ctx: StepContext, step_id: str, filename: str) -> str:
