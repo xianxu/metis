@@ -111,6 +111,20 @@ def test_train_per_fold_emits_score_and_complexity(tmp_path, monkeypatch):
     assert (ts / "model.pkl").exists() is False  # per-fold does not persist a model
 
 
+def test_train_per_fold_emits_complexity_for_hist_gbm(tmp_path, monkeypatch):
+    """metis#21: the per-fold branch is model-kind-generic — a hist_gbm config flows through
+    the same `complexity(model, kind)` seam and emits its total-leaves complexity (> 0)."""
+    run = tmp_path / "runs" / "r-gbm"
+    _run_step(monkeypatch, run, "split", {"dataset": "toy", "k": 3, "stratify": True}, cv_split.main)
+    ts = _run_step(monkeypatch, run, "train",
+                   {"dataset": "toy", "folds": "split",
+                    "model": {"hist_gbm": {"max_iter": 15, "max_leaf_nodes": 8}},
+                    "_fold": {"partition": "p", "idx": 0}}, train.main)
+    metrics = json.loads((ts / "metrics.json").read_text())
+    assert 0.0 <= metrics["fold_score"] <= 1.0
+    assert metrics["complexity"] > 0.0  # hist_gbm total leaves across boosted trees
+
+
 def test_step_context_requires_env(monkeypatch):
     for v in ("METIS_STEP_DIR", "METIS_RUN_DIR", "METIS_STEP_ID", "METIS_EXP_DIR", "METIS_SEED"):
         monkeypatch.delenv(v, raising=False)

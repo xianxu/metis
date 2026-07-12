@@ -120,10 +120,12 @@ wrapped by **thin step-executables** honoring the contract above. Hermetic via *
     selectors. The modality-agnostic envelope adapters produce (tabular now).
   - `split.py` `cv_folds(df, k, seed, stratify_col?)` — deterministic (Stratified)KFold
     fold assignment.
-  - `model.py` `train`/`predict`/`cv_score` — sklearn `logreg`/`rf`, deterministic by seed;
+  - `model.py` `train`/`predict`/`cv_score` — sklearn `logreg`/`rf`/`hist_gbm`, deterministic by seed;
     `cv_score` averages per-fold validation accuracy. `make_model(kind, seed, params)` **applies
-    the swept hyperparams** (`logreg` C; `rf` n_estimators/max_depth); `params` threads through
-    `train`/`cv_score` (default `{}` = sklearn defaults).
+    the swept hyperparams** (`logreg` C; `rf` n_estimators/max_depth; `hist_gbm`
+    learning_rate/max_iter/max_leaf_nodes/max_depth — metis#21); `params` threads through
+    `train`/`cv_score` (default `{}` = sklearn defaults). Adding a model kind is Python-only (`MODELS`
+    + `make_model` + `complexity`); the Go layer derives the family structurally (`FamilyOf`), zero edits.
   - **Model-config contract (`parse_model_config`, metis#12):** the `with["model"]` value is EITHER
     a kind string (`"logreg"`) OR the **`$any` map** (tagged, ex-`$oneof`) single-key bundle carrying the
     swept hyperparams (`{"rf": {"n_estimators": 200, "max_depth": 4}}`); `parse_model_config(raw) →
