@@ -49,6 +49,43 @@ func TestExecStep_InjectsEnv(t *testing.T) {
 	}
 }
 
+// TestExecStep_ReadRootInjectedOnlyWhenSet asserts the metis#23 confinement env:
+// METIS_READ_ROOT is injected iff execStep.readRoot is non-empty, so the flat
+// driver:single path (readRoot == "") stays unconfined.
+func TestExecStep_ReadRootInjectedOnlyWhenSet(t *testing.T) {
+	root := repoRoot(t)
+	base := execStep{stepPath: []string{filepath.Join(root, "testdata", "steps")}, out: io.Discard}
+
+	// (a) readRoot set → env carries it.
+	set := base
+	set.readRoot = "/data/analysis_0"
+	runDir := t.TempDir()
+	if _, err := set.Execute(experiment.Step{ID: "e", Uses: "test/env-dump"}, runDir); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if got := readEnvDump(t, runDir); !strings.Contains(got, "READ_ROOT=/data/analysis_0") {
+		t.Errorf("readRoot set but env missing it; got:\n%s", got)
+	}
+
+	// (b) readRoot empty → var absent (env-dump reports <unset>), so single is unconfined.
+	runDir2 := t.TempDir()
+	if _, err := base.Execute(experiment.Step{ID: "e", Uses: "test/env-dump"}, runDir2); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if got := readEnvDump(t, runDir2); !strings.Contains(got, "READ_ROOT=<unset>") {
+		t.Errorf("readRoot empty but METIS_READ_ROOT was injected; got:\n%s", got)
+	}
+}
+
+func readEnvDump(t *testing.T, runDir string) string {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(runDir, "e", "env.txt"))
+	if err != nil {
+		t.Fatalf("read env.txt: %v", err)
+	}
+	return string(b)
+}
+
 // TestCollectArtifacts_RecursiveExcludesReserved covers the M2-deferred fix: the
 // collector now recurses into subdirectories, and excludes with.json/metrics.json
 // only at the step-dir TOP level (a nested sub/metrics.json is a real artifact).

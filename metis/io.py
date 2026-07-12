@@ -106,6 +106,7 @@ class StepContext:
     step_id: str
     exp_dir: str
     seed: int
+    read_root: str | None = None  # metis#23: outer-fold analysis root (None = unconfined)
 
 
 def step_context() -> StepContext:
@@ -117,6 +118,7 @@ def step_context() -> StepContext:
         step_id=_require_env("METIS_STEP_ID"),
         exp_dir=_require_env("METIS_EXP_DIR"),
         seed=int(_require_env("METIS_SEED")),
+        read_root=os.environ.get("METIS_READ_ROOT"),  # optional (metis#23)
     )
 
 

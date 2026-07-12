@@ -28,6 +28,7 @@ type execStep struct {
 	stepPath []string  // dirs searched for <layer>/<steptype>
 	expDir   string    // absolute experiment dir; anchor for exp-relative step inputs
 	seed     int       // the experiment's seed, exposed to every step for reproducibility
+	readRoot string    // metis#23: outer-fold analysis root; when set, confines base-dataset reads (empty = unconfined)
 	out      io.Writer // plain streaming progress
 }
 
@@ -63,6 +64,11 @@ func (e execStep) Execute(step experiment.Step, runDir string) (experiment.StepR
 		"METIS_EXP_DIR="+e.expDir,
 		"METIS_SEED="+strconv.Itoa(e.seed),
 	)
+	if e.readRoot != "" {
+		// metis#23 confinement: only inject when sealing an outer-fold sweep, so the
+		// flat driver:single path leaves the var unset (unconfined).
+		cmd.Env = append(cmd.Env, "METIS_READ_ROOT="+e.readRoot)
+	}
 	if combined, err := cmd.CombinedOutput(); err != nil {
 		// Runner.Run already prefixes `step %q:`; name the executable, not the id
 		// again, to avoid a doubled "step first: step first" prefix.

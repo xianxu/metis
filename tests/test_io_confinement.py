@@ -81,3 +81,14 @@ def test_handoff_read_under_run_dir_not_confined(tmp_path, monkeypatch):
     monkeypatch.setenv("METIS_READ_ROOT", str(tmp_path / "analysis_0"))  # unrelated to run_dir
     # dataset_dir resolves the upstream artifact WITHOUT touching exp_path → no confinement.
     assert dataset_dir(ctx, "features") == str(upstream)
+
+
+def test_step_context_decodes_read_root(monkeypatch):
+    from metis.io import step_context
+    for k, v in {"METIS_STEP_DIR": "/s", "METIS_RUN_DIR": "/r", "METIS_STEP_ID": "x",
+                 "METIS_EXP_DIR": "/e", "METIS_SEED": "42"}.items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.setenv("METIS_READ_ROOT", "/data/analysis_0")
+    assert step_context().read_root == "/data/analysis_0"
+    monkeypatch.delenv("METIS_READ_ROOT")
+    assert step_context().read_root is None

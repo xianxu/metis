@@ -58,6 +58,7 @@ type runOpts struct {
 	exec experiment.StepExecutor // test seam: an injected fake replaces the subprocess
 	//                              execStep (nil → the production execStep). Composes with
 	//                              cache: the caching decorator still wraps it.
+	readRoot string // metis#23: when set, the production execStep confines base-dataset reads to this root
 }
 
 // runExperiment reads the experiment at o.expPath and dispatches: a `type:
@@ -138,7 +139,7 @@ func runResolvedExperiment(exp experiment.Experiment, o runOpts, runID string, n
 		return experiment.Run{}, err
 	}
 
-	var exec experiment.StepExecutor = execStep{stepPath: o.stepPath, expDir: expDir, seed: exp.Seed, out: out}
+	var exec experiment.StepExecutor = execStep{stepPath: o.stepPath, expDir: expDir, seed: exp.Seed, readRoot: o.readRoot, out: out}
 	if o.exec != nil {
 		exec = o.exec // test seam: drive the loop/cache with a fake, no subprocess
 	}
