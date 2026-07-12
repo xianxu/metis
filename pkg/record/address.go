@@ -26,16 +26,19 @@ func CanonicalHash(v any) (Hash, error) {
 	return cas.HashOf(b), nil
 }
 
-// PointAddress mints the L0 run-identity: the content-address of the resolved config
-// across the whole DAG, the repo SHAs, and the seed. It is the repro/identity key
-// metis#8's ledger derives from — deliberately git-SHA-based and coarse (NOT a
-// per-step read-set trace; that is metis#2's cache key).
-func PointAddress(resolvedWith map[string]map[string]any, repoSHAs map[string]string, seed int) (Hash, error) {
+// PointAddress mints the L0 INTENT-identity: the content-address of the resolved config
+// across the whole DAG, the shape file's git blob-hash, and the seed. It is the pre-run
+// "what I meant to run" key metis#8's ledger derives from — pure inputs, computable
+// before the run (the shape blob-hash is git-hash-object'd up front). It deliberately
+// does NOT carry code identity (repo_shas was dropped in metis#27) — code identity is
+// the POST-run code_fingerprint (CodeFingerprint) over the run's read-set D closure, so
+// same-config-different-code runs are distinguished by fingerprint, not conflated here.
+func PointAddress(resolvedWith map[string]map[string]any, shapeBlobHash string, seed int) (Hash, error) {
 	h, err := CanonicalHash(struct {
-		ResolvedWith map[string]map[string]any `json:"resolved_with"`
-		RepoSHAs     map[string]string         `json:"repo_shas"`
-		Seed         int                       `json:"seed"`
-	}{resolvedWith, repoSHAs, seed})
+		ResolvedWith  map[string]map[string]any `json:"resolved_with"`
+		ShapeBlobHash string                    `json:"shape_blob_hash"`
+		Seed          int                       `json:"seed"`
+	}{resolvedWith, shapeBlobHash, seed})
 	if err != nil {
 		return "", fmt.Errorf("point-address: %w", err)
 	}

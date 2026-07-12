@@ -34,9 +34,9 @@ func TestCanonicalHash_DeterministicAndSensitive(t *testing.T) {
 }
 
 // mustAddr mints a point-address, failing the test on the (well-formed-input) error.
-func mustAddr(t *testing.T, rw map[string]map[string]any, shas map[string]string, seed int) Hash {
+func mustAddr(t *testing.T, rw map[string]map[string]any, shapeBlobHash string, seed int) Hash {
 	t.Helper()
-	h, err := PointAddress(rw, shas, seed)
+	h, err := PointAddress(rw, shapeBlobHash, seed)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,10 +50,10 @@ func TestPointAddress_DeterministicAcrossCalls(t *testing.T) {
 		"prep":  {"k": 5, "shuffle": true},
 		"train": {"model": "logreg", "c": 1.0},
 	}
-	shas := map[string]string{"metis": "abc123", "kbench": "def456"}
-	first := mustAddr(t, rw, shas, 42)
+	shapeBlobHash := "abc123def456"
+	first := mustAddr(t, rw, shapeBlobHash, 42)
 	for i := 0; i < 25; i++ {
-		if got := mustAddr(t, rw, shas, 42); got != first {
+		if got := mustAddr(t, rw, shapeBlobHash, 42); got != first {
 			t.Fatalf("PointAddress not deterministic on call %d: %q != %q", i, got, first)
 		}
 	}
@@ -62,13 +62,13 @@ func TestPointAddress_DeterministicAcrossCalls(t *testing.T) {
 	}
 }
 
-// The address changes iff a determinant changes (resolved-with, repo-SHA, seed).
+// The address changes iff a determinant changes (resolved-with, shape-blob, seed).
 func TestPointAddress_Sensitivity(t *testing.T) {
-	base := mustAddr(t, map[string]map[string]any{"s": {"k": 5}}, map[string]string{"m": "sha1"}, 42)
+	base := mustAddr(t, map[string]map[string]any{"s": {"k": 5}}, "blob1", 42)
 	cases := map[string]Hash{
-		"changed resolved-with": mustAddr(t, map[string]map[string]any{"s": {"k": 6}}, map[string]string{"m": "sha1"}, 42),
-		"changed repo-SHA":      mustAddr(t, map[string]map[string]any{"s": {"k": 5}}, map[string]string{"m": "sha2"}, 42),
-		"changed seed":          mustAddr(t, map[string]map[string]any{"s": {"k": 5}}, map[string]string{"m": "sha1"}, 43),
+		"changed resolved-with": mustAddr(t, map[string]map[string]any{"s": {"k": 6}}, "blob1", 42),
+		"changed shape-blob":    mustAddr(t, map[string]map[string]any{"s": {"k": 5}}, "blob2", 42),
+		"changed seed":          mustAddr(t, map[string]map[string]any{"s": {"k": 5}}, "blob1", 43),
 	}
 	for name, addr := range cases {
 		if addr == base {
@@ -76,7 +76,7 @@ func TestPointAddress_Sensitivity(t *testing.T) {
 		}
 	}
 	// An identical determinant set reproduces the address.
-	if again := mustAddr(t, map[string]map[string]any{"s": {"k": 5}}, map[string]string{"m": "sha1"}, 42); again != base {
+	if again := mustAddr(t, map[string]map[string]any{"s": {"k": 5}}, "blob1", 42); again != base {
 		t.Errorf("identical determinants must reproduce the address: %q != %q", again, base)
 	}
 }
@@ -85,10 +85,10 @@ func TestPointAddress_Sensitivity(t *testing.T) {
 // json.Marshal rejects) must surface as an error, NOT a panic — it's user-reachable
 // input, so the derivation returns it for the caller to surface as a run error.
 func TestPointAddress_ErrorsOnNonFiniteConfig(t *testing.T) {
-	if _, err := PointAddress(map[string]map[string]any{"s": {"lr": math.Inf(1)}}, nil, 0); err == nil {
+	if _, err := PointAddress(map[string]map[string]any{"s": {"lr": math.Inf(1)}}, "", 0); err == nil {
 		t.Error("PointAddress(+Inf) must return an error, not panic or succeed")
 	}
-	if _, err := PointAddress(map[string]map[string]any{"s": {"lr": math.NaN()}}, nil, 0); err == nil {
+	if _, err := PointAddress(map[string]map[string]any{"s": {"lr": math.NaN()}}, "", 0); err == nil {
 		t.Error("PointAddress(NaN) must return an error, not panic or succeed")
 	}
 }
