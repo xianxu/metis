@@ -23,6 +23,32 @@ import pandas as pd
 from metis.dataset import Dataset
 from metis.schema import Schema
 
+# ── Read confinement (metis#23 nested-CV, L2 chokepoint) ─────────────────────
+# When METIS_READ_ROOT is set (an outer-fold sweep runs sealed on its analysis
+# subset dir), every EXP-RELATIVE data read must resolve under that root — else a
+# loud error. Asserted at exp_path (the base-dataset resolver); upstream run-dir
+# handoffs go through dataset_dir's upstream branch (not exp_path) and stay
+# unconfined, so a legitimate features→train handoff is never flagged.
+
+
+def within_root(path: str, root: str) -> bool:
+    """True iff `path` resolves under `root` (sep-aware; no string-prefix collision)."""
+    ap = os.path.abspath(path)
+    ar = os.path.abspath(root)
+    return ap == ar or ap.startswith(ar + os.sep)
+
+
+def assert_within_read_root(path: str) -> None:
+    """Refuse a data read outside METIS_READ_ROOT (metis#23 confinement). No-op when
+    the var is unset (the flat/single path + the outer scoring run are unconfined)."""
+    root = os.environ.get("METIS_READ_ROOT")
+    if root and not within_root(path, root):
+        raise RuntimeError(
+            f"read confinement (metis#23): {path!r} is outside METIS_READ_ROOT {root!r} "
+            f"— an outer-fold sweep must not read outside its analysis root (leakage)"
+        )
+
+
 # ── Dataset serialization ────────────────────────────────────────────────────
 
 
