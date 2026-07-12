@@ -133,6 +133,10 @@ review boundary at `sdlc close`.
 ## Log
 
 ### 2026-07-11
+- **`deps: []` is intentional.** The Log/Spec reference to metis#28 is a *conceptual* dependency (the
+  "consistent D closure" definition), NOT a blocking code dep: #27 explicitly scopes out consistency
+  *verification* and assumes within-run consistency (hashing the run-end closure). #28 depends on #27,
+  not the reverse.
 - Filed from a reproducibility architecture walkthrough. This is the **keystone** the sweep-key change
   (metis#26) depends on: it replaces the repo-HEAD code proxy in `point_address` with a pre-run
   intent-identity (shape blob-hash) + a post-run code fingerprint, so dropping `sweep_sha` doesn't
