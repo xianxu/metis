@@ -26,18 +26,54 @@ func CanonicalHash(v any) (Hash, error) {
 	return cas.HashOf(b), nil
 }
 
-// PointAddress mints the L0 run-identity: the content-address of the resolved config
-// across the whole DAG, the repo SHAs, and the seed. It is the repro/identity key
-// metis#8's ledger derives from — deliberately git-SHA-based and coarse (NOT a
-// per-step read-set trace; that is metis#2's cache key).
-func PointAddress(resolvedWith map[string]map[string]any, repoSHAs map[string]string, seed int) (Hash, error) {
+// PointAddress mints the L0 INTENT-identity: the content-address of the resolved config
+// across the whole DAG, the shape file's git blob-hash, and the seed. It is the pre-run
+// "what I meant to run" key metis#8's ledger derives from — pure inputs, computable
+// before the run (the shape blob-hash is git-hash-object'd up front). It deliberately
+// does NOT carry code identity (repo_shas was dropped in metis#27) — code identity is
+// the POST-run code_fingerprint (CodeFingerprint) over the run's read-set D closure, so
+// same-config-different-code runs are distinguished by fingerprint, not conflated here.
+func PointAddress(resolvedWith map[string]map[string]any, shapeBlobHash string, seed int) (Hash, error) {
 	h, err := CanonicalHash(struct {
-		ResolvedWith map[string]map[string]any `json:"resolved_with"`
-		RepoSHAs     map[string]string         `json:"repo_shas"`
-		Seed         int                       `json:"seed"`
-	}{resolvedWith, repoSHAs, seed})
+		ResolvedWith  map[string]map[string]any `json:"resolved_with"`
+		ShapeBlobHash string                    `json:"shape_blob_hash"`
+		Seed          int                       `json:"seed"`
+	}{resolvedWith, shapeBlobHash, seed})
 	if err != nil {
 		return "", fmt.Errorf("point-address: %w", err)
+	}
+	return h, nil
+}
+
+// CodeFingerprint content-addresses the code a run ACTUALLY executed: the run-end
+// read-set D closure reduced to a canonical manifest of (path, blob-hash) pairs. It is
+// the POST-run "what code ran" identity (metis#27) — recorded on the RunRecord and each
+// ledger row, so two runs of the same config with DIFFERENT code (different blobs) are
+// distinguished by fingerprint rather than colliding on point-address. The absolute
+// repo root (CodeRef.Repo) is DELIBERATELY excluded: captureClosure sets it to a
+// symlink-resolved absolute path, which would make the fingerprint machine/checkout-
+// specific — the code identity is (path, blob), not where the checkout lives. Sorted by
+// (path, blob) so it's stable regardless of D's discovery order; empty D → a defined,
+// stable hash (nil and empty normalize). metis#28 will swap the input for a per-step-
+// time closure + add a within-run consistency check; the hash itself is unchanged.
+func CodeFingerprint(d []CodeRef) (Hash, error) {
+	type entry struct {
+		Path     string `json:"path"`
+		BlobHash Hash   `json:"blob_hash"`
+	}
+	manifest := make([]entry, len(d)) // non-nil even for nil d → "[]" not "null"
+	for i, cr := range d {
+		manifest[i] = entry{Path: cr.Path, BlobHash: cr.BlobHash}
+	}
+	sort.Slice(manifest, func(i, j int) bool {
+		if manifest[i].Path != manifest[j].Path {
+			return manifest[i].Path < manifest[j].Path
+		}
+		return manifest[i].BlobHash < manifest[j].BlobHash
+	})
+	h, err := CanonicalHash(manifest)
+	if err != nil {
+		return "", fmt.Errorf("code-fingerprint: %w", err)
 	}
 	return h, nil
 }

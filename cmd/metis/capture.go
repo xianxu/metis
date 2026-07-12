@@ -266,6 +266,35 @@ func addSpecToClosure(closureByRepo map[string][]string, specPath string) {
 	closureByRepo[key] = append(closureByRepo[key], rel)
 }
 
+// shapeBlobHash returns the shape .md's git blob-hash — its content identity, computed
+// PRE-run so PointAddress can content-address the intent (metis#27). Reuses gitBlobHashes
+// over the spec's repo-relative path (symlink-resolved like addSpecToClosure, so Rel
+// against git's realpath toplevel is clean). Returns an error when the spec isn't in a git
+// work-tree — the caller falls back (a no-git run keeps a timestamp dir + an empty
+// shape-blob in its address).
+func shapeBlobHash(specPath string) (string, error) {
+	abs, err := filepath.Abs(specPath)
+	if err != nil {
+		return "", err
+	}
+	if r, err := filepath.EvalSymlinks(abs); err == nil {
+		abs = r
+	}
+	root, err := gitOut(filepath.Dir(abs), "rev-parse", "--show-toplevel")
+	if err != nil {
+		return "", err
+	}
+	rel, err := filepath.Rel(root, abs)
+	if err != nil {
+		return "", err
+	}
+	hashes, err := gitBlobHashes(root, []string{rel})
+	if err != nil {
+		return "", err
+	}
+	return string(hashes[rel]), nil
+}
+
 // resolveRoot symlink-resolves a repo root for a stable map key (macOS /var → /private/var).
 func resolveRoot(root string) string {
 	if r, err := filepath.EvalSymlinks(root); err == nil {
@@ -312,6 +341,16 @@ func backfillCodeManifest(expPath, runID string, d []record.CodeRef, commit, sta
 		}
 		rec.Steps[i].Code.CaptureStatus = status
 	}
+	// The realized code identity (metis#27): the ONE post-capture site where the run's D
+	// closure exists + the record is re-written. Two runs of the same config with different
+	// code get different fingerprints → the ledger keeps both. (buildRecord runs before D
+	// exists, so it can't set this.) A hash error (non-canonicalizable closure — unreachable
+	// for a string manifest) is surfaced rather than silently dropped.
+	fp, err := record.CodeFingerprint(d)
+	if err != nil {
+		return err
+	}
+	rec.CodeFingerprint = fp
 	return writeRecordJSON(filepath.Join(filepath.Dir(expPath), "runs", runID), rec)
 }
 

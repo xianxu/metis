@@ -5,30 +5,38 @@ import (
 	"testing"
 )
 
-func row(sha, addr string, fp map[string]any, metrics map[string]float64, status string) Row {
-	return Row{SweepSHA: sha, PointAddr: addr, FreeParams: fp, Metrics: metrics, Status: status}
+func row(fingerprint, addr string, fp map[string]any, metrics map[string]float64, status string) Row {
+	return Row{CodeFingerprint: fingerprint, PointAddr: addr, FreeParams: fp, Metrics: metrics, Status: status}
 }
 
-// Append is append-only + dedups by point-address: re-appending a seen address is a
-// no-op; a new address (e.g. a new code-version's rows) appends.
-func TestAppend_DedupByPointAddress(t *testing.T) {
+// Append is append-only + dedups by (point-address, code-fingerprint) — the metis#27
+// composite identity: re-appending a seen (addr, fingerprint) is a no-op; a new address
+// appends; AND the SAME address with a DIFFERENT fingerprint (same config, different code)
+// appends too, so both variations are preserved (neither silently overwritten).
+func TestAppend_DedupByPointAddrAndFingerprint(t *testing.T) {
 	var l Ledger
 	l.Append(
-		row("sha1", "addr-a", map[string]any{"model": "logreg"}, map[string]float64{"train.cv_score": 0.8}, "ok"),
-		row("sha1", "addr-b", map[string]any{"model": "rf"}, map[string]float64{"train.cv_score": 0.82}, "ok"),
+		row("cf1", "addr-a", map[string]any{"model": "logreg"}, map[string]float64{"train.cv_score": 0.8}, "ok"),
+		row("cf1", "addr-b", map[string]any{"model": "rf"}, map[string]float64{"train.cv_score": 0.82}, "ok"),
 	)
 	if len(l.Rows) != 2 {
 		t.Fatalf("want 2 rows, got %d", len(l.Rows))
 	}
-	// Re-append the same addresses (idempotent re-run) → no growth.
-	l.Append(row("sha1", "addr-a", map[string]any{"model": "logreg"}, map[string]float64{"train.cv_score": 0.8}, "ok"))
+	// Re-append the same (addr, fingerprint) (idempotent re-run) → no growth.
+	l.Append(row("cf1", "addr-a", map[string]any{"model": "logreg"}, map[string]float64{"train.cv_score": 0.8}, "ok"))
 	if len(l.Rows) != 2 {
-		t.Errorf("re-appending a seen point-address must be a no-op, got %d rows", len(l.Rows))
+		t.Errorf("re-appending a seen (addr, fingerprint) must be a no-op, got %d rows", len(l.Rows))
 	}
-	// A new code-version's row (new address) appends.
-	l.Append(row("sha2", "addr-a2", map[string]any{"model": "logreg"}, map[string]float64{"train.cv_score": 0.85}, "ok"))
+	// A new point-address appends.
+	l.Append(row("cf1", "addr-c", map[string]any{"model": "logreg"}, map[string]float64{"train.cv_score": 0.85}, "ok"))
 	if len(l.Rows) != 3 {
 		t.Errorf("a new point-address must append, got %d rows", len(l.Rows))
+	}
+	// SAME point-address, DIFFERENT code fingerprint (same config, different code) → appends
+	// (the metis#27 identity split — the exact collision this fixes; both must survive).
+	l.Append(row("cf2", "addr-a", map[string]any{"model": "logreg"}, map[string]float64{"train.cv_score": 0.9}, "ok"))
+	if len(l.Rows) != 4 {
+		t.Errorf("same addr + new fingerprint must append (not overwrite), got %d rows", len(l.Rows))
 	}
 }
 
@@ -47,7 +55,7 @@ func TestCSV_RaggedRoundTrip(t *testing.T) {
 	}
 	header := strings.SplitN(string(csv), "\n", 2)[0]
 	// Union columns present (ragged): C (logreg-only) AND n_estimators (rf-only).
-	for _, col := range []string{"fp.C", "fp.model", "fp.n_estimators", "metric.train.cv_score", "sweep_sha", "point_addr", "status"} {
+	for _, col := range []string{"fp.C", "fp.model", "fp.n_estimators", "metric.train.cv_score", "code_fingerprint", "point_addr", "status"} {
 		if !strings.Contains(header, col) {
 			t.Errorf("header missing union column %q: %s", col, header)
 		}
@@ -179,10 +187,42 @@ func TestSortAll_KeepsFailedRows(t *testing.T) {
 }
 
 // foldRow builds a raw per-fold Row (metis#18) with the given fold coordinate.
-func foldRow(sha, addr string, fp map[string]any, fold int, score float64, status string) Row {
+func foldRow(fingerprint, addr string, fp map[string]any, fold int, score float64, status string) Row {
 	f := fold
-	return Row{SweepSHA: sha, PointAddr: addr, FreeParams: fp, Fold: &f,
+	return Row{CodeFingerprint: fingerprint, PointAddr: addr, FreeParams: fp, Fold: &f,
 		Metrics: map[string]float64{"train.fold_score": score}, Status: status}
+}
+
+// metis#19: AggregateView means EVERY metric column (so train.complexity flows to the
+// aggregate rows for the select rule), keeping .se/.n only for the objective metric.
+func TestAggregateView_MeansAllMetrics(t *testing.T) {
+	var l Ledger
+	cfg := map[string]any{"train.model": "rf"}
+	f0, f1 := 0, 1
+	l.Append(
+		Row{CodeFingerprint: "s", PointAddr: "r0", FreeParams: cfg, Fold: &f0, Status: "ok",
+			Metrics: map[string]float64{"train.fold_score": 0.80, "train.complexity": 16}},
+		Row{CodeFingerprint: "s", PointAddr: "r1", FreeParams: cfg, Fold: &f1, Status: "ok",
+			Metrics: map[string]float64{"train.fold_score": 0.90, "train.complexity": 18}},
+	)
+	agg := AggregateView(l, "train.fold_score")
+	if len(agg.Rows) != 1 {
+		t.Fatalf("2 fold rows / 1 config → 1 aggregate row, got %d", len(agg.Rows))
+	}
+	m := agg.Rows[0].Metrics
+	if got := m["train.fold_score"]; got < 0.8499 || got > 0.8501 {
+		t.Errorf("objective mean = %v, want ~0.85", got)
+	}
+	if _, ok := m["train.fold_score.se"]; !ok {
+		t.Errorf(".se present only for the objective metric; missing")
+	}
+	if got := m["train.complexity"]; got != 17 { // mean(16,18)
+		t.Errorf("complexity mean = %v, want 17", got)
+	}
+	// a non-objective metric gets NO .se/.n (only its mean is meaningful for selection).
+	if _, ok := m["train.complexity.se"]; ok {
+		t.Errorf("non-objective metric should not carry .se")
+	}
 }
 
 // AggregateView reduces raw per-fold rows → one per-config (mean, SE, n) row, grouping by
@@ -252,16 +292,16 @@ func TestAggregateView_NonFoldRowPassesThrough(t *testing.T) {
 	}
 }
 
-// Filter selects rows by sweep-SHA (an invocation view).
-func TestFilter_BySweepSHA(t *testing.T) {
+// Filter selects rows by code-fingerprint (a code-version view).
+func TestFilter_ByFingerprint(t *testing.T) {
 	var l Ledger
 	l.Append(
-		row("sha1", "a", nil, nil, "ok"),
-		row("sha2", "b", nil, nil, "ok"),
-		row("sha1", "c", nil, nil, "ok"),
+		row("cf1", "a", nil, nil, "ok"),
+		row("cf2", "b", nil, nil, "ok"),
+		row("cf1", "c", nil, nil, "ok"),
 	)
-	got := Filter(l, "sha1")
+	got := Filter(l, "cf1")
 	if len(got.Rows) != 2 {
-		t.Errorf("filter by sha1 = %d rows, want 2", len(got.Rows))
+		t.Errorf("filter by cf1 = %d rows, want 2", len(got.Rows))
 	}
 }

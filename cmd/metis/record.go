@@ -57,14 +57,14 @@ func gitOut(dir string, args ...string) (string, error) {
 // Git provenance degrades gracefully: if the probe fails (e.g. running outside a git
 // repo) the run does NOT fail — it warns and records no repo-SHAs (the design's "v1:
 // warn" for a non-reproducible run). The point-address still mints from config+seed.
-func assembleRecord(git gitProbe, out io.Writer, dir, runDir string, exp experiment.Experiment, run experiment.Run, steps []experiment.StepRun) (record.RunRecord, error) {
+func assembleRecord(git gitProbe, out io.Writer, dir, runDir string, exp experiment.Experiment, run experiment.Run, steps []experiment.StepRun, shapeBlobHash string) (record.RunRecord, error) {
 	if git == nil {
 		git = gitCLI{}
 	}
-	name, sha, dirty, err := git.Probe(dir)
+	_, sha, dirty, err := git.Probe(dir)
 	if err != nil {
-		fmt.Fprintf(out, "metis: warning: no git provenance for %s (%v) — record omits repo-SHAs; the run is not commit-reproducible\n", dir, err)
-		name, sha, dirty = "", "", false
+		fmt.Fprintf(out, "metis: warning: no git provenance for %s (%v) — record omits the code commit; the run is not commit-reproducible\n", dir, err)
+		sha, dirty = "", false
 	}
 	outputHashes := make(map[string]record.Hash, len(steps))
 	for _, sr := range steps {
@@ -74,17 +74,19 @@ func assembleRecord(git gitProbe, out io.Writer, dir, runDir string, exp experim
 		}
 		outputHashes[sr.Step.ID] = record.OutputHash(fhs)
 	}
-	return buildRecord(run, exp.Steps, steps, outputHashes, name, sha, dirty)
+	return buildRecord(run, exp.Steps, steps, outputHashes, shapeBlobHash, sha, dirty)
 }
 
 // buildRecord assembles the RunRecord from the executed steps, their per-step output
 // hashes (computed by the caller from artifact bytes), and the git provenance, and
-// mints the point-address from the resolved config + repo SHA + seed. Pure aside from
-// PointAddress (which errors on non-finite config). #3 fills the coarse code identity
-// (commit + dirty); Upstream is populated below (each step's needs → the upstream
-// output-hashes, sorted — the metis#2 K_pre wiring). Code.D / Deps stay empty in the
-// record — that provenance population is deferred to metis#8 (git-side-ref durability).
-func buildRecord(run experiment.Run, allSteps []experiment.Step, steps []experiment.StepRun, outputHashes map[string]record.Hash, repoName, sha string, dirty bool) (record.RunRecord, error) {
+// mints the point-address (the INTENT identity) from the resolved config + the shape's
+// blob-hash + seed (metis#27 — repo_shas dropped). Pure aside from PointAddress (which
+// errors on non-finite config). #3 fills the coarse per-step code identity (Commit +
+// Dirty from sha/dirty); the run-level code_fingerprint is set later in
+// backfillCodeManifest (after D is captured — it doesn't exist here). Upstream is the
+// upstream output-hashes, sorted (the metis#2 K_pre wiring); Code.D/Deps stay empty until
+// metis#8's side-ref capture backfills them.
+func buildRecord(run experiment.Run, allSteps []experiment.Step, steps []experiment.StepRun, outputHashes map[string]record.Hash, shapeBlobHash, sha string, dirty bool) (record.RunRecord, error) {
 	// The point-address is minted from the point's FULL INTENDED config (allSteps) —
 	// the point's stable repro identity, the SAME whether the run succeeded or a step
 	// failed mid-run. Runner.Run returns only the pre-failure StepRuns, so deriving
@@ -113,10 +115,10 @@ func buildRecord(run experiment.Run, allSteps []experiment.Step, steps []experim
 			Metrics:    sr.Result.Metrics,
 		})
 	}
-	// Single-source the {repoName: sha} construction (repoSHAsOf) so the sweep driver's
-	// pre-computed point-address runID can't drift from this record's internal address.
-	repoSHAs := repoSHAsOf(repoName, sha)
-	addr, err := record.PointAddress(resolvedWith, repoSHAs, run.Seed)
+	// The intent-address is minted from the shape's blob-hash (metis#27) the SAME way the
+	// sweep driver's pre-computed runID is (pointAddressOf), so the manifest run_id and this
+	// record's point_address can't drift.
+	addr, err := record.PointAddress(resolvedWith, shapeBlobHash, run.Seed)
 	if err != nil {
 		return record.RunRecord{}, err
 	}
@@ -125,7 +127,6 @@ func buildRecord(run experiment.Run, allSteps []experiment.Step, steps []experim
 		Experiment:   run.Experiment,
 		Seed:         run.Seed,
 		PointAddress: addr,
-		RepoSHAs:     repoSHAs,
 		Dirty:        dirty,
 		Steps:        stepRecs,
 		Started:      run.Started,

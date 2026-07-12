@@ -6,13 +6,13 @@ package sampler
 type SinglePoint struct{}
 
 // SingleDriver is the degenerate outer Sampler for driver:single: no honest outer
-// resample — it runs the sweeper once on all data and passes its Winner through
+// resample — it runs the sweeper once on all data and passes its SweepResult through
 // (no estimate). The seam metis#23's k-outer-fold nested-CV driver replaces (an
 // adaptive-nesting Sampler that scores the winner on each sealed outer fold).
 type SingleDriver struct{}
 
 type driverState struct {
-	winner Winner
+	result SweepResult
 	told   bool
 }
 
@@ -26,14 +26,15 @@ func (SingleDriver) Ask(s driverState) ([]SinglePoint, bool) {
 	return []SinglePoint{{}}, false
 }
 
-// Tell captures the sweeper's Winner (the runPoint's output).
-func (SingleDriver) Tell(s driverState, _ SinglePoint, w Winner) driverState {
-	s.winner = w
+// Tell captures the sweeper's SweepResult (the runPoint's output).
+func (SingleDriver) Tell(s driverState, _ SinglePoint, r SweepResult) driverState {
+	s.result = r
 	s.told = true
 	return s
 }
 
-// Done passes the winner through — driver:single ships it (no honest estimate).
-func (SingleDriver) Done(s driverState) Winner { return s.winner }
+// Done passes the sweeper result through — driver:single ships its cross-family pick
+// (no honest estimate; that's driver:cv, metis#23).
+func (SingleDriver) Done(s driverState) SweepResult { return s.result }
 
-var _ Sampler[driverState, SinglePoint, Winner, Winner] = SingleDriver{}
+var _ Sampler[driverState, SinglePoint, SweepResult, SweepResult] = SingleDriver{}

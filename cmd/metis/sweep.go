@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 
 	"github.com/xianxu/metis/pkg/experiment"
@@ -24,6 +25,13 @@ const partitionStepID = "cv-split"
 // namespaced form (`<train-step>.fold_score`); AggregateView reduces them to per-config
 // (mean, SE). (Kept as the bare name here; run.Metrics is the flat merge.)
 const foldMetric = "fold_score"
+
+// foldComplexityMetric is the bare per-fold metric the train step emits alongside
+// fold_score (metis#19): the fitted model's realized complexity (rf mean leaves / logreg
+// coef count). runPipelineFold reads it into FoldOutcome; absent → HasComplexity stays
+// false (the guard for a parsimony rule keys off this). Ledger-namespaced to
+// `<train-step>.complexity`.
+const foldComplexityMetric = "complexity"
 
 // sweepManifest groups the point-runs an experiment-shape invocation produced. Its
 // identity (ShapeRunID) filters the accumulating ledger (metis#8) by invocation /
@@ -58,16 +66,16 @@ type configScore struct {
 // the manifest + per-config estimates, and captures the first fatal error (the pure Run
 // has no error channel, so a fatal fold sets ss.err and short-circuits the rest).
 type shapeSweep struct {
-	o        runOpts
-	sh       experiment.Shape
-	now      func() time.Time
-	out      io.Writer
-	repoSHAs map[string]string
-	codeID   string // the frozen HEAD sha; a mid-sweep change detect-and-aborts
-	partRef  sampler.PartitionRef
-	man      sweepManifest
-	configs  []configScore
-	err      error
+	o             runOpts
+	sh            experiment.Shape
+	now           func() time.Time
+	out           io.Writer
+	shapeBlobHash string // metis#27: the shape .md's blob-hash — the intent-address term
+	codeID        string // the frozen HEAD sha; a mid-sweep change detect-and-aborts
+	partRef       sampler.PartitionRef
+	man           sweepManifest
+	configs       []configScore
+	err           error
 }
 
 // runShapeSweep drives the metis#18 nested Sampler loop: the sweeper (GridConfigs over the
@@ -78,8 +86,10 @@ type shapeSweep struct {
 // + the manifest + the raw per-fold ledger. Per-fold failure is fatal to the sweep (surfaced,
 // not swallowed — a partial resample is not an honest estimate).
 func runShapeSweep(o runOpts, sh experiment.Shape, now func() time.Time, out io.Writer) error {
-	repoName, sha, _ := probeRepo(o.git, filepath.Dir(o.expPath))
-	repoSHAs := repoSHAsOf(repoName, sha)
+	// probeRepo's HEAD sha still drives the mid-sweep code-freeze guard (codeID) — NOT the
+	// identity (metis#27 dropped repo_shas). The shape's blob-hash content-addresses the intent.
+	_, sha, _ := probeRepo(o.git, filepath.Dir(o.expPath))
+	sbh, _ := shapeBlobHash(o.expPath)
 
 	configPts, err := shape.Expand(sh.Pipeline, 0)
 	if err != nil {
@@ -100,12 +110,12 @@ func runShapeSweep(o runOpts, sh experiment.Shape, now func() time.Time, out io.
 		return nil
 	}
 
-	shapeRunID, err := shapeRunIdentity(sh, repoSHAs)
+	shapeRunID, err := shapeRunIdentity(sh, sbh)
 	if err != nil {
 		return err
 	}
 	ss := &shapeSweep{
-		o: o, sh: sh, now: now, out: out, repoSHAs: repoSHAs, codeID: sha,
+		o: o, sh: sh, now: now, out: out, shapeBlobHash: sbh, codeID: sha,
 		partRef: partitionRef(sh),
 		man:     sweepManifest{ShapeRunID: shapeRunID, Shape: sh.ID, Sampler: sh.Sweeper.Sampler, Seed: sh.Seed},
 	}
@@ -114,14 +124,16 @@ func runShapeSweep(o runOpts, sh experiment.Shape, now func() time.Time, out io.
 
 	// The three-level nested fold — driver ⊃ sweeper ⊃ resample, each the SAME Sampler node
 	// (metis#18). driver:single (SingleDriver) runs the sweeper once on all data and passes
-	// its Winner through; #23's driver:cv is a one-line swap of this outer Sampler. The
-	// sweeper (GridConfigs) grids over configs; the inner FixedKFolds scores each over k folds.
-	winner := sampler.Run(ctx, sampler.SingleDriver{}, func(sampler.SinglePoint) sampler.Winner {
+	// its SweepResult through; #23's driver:cv is a one-line swap of this outer Sampler. The
+	// sweeper (GridConfigs) grids over configs, Done-selecting via the metis#19 rule → a
+	// per-family winner map + the cross-family ship pick; the inner FixedKFolds scores each
+	// config over k folds → (mean, SE, complexity).
+	res := sampler.Run(ctx, sampler.SingleDriver{}, func(sampler.SinglePoint) sampler.SweepResult {
 		return sampler.Run(ctx,
 			sampler.GridConfigs{Points: configPts, Direction: sh.Sweeper.Objective.Direction, Select: sh.Sweeper.Objective.Select},
 			func(c shape.Point) sampler.MeanSE {
 				ms := sampler.Run(ctx, sampler.FixedKFolds{K: k},
-					func(f sampler.FoldPoint) float64 { return ss.runPipelineFold(c, f) })
+					func(f sampler.FoldPoint) sampler.FoldOutcome { return ss.runPipelineFold(c, f) })
 				ss.configs = append(ss.configs, configScore{point: c, meanSE: ms})
 				return ms
 			})
@@ -144,8 +156,26 @@ func runShapeSweep(o runOpts, sh experiment.Shape, now func() time.Time, out io.
 	if err := writeSweepLedger(o.expPath, ss.man); err != nil {
 		return err
 	}
-	ss.reportWinner(winner)
-	return ss.shipWinner(winner)
+	// Guard (metis#19): a parsimony rule (one-std-err/pct-loss) needs a measured complexity
+	// for every swept family — else the parsimony axis is silently dropped and the winner is
+	// quietly wrong. The raw fold rows are already persisted (re-selectable after a fix); only
+	// the ship/report is gated. Checked here (post-fold) because HasComplexity is only known
+	// after the folds run.
+	if err := sampler.GuardComplexity(sh.Sweeper.Objective.Select, ss.configStats()); err != nil {
+		return err
+	}
+	ss.reportWinner(res)
+	return ss.shipWinner(res.Ship)
+}
+
+// configStats builds the per-config stats (with each config's family) from the completed
+// sweep — the guard's input, matching the shape GridConfigs.Done reduces internally.
+func (ss *shapeSweep) configStats() []sampler.ConfigStat {
+	stats := make([]sampler.ConfigStat, len(ss.configs))
+	for i, c := range ss.configs {
+		stats[i] = sampler.ConfigStat{Point: c.point, Family: sampler.FamilyOf(c.point), Score: c.meanSE}
+	}
+	return stats
 }
 
 // shipWinner runs the driver:single ship: reconstruct the winning config's runnable
@@ -167,7 +197,7 @@ func (ss *shapeSweep) shipWinner(w sampler.Winner) error {
 		return nil
 	}
 	shipExp := shapeConfigToExperiment(ss.sh, w.Point)
-	shipRunID, err := pointAddressOf(shipExp, ss.repoSHAs)
+	shipRunID, err := pointAddressOf(shipExp, ss.shapeBlobHash)
 	if err != nil {
 		return fmt.Errorf("ship winner %s: %w", freeParamStrFromParams(w.Point.FreeParams), err)
 	}
@@ -185,23 +215,23 @@ func (ss *shapeSweep) shipWinner(w sampler.Winner) error {
 // the shared cached runner, record the manifest row, and return the fold_score the inner
 // resample Sampler folds. A fatal outcome sets ss.err and returns 0 (the pure Run keeps
 // going; runShapeSweep checks ss.err before using the winner).
-func (ss *shapeSweep) runPipelineFold(c shape.Point, f sampler.FoldPoint) float64 {
+func (ss *shapeSweep) runPipelineFold(c shape.Point, f sampler.FoldPoint) sampler.FoldOutcome {
 	if ss.err != nil {
-		return 0
+		return sampler.FoldOutcome{}
 	}
 	// Detect-and-abort: a mid-sweep HEAD-sha change breaks the shape-run's one-code
 	// identity (per-fold records stay correct). Compares the HEAD sha only, not the dirty
 	// flag — the sweep's own writes (runs/, manifest) dirty the tree (see codeID freeze).
 	if _, s, _ := probeRepo(ss.o.git, filepath.Dir(ss.o.expPath)); s != ss.codeID {
 		ss.err = fmt.Errorf("code changed mid-sweep (%s → %s) — re-run to sweep the new revision", ss.codeID, s)
-		return 0
+		return sampler.FoldOutcome{}
 	}
 
 	exp := ss.buildFoldExperiment(c, f)
-	runID, err := pointAddressOf(exp, ss.repoSHAs)
+	runID, err := pointAddressOf(exp, ss.shapeBlobHash)
 	if err != nil {
 		ss.err = fmt.Errorf("config %s fold %d: %w", freeParamStr(c), f.Idx, err)
-		return 0
+		return sampler.FoldOutcome{}
 	}
 	pointOpts := ss.o
 	pointOpts.inSweep = true // metis#14: the sweep captures once (captureSweepCode), not per point
@@ -211,7 +241,7 @@ func (ss *shapeSweep) runPipelineFold(c shape.Point, f sampler.FoldPoint) float6
 	// validation never-start, a persistence error) aborts — surfaced, never a half-scored config.
 	if runErr != nil {
 		ss.err = fmt.Errorf("config %s fold %d (%s): %w", freeParamStr(c), f.Idx, runID, runErr)
-		return 0
+		return sampler.FoldOutcome{}
 	}
 	ss.man.Points = append(ss.man.Points, pointRun{
 		RunID:      runID,
@@ -220,7 +250,10 @@ func (ss *shapeSweep) runPipelineFold(c shape.Point, f sampler.FoldPoint) float6
 		Status:     run.Status,
 		Metrics:    run.Metrics,
 	})
-	return run.Metrics[foldMetric]
+	// metis#19 M2: read the train step's realized-complexity metric. Present → the parsimony
+	// rules consume it; absent (HasComplexity false) → the guard rejects a parsimony rule.
+	cx, hasCx := run.Metrics[foldComplexityMetric]
+	return sampler.FoldOutcome{Score: run.Metrics[foldMetric], Complexity: cx, HasComplexity: hasCx}
 }
 
 // buildFoldExperiment reconstructs the runnable per-fold experiment for one (config, fold):
@@ -309,27 +342,40 @@ func partitionRef(sh experiment.Shape) sampler.PartitionRef {
 // pointAddressOf pre-computes a (config, fold) run's content-address (== its run-dir id),
 // minted from its FULL resolved config the SAME way buildRecord mints the record's address —
 // so the manifest run_id and the record.json point_address can't desync (metis#8's handoff).
-func pointAddressOf(exp experiment.Experiment, repoSHAs map[string]string) (string, error) {
+func pointAddressOf(exp experiment.Experiment, shapeBlobHash string) (string, error) {
 	resolved := make(map[string]map[string]any, len(exp.Steps))
 	for _, s := range exp.Steps {
 		resolved[s.ID] = s.With
 	}
-	h, err := record.PointAddress(resolved, repoSHAs, exp.Seed)
+	h, err := record.PointAddress(resolved, shapeBlobHash, exp.Seed)
 	return string(h), err
 }
 
-// reportWinner prints the honest per-config (mean, SE) leaderboard (best-first by the
-// objective) + the selected winner — the metis#18 deliverable. Ship (refit + submission) is
-// metis#18 M1a-5; here we report the selection.
-func (ss *shapeSweep) reportWinner(w sampler.Winner) {
+// reportWinner prints the honest per-config (mean, SE, complexity) leaderboard (best-first
+// by the objective), the per-family robust winners (metis#19), and the cross-family ship
+// pick. Ship (refit + submission) is metis#18 M1a-5; here we report the selection.
+func (ss *shapeSweep) reportWinner(res sampler.SweepResult) {
 	fmt.Fprintf(ss.out, "metis: sweep %s done — %d configs scored (manifest %s)\n", ss.sh.ID, len(ss.configs), ss.man.ShapeRunID[:12])
 	best := betterFirst(ss.configs, ss.sh.Sweeper.Objective.Direction)
-	fmt.Fprintln(ss.out, "  config                          mean      SE")
+	fmt.Fprintln(ss.out, "  config                          mean      SE       cx")
 	for _, cs := range best {
-		fmt.Fprintf(ss.out, "  %-30s  %.4f  %.4f\n", freeParamStr(cs.point), cs.meanSE.Mean, cs.meanSE.SE)
+		fmt.Fprintf(ss.out, "  %-30s  %.4f  %.4f  %6.1f\n", freeParamStr(cs.point), cs.meanSE.Mean, cs.meanSE.SE, cs.meanSE.MeanComplexity)
 	}
-	fmt.Fprintf(ss.out, "metis: winner %s — mean %.4f (SE %.4f) over %d folds\n",
-		freeParamStrFromParams(w.Point.FreeParams), w.Score.Mean, w.Score.SE, len(w.FoldKeys))
+	if len(res.PerFamily) > 1 {
+		fams := make([]string, 0, len(res.PerFamily))
+		for fam := range res.PerFamily {
+			fams = append(fams, fam)
+		}
+		sort.Strings(fams)
+		fmt.Fprintln(ss.out, "  per-family winners (metis#19):")
+		for _, fam := range fams {
+			w := res.PerFamily[fam]
+			fmt.Fprintf(ss.out, "    %-22s %-24s  mean %.4f  cx %.1f\n", fam, freeParamStrFromParams(w.Point.FreeParams), w.Score.Mean, w.Score.MeanComplexity)
+		}
+	}
+	w := res.Ship
+	fmt.Fprintf(ss.out, "metis: winner %s — mean %.4f (SE %.4f, cx %.1f) over %d folds\n",
+		freeParamStrFromParams(w.Point.FreeParams), w.Score.Mean, w.Score.SE, w.Score.MeanComplexity, len(w.FoldKeys))
 }
 
 // betterFirst returns the configs sorted best-first by the objective direction (a stable
@@ -354,16 +400,16 @@ func betterMeanSE(a, b float64, direction string) bool {
 // shapeRunIdentity mints the invocation identity that groups the sweep's point-runs:
 // hash(shape id + phases + sweeper + repo SHAs + seed). The config × fold set is derivable
 // from the shape, so the manifest stays thin.
-func shapeRunIdentity(sh experiment.Shape, repoSHAs map[string]string) (string, error) {
+func shapeRunIdentity(sh experiment.Shape, shapeBlobHash string) (string, error) {
 	h, err := record.CanonicalHash(struct {
-		Shape    string             `json:"shape"`
-		Data     []experiment.Step  `json:"data"`
-		Pipeline []experiment.Step  `json:"pipeline"`
-		Ship     []experiment.Step  `json:"ship"`
-		Sweeper  experiment.Sweeper `json:"sweeper"`
-		RepoSHAs map[string]string  `json:"repo_shas"`
-		Seed     int                `json:"seed"`
-	}{sh.ID, sh.Data, sh.Pipeline, sh.Ship, sh.Sweeper, repoSHAs, sh.Seed})
+		Shape         string             `json:"shape"`
+		Data          []experiment.Step  `json:"data"`
+		Pipeline      []experiment.Step  `json:"pipeline"`
+		Ship          []experiment.Step  `json:"ship"`
+		Sweeper       experiment.Sweeper `json:"sweeper"`
+		ShapeBlobHash string             `json:"shape_blob_hash"`
+		Seed          int                `json:"seed"`
+	}{sh.ID, sh.Data, sh.Pipeline, sh.Ship, sh.Sweeper, shapeBlobHash, sh.Seed})
 	return string(h), err
 }
 
@@ -390,16 +436,6 @@ func probeRepo(git gitProbe, dir string) (name, sha string, dirty bool) {
 		return "", "", false
 	}
 	return n, s, d
-}
-
-// repoSHAsOf builds the {repoName: sha} map buildRecord uses — same construction, so a
-// pre-computed PointAddress matches the record's internal one (incl. the no-git case).
-func repoSHAsOf(repoName, sha string) map[string]string {
-	m := map[string]string{}
-	if repoName != "" {
-		m[repoName] = sha
-	}
-	return m
 }
 
 // freeParamMap renders a config point's free-param path as a {path: value} map (for the

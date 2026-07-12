@@ -34,9 +34,9 @@ func TestCanonicalHash_DeterministicAndSensitive(t *testing.T) {
 }
 
 // mustAddr mints a point-address, failing the test on the (well-formed-input) error.
-func mustAddr(t *testing.T, rw map[string]map[string]any, shas map[string]string, seed int) Hash {
+func mustAddr(t *testing.T, rw map[string]map[string]any, shapeBlobHash string, seed int) Hash {
 	t.Helper()
-	h, err := PointAddress(rw, shas, seed)
+	h, err := PointAddress(rw, shapeBlobHash, seed)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,10 +50,10 @@ func TestPointAddress_DeterministicAcrossCalls(t *testing.T) {
 		"prep":  {"k": 5, "shuffle": true},
 		"train": {"model": "logreg", "c": 1.0},
 	}
-	shas := map[string]string{"metis": "abc123", "kbench": "def456"}
-	first := mustAddr(t, rw, shas, 42)
+	shapeBlobHash := "abc123def456"
+	first := mustAddr(t, rw, shapeBlobHash, 42)
 	for i := 0; i < 25; i++ {
-		if got := mustAddr(t, rw, shas, 42); got != first {
+		if got := mustAddr(t, rw, shapeBlobHash, 42); got != first {
 			t.Fatalf("PointAddress not deterministic on call %d: %q != %q", i, got, first)
 		}
 	}
@@ -62,13 +62,13 @@ func TestPointAddress_DeterministicAcrossCalls(t *testing.T) {
 	}
 }
 
-// The address changes iff a determinant changes (resolved-with, repo-SHA, seed).
+// The address changes iff a determinant changes (resolved-with, shape-blob, seed).
 func TestPointAddress_Sensitivity(t *testing.T) {
-	base := mustAddr(t, map[string]map[string]any{"s": {"k": 5}}, map[string]string{"m": "sha1"}, 42)
+	base := mustAddr(t, map[string]map[string]any{"s": {"k": 5}}, "blob1", 42)
 	cases := map[string]Hash{
-		"changed resolved-with": mustAddr(t, map[string]map[string]any{"s": {"k": 6}}, map[string]string{"m": "sha1"}, 42),
-		"changed repo-SHA":      mustAddr(t, map[string]map[string]any{"s": {"k": 5}}, map[string]string{"m": "sha2"}, 42),
-		"changed seed":          mustAddr(t, map[string]map[string]any{"s": {"k": 5}}, map[string]string{"m": "sha1"}, 43),
+		"changed resolved-with": mustAddr(t, map[string]map[string]any{"s": {"k": 6}}, "blob1", 42),
+		"changed shape-blob":    mustAddr(t, map[string]map[string]any{"s": {"k": 5}}, "blob2", 42),
+		"changed seed":          mustAddr(t, map[string]map[string]any{"s": {"k": 5}}, "blob1", 43),
 	}
 	for name, addr := range cases {
 		if addr == base {
@@ -76,7 +76,7 @@ func TestPointAddress_Sensitivity(t *testing.T) {
 		}
 	}
 	// An identical determinant set reproduces the address.
-	if again := mustAddr(t, map[string]map[string]any{"s": {"k": 5}}, map[string]string{"m": "sha1"}, 42); again != base {
+	if again := mustAddr(t, map[string]map[string]any{"s": {"k": 5}}, "blob1", 42); again != base {
 		t.Errorf("identical determinants must reproduce the address: %q != %q", again, base)
 	}
 }
@@ -85,11 +85,53 @@ func TestPointAddress_Sensitivity(t *testing.T) {
 // json.Marshal rejects) must surface as an error, NOT a panic — it's user-reachable
 // input, so the derivation returns it for the caller to surface as a run error.
 func TestPointAddress_ErrorsOnNonFiniteConfig(t *testing.T) {
-	if _, err := PointAddress(map[string]map[string]any{"s": {"lr": math.Inf(1)}}, nil, 0); err == nil {
+	if _, err := PointAddress(map[string]map[string]any{"s": {"lr": math.Inf(1)}}, "", 0); err == nil {
 		t.Error("PointAddress(+Inf) must return an error, not panic or succeed")
 	}
-	if _, err := PointAddress(map[string]map[string]any{"s": {"lr": math.NaN()}}, nil, 0); err == nil {
+	if _, err := PointAddress(map[string]map[string]any{"s": {"lr": math.NaN()}}, "", 0); err == nil {
 		t.Error("PointAddress(NaN) must return an error, not panic or succeed")
+	}
+}
+
+// CodeFingerprint content-addresses the run-end D closure: order-independent, blob-
+// sensitive, portable (the absolute Repo root must not perturb it), empty is defined.
+func TestCodeFingerprint(t *testing.T) {
+	base := []CodeRef{
+		{Repo: "/abs/metis", Path: "model.py", BlobHash: "b1"},
+		{Repo: "/abs/kbench", Path: "features.py", BlobHash: "b2"},
+	}
+	h, err := CodeFingerprint(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(h) != 64 {
+		t.Errorf("fingerprint should be a 64-hex hash, got %d chars", len(h))
+	}
+	// order-independent (sorted inside)
+	if h2, _ := CodeFingerprint([]CodeRef{base[1], base[0]}); h2 != h {
+		t.Errorf("CodeFingerprint must be order-independent: %q != %q", h2, h)
+	}
+	// a changed blob → a changed fingerprint
+	changed := []CodeRef{{Repo: "/abs/metis", Path: "model.py", BlobHash: "bX"}, base[1]}
+	if hc, _ := CodeFingerprint(changed); hc == h {
+		t.Error("a changed blob must change the fingerprint")
+	}
+	// the absolute Repo root must NOT affect the hash (portability across machines/checkouts)
+	moved := []CodeRef{
+		{Repo: "/other/machine/metis", Path: "model.py", BlobHash: "b1"},
+		{Repo: "/other/machine/kbench", Path: "features.py", BlobHash: "b2"},
+	}
+	if hm, _ := CodeFingerprint(moved); hm != h {
+		t.Errorf("absolute Repo root must not affect the fingerprint: %q != %q", hm, h)
+	}
+	// empty → a defined, stable hash (nil == empty)
+	e1, _ := CodeFingerprint(nil)
+	e2, _ := CodeFingerprint([]CodeRef{})
+	if e1 != e2 {
+		t.Error("nil and empty D must hash equally")
+	}
+	if len(e1) != 64 {
+		t.Error("empty D must still yield a well-formed hash")
 	}
 }
 
@@ -134,7 +176,7 @@ func TestOutputHash_EmptyIsDefined(t *testing.T) {
 func TestRunRecord_JSONRoundTrip(t *testing.T) {
 	rec := RunRecord{
 		RunID: "run-001", Experiment: "exp1", Seed: 7,
-		PointAddress: "abc", RepoSHAs: map[string]string{"metis": "sha"}, Dirty: false,
+		PointAddress: "abc", CodeFingerprint: "cf1", Dirty: false,
 		Steps: []StepRecord{{
 			StepID: "prep", Uses: "metis/cv-split",
 			With:       map[string]any{"k": float64(5)}, // JSON numbers decode to float64

@@ -62,8 +62,18 @@ objective+select that turns per-config `(mean, SE)` into the winner.
   - `metric` — the **reduced** score name (e.g. `accuracy`) the pipeline emits per fold. **Not** the v1
     `<step>.<metric>` namespacing — the resample Sampler owns the reduction.
   - `direction` — `maximize | minimize` (required).
-  - `select` — the rule turning `(mean, SE)` into a winner. `argmax-mean` (M1a); `one-std-err` /
-    `pct-loss` are a *different* `Done` over the same cached fold-scores (metis#19).
+  - `select` — the rule turning per-config `(mean, SE, complexity)` into the winner (metis#19). A
+    **tagged union**, exactly one branch, params bound to it (mirrors `driver`'s `single|cv` — optional
+    fields, exactly-one enforced in Go):
+    - `select: {argmax-mean: {}}` — highest mean (M1a; no params).
+    - `select: {one-std-err: {}}` — within 1×SE of the family best, then the simplest (min measured
+      complexity), tie-break mean.
+    - `select: {pct-loss: {tolerance: 0.02}}` — within `tolerance` (%) of the family best, then the
+      simplest (the canonical rule; recovers the shallower regime).
+    - `select: {mean-std: {lambda: 1.0}}` — argmax of `mean − λ·std`.
+    Selection is **two-level**: the rule picks *within* each model family (the `$any`-map branch), and
+    the single ship pick is `argmax-mean` *across* the per-family winners. A **bare scalar**
+    (`select: argmax-mean`) is now rejected — always use the `{rule: {params}}` form.
 
 ### The `driver` block (outer Sampler — the honest evaluator, optional in spirit)
 

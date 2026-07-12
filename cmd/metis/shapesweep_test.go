@@ -28,7 +28,8 @@ func fixedNow() func() time.Time {
 // records the step-ids the INNER exec actually ran — a cache HIT skips it, so calls is the
 // MISS trace the cache assertions read.
 type foldFakeExec struct {
-	calls *[]string
+	calls        *[]string
+	noComplexity bool // metis#19: omit the complexity metric (simulate a model class that doesn't report it)
 }
 
 func (f foldFakeExec) Execute(step experiment.Step, runDir string) (experiment.StepResult, error) {
@@ -49,6 +50,9 @@ func (f foldFakeExec) Execute(step experiment.Step, runDir string) (experiment.S
 	metrics := map[string]float64{}
 	if step.ID == "train" {
 		metrics["fold_score"] = fakeTrainScore(step.With)
+		if !f.noComplexity {
+			metrics["complexity"] = fakeTrainComplexity(step.With)
+		}
 	}
 	return experiment.StepResult{Metrics: metrics, Artifacts: []string{art}}, nil
 }
@@ -65,6 +69,14 @@ func fakeTrainScore(with map[string]any) float64 {
 		}
 	}
 	return base + float64(idx)*0.02
+}
+
+// fakeTrainComplexity is a deterministic per-model realized-complexity (metis#19): a
+// fixed value per model, fold-independent (like a tree's realized leaves), so a config's
+// MeanComplexity is stable across folds. Distinct from fakeTrainScore so the tests can tell
+// the two metrics apart.
+func fakeTrainComplexity(with map[string]any) float64 {
+	return map[string]float64{"a": 10, "b": 20, "c": 30}[fmt.Sprint(with["model"])]
 }
 
 // foldShapeMD is a valid metis#18 phase shape: data(get-data,adapt) │ pipeline(features,
@@ -115,11 +127,18 @@ pipeline:
 ` + ship + `sweeper:
   sampler: grid
   resample: {cv: {k: 2, stratify: false}}
-  objective: {metric: train.fold_score, direction: maximize, select: argmax-mean}
+  objective: {metric: train.fold_score, direction: maximize, select: {argmax-mean: {}}}
 driver:
   single: {}
 ---
 `
+}
+
+// foldShapePctLossMD is foldShapeMD with a pct-loss (parsimony) select rule — used to test
+// the metis#19 complexity guard (a parsimony rule needs a measured complexity).
+func foldShapePctLossMD(models string) string {
+	return strings.Replace(foldShapeMD(models),
+		"select: {argmax-mean: {}}", "select: {pct-loss: {tolerance: 0.02}}", 1)
 }
 
 func writeShapeFile(t *testing.T, dir, body string) string {
@@ -192,6 +211,14 @@ func TestShapeSweep_NestedLoopWinnerAndLedger(t *testing.T) {
 		if r.Fold == nil {
 			t.Errorf("a swept ledger row must carry a fold coordinate; got %+v", r)
 		}
+		// metis#27: the code_fingerprint must reach the PERSISTED row via the real
+		// runShapeSweep orchestration — captureSweepCode → backfillCodeManifest (sets the
+		// fingerprint on the record) MUST run before writeSweepLedger reads it back. A reorder
+		// would silently yield empty-fingerprint rows (re-opening the same-config-different-code
+		// collision) yet leave every other assertion green — this guards that ordering.
+		if r.CodeFingerprint == "" {
+			t.Errorf("a swept ledger row must carry a non-empty code_fingerprint (capture-before-ledger ordering); got %+v", r)
+		}
 	}
 	agg := ledger.AggregateView(led, "train.fold_score")
 	if len(agg.Rows) != 2 {
@@ -211,6 +238,72 @@ func TestShapeSweep_NestedLoopWinnerAndLedger(t *testing.T) {
 	// The leaderboard + winner are reported to the user.
 	if s := out.String(); !strings.Contains(s, "winner") || !strings.Contains(s, "train.model=b") {
 		t.Errorf("sweep should report the winner (model=b); got:\n%s", s)
+	}
+}
+
+// metis#19 M2: a per-fold `complexity` metric threads fold→config (FoldOutcome.Complexity
+// → Aggregate → MeanSE.MeanComplexity) and surfaces on the winner line. Proves runPipelineFold
+// reads the metric and the reducer carries it (M1 wired it as 0).
+func TestShapeSweep_ComplexityThreadsFoldToConfig(t *testing.T) {
+	ws := t.TempDir()
+	expPath := writeShapeFile(t, ws, foldShapeMD("[a, b]"))
+	var out strings.Builder
+	if err := runFoldSweep(t, expPath, false, nil, &out, nil); err != nil {
+		t.Fatalf("shape sweep should run: %v", err)
+	}
+	// The winner (model=b) line reports a non-zero mean complexity (fake emits cx per model).
+	s := out.String()
+	if !strings.Contains(s, "train.model=b") {
+		t.Fatalf("expected winner model=b; got:\n%s", s)
+	}
+	// The winner line ends with "cx <N>"; N must be > 0 (b's fake complexity = 20).
+	if !strings.Contains(s, "cx 20.0") {
+		t.Errorf("winner line should report the threaded complexity cx 20.0 (model=b); got:\n%s", s)
+	}
+	// The raw ledger rows carry the namespaced per-fold complexity.
+	led := loadLedgerOrFatal(t, expPath)
+	for _, r := range led.Rows {
+		if _, ok := r.Metrics["train.complexity"]; !ok {
+			t.Errorf("each per-fold ledger row must carry train.complexity; got %+v", r.Metrics)
+		}
+	}
+}
+
+// metis#19 guard: an in-memory sweep with a parsimony rule (pct-loss) whose model step does
+// NOT emit complexity → a hard error (raw rows still persisted; only ship/report is gated).
+func TestShapeSweep_ParsimonyGuardOnMissingComplexity(t *testing.T) {
+	ws := t.TempDir()
+	expPath := writeShapeFile(t, ws, foldShapePctLossMD("[a, b]"))
+	_, err := runExperiment(runOpts{
+		expPath: expPath, now: fixedNow(),
+		git:  fakeGitProbe{name: "metis", sha: "sha", dirty: false},
+		exec: foldFakeExec{noComplexity: true}, out: io.Discard,
+	})
+	if err == nil {
+		t.Fatalf("pct-loss with no emitted complexity must error")
+	}
+	if !strings.Contains(err.Error(), "complexity") {
+		t.Errorf("guard error should mention complexity; got %v", err)
+	}
+	// The raw ledger rows are still persisted (re-selectable after a fix).
+	led := loadLedgerOrFatal(t, expPath)
+	if len(led.Rows) != 4 {
+		t.Errorf("raw fold rows should persist despite the guard; got %d", len(led.Rows))
+	}
+}
+
+// The same pct-loss shape WITH complexity emitted selects cleanly (the guard passes).
+func TestShapeSweep_ParsimonyRuleWithComplexity(t *testing.T) {
+	ws := t.TempDir()
+	expPath := writeShapeFile(t, ws, foldShapePctLossMD("[a, b]"))
+	var out strings.Builder
+	if err := runFoldSweep(t, expPath, false, nil, &out, nil); err != nil {
+		t.Fatalf("pct-loss with complexity should run: %v", err)
+	}
+	// model=b (0.91) is within 2% of itself; parsimony: a (cx 10) is simpler than b (cx 20)
+	// but a's mean 0.81 is outside b's 2% band (0.91·0.98=0.8918) → b wins. Just assert it ran.
+	if s := out.String(); !strings.Contains(s, "winner") {
+		t.Errorf("expected a winner line; got:\n%s", s)
 	}
 }
 

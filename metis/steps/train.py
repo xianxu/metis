@@ -24,7 +24,7 @@ with:
            metis.model.parse_model_config → (kind, params).
   _fold:   {partition, idx} — engine-injected fold-context; present in  (per-fold)
            the per-fold run, absent for the all-rows ship refit.
-Outputs: metrics.json{fold_score} (per-fold) OR model.pkl + metrics.json{cv_score}.
+Outputs: metrics.json{fold_score, complexity} (per-fold) OR model.pkl + metrics.json{cv_score}.
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ import json
 import pickle
 
 from metis import io
-from metis.model import cv_score, fold_score, parse_model_config, train
+from metis.model import complexity, cv_score, fold_fit, parse_model_config, train
 
 
 def main() -> None:
@@ -51,8 +51,11 @@ def main() -> None:
     if isinstance(fold, dict) and "idx" in fold:
         # per-fold: the engine drives the fold axis; score the one assessment fold. `folds`
         # is REQUIRED here — the fold assignment is what defines the analysis/assessment split.
-        score = fold_score(X, y, _load_folds(ctx, w), int(fold["idx"]), kind, ctx.seed, params)
-        io.write_metrics(ctx, {"fold_score": score})
+        # Fit ONCE (fold_fit) and read both the score AND the fitted model's realized
+        # complexity (metis#19) — the parsimony axis the select rule consumes. Bare metric
+        # names; the ledger namespaces them to train.fold_score / train.complexity.
+        score, model = fold_fit(X, y, _load_folds(ctx, w), int(fold["idx"]), kind, ctx.seed, params)
+        io.write_metrics(ctx, {"fold_score": score, "complexity": complexity(model, kind)})
         return
 
     # all-rows (v1 plain / the M1a-5 ship refit): fit a model on ALL rows for predict. The

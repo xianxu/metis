@@ -81,3 +81,33 @@ re-run); group-by-family leaderboard; loud warning on an unmodeled knob.
 
 ARCH: pure `pkg/sampler` + CUE + manifests, no new IO in the hot path (ARCH-PURE); the schema is the
 single source, Go + Python + the merge-check derive from it (ARCH-DRY / single-source).
+
+## Revisions
+
+### 2026-07-08 — spec pass (metis#19 `## Spec` is now the record of truth)
+- **`C` complexity basis corrected: `linear·inverse` → `linear·value`.** The shorthand above was
+  wrong taken literally — sklearn `C` is *inverse* regularization strength, so small C = strong reg =
+  *simpler*; complexity must INCREASE with C (`basis: value`). `inverse` is kept in the vocabulary for
+  a true penalty-weight knob (`alpha`/`lambda`), not C.
+- **Two-level selection made explicit:** the `select` rule is the WITHIN-family policy; ACROSS families
+  is *always* `argmax-mean` over the robust per-family winners. This makes `argmax-mean` a true special
+  case (within=argmax, across=argmax ⇒ global argmax-mean, M1a unchanged), not a fourth branch of ad-hoc
+  logic.
+- **Rules consume only the monotone direction today:** Pareto + rank-tie-break are invariant to any
+  monotone transform, so `form: linear|log`/scale is declared-for-forward (a complexity-penalty rule),
+  NOT consumed by the current rules. Documented as declared-not-yet-consumed (the direction IS used).
+- **3 open knobs settled** (see the issue Log): tagged-union `select` mirroring `driver`; first
+  manifests = swept step-types only; select required-explicit with `pct-loss` canonical.
+
+### 2026-07-08 — measured-complexity pivot (SUPERSEDES the declared-complexity design above)
+The issue `## Spec` (v2) is now the record of truth; the "complexity substrate" / per-knob
+`{form,basis}` / `#StepManifest` design in this pensive's body is **superseded**. After a fresh-eyes
+spec review (traced the rule over the real ledger → the drafted Pareto parsimony shipped an
+unvalidated md=4/nfeat=1 corner, not 0.782) and an RF-complexity literature pass (realized leaves, not
+`2^depth`; n_estimators-neutral; feature-count dominated; cross-family param-count unsound; tidymodels
+declares-not-computes), the design pivoted to: **complexity is MEASURED on the fitted model** — each
+model class reports `complexity(fitted) → float` (rf realized leaves; logreg feature count), emitted
+per-fold, cached, reduced; the select rule minimizes that one scalar within the band, tie-break mean.
+Drops the CUE per-knob schema, `{form,basis}`, `2^depth`, and Pareto/rank entirely; de-entangles #4;
+keeps cross-family = argmax-mean (incommensurable units). See the issue `## Spec` + Log for the full
+converged design.

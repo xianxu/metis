@@ -13,11 +13,21 @@ type FoldPoint struct {
 // Addr is the fold-point's stable identity string.
 func (fp FoldPoint) Addr() string { return fmt.Sprintf("%s#fold%d", fp.Partition, fp.Idx) }
 
+// FoldOutcome is the resample runPoint's output (metis#19): a fold's raw score plus
+// the model's MEASURED complexity for that fold (HasComplexity=false when the step
+// emitted none — M1 wires it as an absent 0). Widened from a bare float64 so the
+// per-config reduction carries complexity for the select rule.
+type FoldOutcome struct {
+	Score         float64
+	Complexity    float64
+	HasComplexity bool
+}
+
 // FixedKFolds is the static resample Sampler: k folds over the materialized
-// partition, all proposed at once (no feedback), reduced by Aggregate → (mean,SE).
-// The degenerate static scatter/gather of the resample level; racing/early-stop
-// (metis#19+) is a later Sampler over the same FoldPoints. Its runPoint yields the
-// raw fold score (float64); Tell pairs it with the fold's authoritative address.
+// partition, all proposed at once (no feedback), reduced by Aggregate → (mean, SE,
+// complexity). The degenerate static scatter/gather of the resample level;
+// racing/early-stop is a later Sampler over the same FoldPoints. Its runPoint yields a
+// FoldOutcome; Tell pairs it with the fold's authoritative address.
 type FixedKFolds struct {
 	K int
 }
@@ -45,14 +55,14 @@ func (f FixedKFolds) Ask(s foldState) ([]FoldPoint, bool) {
 	return s.points[len(s.scores):], false
 }
 
-// Tell folds one fold-point's raw score in, stamping the fold's authoritative Addr
+// Tell folds one fold-point's outcome in, stamping the fold's authoritative Addr
 // (so the told-set key comes from the FoldPoint, not the runPoint).
-func (f FixedKFolds) Tell(s foldState, p FoldPoint, out float64) foldState {
-	s.scores = append(s.scores, FoldScore{Addr: p.Addr(), Score: out})
+func (f FixedKFolds) Tell(s foldState, p FoldPoint, out FoldOutcome) foldState {
+	s.scores = append(s.scores, FoldScore{Addr: p.Addr(), Score: out.Score, Complexity: out.Complexity, HasComplexity: out.HasComplexity})
 	return s
 }
 
-// Done reduces the told fold scores → (mean, SE), keyed on the sorted told-set.
+// Done reduces the told fold scores → (mean, SE, complexity), keyed on the sorted told-set.
 func (f FixedKFolds) Done(s foldState) MeanSE { return Aggregate(s.scores) }
 
-var _ Sampler[foldState, FoldPoint, float64, MeanSE] = FixedKFolds{}
+var _ Sampler[foldState, FoldPoint, FoldOutcome, MeanSE] = FixedKFolds{}

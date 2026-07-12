@@ -3,7 +3,8 @@
 An experiment is a git-tracked, declarative **pipeline of steps** — *issue-shaped*: schematized
 frontmatter (the machine-executable pipeline + config) over a freeform body (hypothesis + prose).
 It is **immutable input** (#13): a run never writes back into the `.md` — run history lives in
-`runs/<id>/record.json` + the `.ledger.csv` sidecar (browse via `metis ledger show`), so a
+`runs/<id>/record.json` + the `.ledger.csv` sidecar (browse via `metis ledger show`; apply the
+sweeper's two-level select rule offline via `metis ledger select --rule R`, #19), so a
 committed config is a stable content-hash. The Go step-runner
 (`metis run <id>`, M2) executes it with **no agent in the loop**, unifying data
 reconstruction, training, and experiment tracking under one entrypoint.
@@ -48,9 +49,13 @@ a Run. `--cache` (default on) enables the metis#2 validating-trace cache (see `a
     record (the L0 reproducibility atom), emitted as `runs/<id>/record.json`. Mirrors the CUE
     `#RunRecord`/`#StepRecord` (drift-guarded). Fields split by role: key-material (`With`,
     `Upstream`, `Code`) vs. provenance-extras (`OutputHash`, `Metrics`).
-  - `PointAddress(resolvedWith, repoSHAs, seed) (Hash, error)` — mints the **L0 run-identity**
-    (repro key; the coarse config+repo+seed content-address, NOT the per-step trace) via canonical
-    `json.Marshal` → `cas.HashOf`; errors on non-finite config.
+  - `PointAddress(resolvedWith, shapeBlobHash, seed) (Hash, error)` — mints the **intent identity**
+    (metis#27: the pre-run config+shape-blob+seed content-address, NOT repo HEAD, NOT the per-step
+    trace) via canonical `json.Marshal` → `cas.HashOf`; errors on non-finite config.
+  - `CodeFingerprint([]CodeRef) (Hash, error)` — the **realized code identity** (metis#27): a
+    `{path, blob_hash}`-only manifest of the run-end read-set `D` closure, sorted + canonical-hashed
+    (excludes the absolute repo root, so it's checkout-portable). Ledger dedups on `(point_address,
+    code_fingerprint)` so same-config-different-code runs are both kept.
   - `OutputHash([]FileHash) Hash` — reduces a step's multi-file output set to one address (sorted
     `(path, content-hash)` manifest).
   - **Scope line:** #3 owns the record + point-address; the read-set trace `D` + cache key are

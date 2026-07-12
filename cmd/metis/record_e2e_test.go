@@ -87,8 +87,8 @@ steps:
 	if len(rec.PointAddress) != 64 {
 		t.Errorf("point-address = %q; want a 64-hex hash", rec.PointAddress)
 	}
-	if rec.RepoSHAs["metis"] != "deadbeef" || rec.Dirty {
-		t.Errorf("repo provenance wrong: shas=%v dirty=%v", rec.RepoSHAs, rec.Dirty)
+	if rec.Steps[0].Code.Commit != "deadbeef" || rec.Dirty {
+		t.Errorf("code provenance wrong: commit=%v dirty=%v", rec.Steps[0].Code.Commit, rec.Dirty)
 	}
 	if len(rec.Steps) != 2 || rec.Steps[0].StepID != "prep" || rec.Steps[1].StepID != "train" {
 		t.Fatalf("step records wrong: %+v", rec.Steps)
@@ -187,8 +187,8 @@ steps:
 	if err := json.Unmarshal(rb, &rec); err != nil {
 		t.Fatal(err)
 	}
-	if len(rec.RepoSHAs) != 0 {
-		t.Errorf("no-git record should carry no repo-SHAs, got %v", rec.RepoSHAs)
+	if len(rec.Steps) > 0 && rec.Steps[0].Code.Commit != "" {
+		t.Errorf("no-git record should carry no code commit, got %v", rec.Steps[0].Code.Commit)
 	}
 	if len(rec.PointAddress) != 64 {
 		t.Errorf("point-address should still mint (from config+seed): %q", rec.PointAddress)

@@ -14,15 +14,18 @@ identical on a non-Kaggle platform?* — if yes, it lives here.
 - **`pkg/record`** (the L0 provenance record) — the unified per-step record (metis#3), the
   reproducibility atom the v1 cache/ledger chain keys off. Pure leaf over `pkg/cas`: `RunRecord`/
   `StepRecord` (emitted as `runs/<id>/record.json`, CUE-drift-guarded), `PointAddress` (the L0
-  run-identity: config+repo-SHAs+seed content-address), `OutputHash` (multi-file output reduction).
+  INTENT-identity: config+**shape-blob-hash**+seed content-address — metis#27 dropped repo_shas),
+  `CodeFingerprint` (the realized code identity over the run's D closure — metis#27), `OutputHash`
+  (multi-file output reduction).
   `Runner.Run` returns per-step `[]StepRun` so `cmd/metis` can assemble the record (git provenance
   via an injected `gitProbe`) and write `record.json` (the experiment `.md` is immutable input, #13 —
   no `## Runs` write-back). Scope
   line: #3 owns the record + point-address; the trace/cache-key are #2, side-ref code capture #7/#8.
   See [experiment.md](experiment.md). [metis#3]
 - **`pkg/ledger`** (the shape-run ledger) — metis#8, the L1 tracking layer: a pure append-only,
-  **point-address-deduped** table (`Row` = free-param tuple / sweep-SHA / point-address / namespaced
-  metrics / status) with a **ragged** CSV codec (union columns, blank where absent), objective-driven
+  **(point-address, code-fingerprint)-deduped** table (`Row` = free-param tuple / code-fingerprint /
+  point-address / namespaced metrics / status — metis#27: same config + different code → both rows
+  kept) with a **ragged** CSV codec (union columns, blank where absent), objective-driven
   `Best`/`TopN`, and `Filter`. It is an *aggregation view* over #3's per-run records, not a second run
   store. The driver (`cmd/metis/ledger.go`): after a sweep, `rowsFromManifest` (pure) turns #7's
   manifest + the per-point `record.json`s (namespaced per-step metrics — the collision fix) into rows,
@@ -31,7 +34,7 @@ identical on a non-Kaggle platform?* — if yes, it lives here.
   **metis#18:** a `Row` is now a **raw per-fold** row (a `Fold` coordinate); `AggregateView(l, metric)`
   reduces them read-time → per-config `(mean, SE)` (`<metric>{,.se,.n}`) — the leaderboard `ledger show
   --sort` and `promote` sort over (metis#19's 1-SE select re-reduces the same rows, no re-run). A v1
-  non-fold row passes through untouched (idempotent). **`metis ledger show <shape> [--sweep|--sort|--top]`**
+  non-fold row passes through untouched (idempotent). **`metis ledger show <shape> [--fingerprint|--sort|--top]`**
   renders sorted/filtered views. **`metis promote <shape> (--best|--point 'k=v') --name X`** aggregates the
   raw fold rows to per-config `(mean,SE)` FIRST (so both `--best` and `--point` promote a *config* by its
   honest estimate, not one fold's row), then reconstructs the winner as a runnable experiment (pure
@@ -60,17 +63,31 @@ identical on a non-Kaggle platform?* — if yes, it lives here.
 - **`pkg/sampler`** (the Sampler fold node) — metis#18, the pure ask/tell resample/sweep construct
   superseding metis#7's `pkg/sweep`: `Sampler[S,P,O,R]` (`Init`/`Ask`/`Tell`/`Done`) + a generic `Run`
   loop, instantiated **nested at three levels** (driver ⊃ sweeper ⊃ resample) that monomorphize by type —
-  the resample's `R=MeanSE` is the sweeper's `O`, the sweeper's `R=Winner` is the driver's `O`. **Static
+  the resample's `R=MeanSE` is the sweeper's `O`, the sweeper's `R=SweepResult` is the driver's `O`. **Static
   vs adaptive is the plannability line:** M1a wires only the *static* (feedback-free) Samplers, whose `Ask`
   emits the whole point-set at once and whose `Tell` ignores feedback — `GridConfigs` (the sweeper — every
   `shape.Expand` config), `FixedKFolds` (the inner resample — k folds over the materialized partition),
   `SingleDriver` (the degenerate outer driver:single). Adaptive Samplers use the feedback edge and are
-  later impls against the SAME node: metis#19 select = a different `Done` over the cached fold-scores,
-  metis#23 nested-CV = an outer resample Sampler swapping `SingleDriver`, racing/Bayesian = feedback-driven
-  `Ask`. `Aggregate` → `MeanSE` (the honest per-config `(mean,SE)`, keyed on the sorted told-set — an
-  adaptive `Done` re-reduces the same scores for free); `Winner` carries the **resolved config `Point`**
-  (its per-step `With` + free-params) as reconstructable run-keys → ship/promote rebuild the exact run
-  DIRECTLY, not by re-expanding the grid. The **driver** is `cmd/metis`: `metis run` on an experiment-shape
+  later impls against the SAME node: metis#23 nested-CV = an outer resample Sampler swapping `SingleDriver`,
+  racing/Bayesian = feedback-driven `Ask`. `Aggregate` → `MeanSE` (the honest per-config
+  `(mean, SE, meanComplexity)`, keyed on the sorted told-set — an adaptive `Done` re-reduces the same
+  scores for free). **The select rule (metis#19)** is a pure `SelectConfigs` (`select.go`) that
+  `GridConfigs.Done` calls: `objective.select` is a tagged union (`argmax-mean|one-std-err|pct-loss|mean-std`,
+  mirroring the `driver` union); it groups configs by **model family** (the tagged-sum `$any`-map branch, read
+  off `Point.With` bundling via the exported `FamilyOf`), within a family applies a band (SE/%/none) then
+  **minimizes measured complexity** (ε-binned, `complexityBinRelTol`) tie-broken by mean, and picks the
+  cross-family ship by argmax-mean over the per-family winners → `SweepResult{PerFamily, Ship}`. Complexity is
+  **measured on the fitted model** (M2): each model class's `metis.model.complexity(fitted, kind)` reports
+  realized capacity — rf **mean** leaves/tree (n_estimators-neutral per Breiman's LLN), logreg coef count
+  (= feature count) — emitted per fold by `train` (`fold_fit` fits once for both score + complexity),
+  reduced by `Aggregate`. **`GuardComplexity`** rejects a parsimony rule when any swept family lacks measured
+  complexity (post-fold, pre-selection — a silently-dropped axis → a quietly-wrong winner). `SelectConfigs`
+  has **two consumers** (ARCH-DRY): the in-memory `GridConfigs.Done` (the shipped `Winner`) and the offline
+  **`metis ledger select --rule R`** (`select_cmd.go` — re-selects over the cached ledger with no re-run,
+  matching each aggregate row to its Expanded `Point` so `FamilyOf` keys families identically). The real
+  acceptance: `pct-loss` recovers rf md=4 (cx ~15) over argmax-mean's md=8 (cx ~66) on the 891-row Titanic. `Winner` carries the **resolved
+  config `Point`** (its per-step `With` + free-params) + its `Family` as reconstructable run-keys → ship/promote
+  rebuild the exact run DIRECTLY, not by re-expanding the grid. The **driver** is `cmd/metis`: `metis run` on an experiment-shape
   drives the real three-level loop (`runShapeSweep`: `Run(SingleDriver) ⊃ Run(GridConfigs) ⊃
   Run(FixedKFolds)`), running each `(config, fold)` through the shared `runResolvedExperiment` (cached
   runner) keyed by its content-address. Each fold builds a per-fold experiment (`data ++ engine-synthesized

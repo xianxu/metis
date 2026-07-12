@@ -47,9 +47,9 @@ func TestRunRecordConformsToCUE(t *testing.T) {
 		RunID:        "run-001",
 		Experiment:   "titanic-baseline",
 		Seed:         42,
-		PointAddress: "abc123",
-		RepoSHAs:     map[string]string{"metis": "deadbeef", "kbench": "cafef00d"},
-		Dirty:        false,
+		PointAddress:    "abc123",
+		CodeFingerprint: "cafef00ddeadbeef",
+		Dirty:           false,
 		Steps: []StepRecord{{
 			StepID:   "cv-split",
 			Uses:     "metis/cv-split",

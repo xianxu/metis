@@ -13,4 +13,5 @@ type Winner struct {
 	Seed     int
 	FoldKeys []string
 	Score    MeanSE
+	Family   string // the model-family key this winner belongs to (metis#19; "" = one implicit family)
 }

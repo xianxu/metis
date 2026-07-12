@@ -66,15 +66,31 @@ def predict(estimator, X):
     return estimator.predict(X)
 
 
-def fold_score(X, y, folds, fold_idx: int, kind: str, seed: int, params: dict | None = None) -> float:
-    """Validation accuracy for ONE fold (pure, deterministic) — metis#18 M1a.
+def complexity(fitted, kind: str) -> float:
+    """Realized complexity of a FITTED model (metis#19) — the select rule's parsimony axis.
+
+    Measured on the fitted object, not predicted from hyperparameters: trees prune and
+    regularization sparsifies, so realized structure is the capacity (cost-complexity
+    pruning penalizes realized leaf count |T|; `2^max_depth` overstates).
+    - rf → MEAN leaves per tree (mean, not total, so it's n_estimators-neutral per
+      Breiman's LLN — more trees reduce variance, not overfitting-capacity).
+    - logreg → coefficient count (L2 zeroes nothing → all non-zero = feature count).
+    """
+    if kind == "rf":
+        leaves = [t.tree_.n_leaves for t in fitted.estimators_]
+        return float(sum(leaves) / len(leaves))
+    if kind == "logreg":
+        return float(fitted.coef_.size)
+    raise ValueError(f"complexity: unknown model kind {kind!r}; want one of {sorted(MODELS)}")
+
+
+def fold_fit(X, y, folds, fold_idx: int, kind: str, seed: int, params: dict | None = None):
+    """Fit ONE fold and return `(score, fitted_model)` — pure, deterministic (metis#18 M1a).
 
     Train on the analysis rows (fold != fold_idx), score on the assessment rows
-    (fold == fold_idx); return the accuracy. This is the single-fold body cv_score
-    looped over, LIFTED OUT so the engine drives the fold axis: each (config, fold) is a
-    cached run emitting one fold_score, and the resample Sampler's Done reduces the k
-    fold-scores → (mean, SE) (the ledger keeps the raw fold rows, so metis#19's select is
-    a free re-reduction). Uses numpy so per-fold models are name-free and reproducible.
+    (fold == fold_idx). The fitted model is returned so a caller can *also* read its
+    realized complexity (metis#19) WITHOUT a second fit — one fit feeds both score and
+    complexity. Uses numpy so per-fold models are name-free and reproducible.
     """
     Xa = np.asarray(X)
     ya = np.asarray(y)
@@ -82,7 +98,20 @@ def fold_score(X, y, folds, fold_idx: int, kind: str, seed: int, params: dict | 
     val = fa == fold_idx
     trn = ~val
     model = train(Xa[trn], ya[trn], kind, seed, params)
-    return float(accuracy_score(ya[val], predict(model, Xa[val])))
+    score = float(accuracy_score(ya[val], predict(model, Xa[val])))
+    return score, model
+
+
+def fold_score(X, y, folds, fold_idx: int, kind: str, seed: int, params: dict | None = None) -> float:
+    """Validation accuracy for ONE fold (pure, deterministic) — metis#18 M1a.
+
+    The single-fold body cv_score loops over, LIFTED OUT so the engine drives the fold
+    axis: each (config, fold) is a cached run emitting one fold_score, and the resample
+    Sampler's Done reduces the k fold-scores → (mean, SE) (the ledger keeps the raw fold
+    rows, so metis#19's select is a free re-reduction). Delegates to fold_fit (DRY).
+    """
+    score, _ = fold_fit(X, y, folds, fold_idx, kind, seed, params)
+    return score
 
 
 def cv_score(X, y, folds, kind: str, seed: int, params: dict | None = None) -> float:

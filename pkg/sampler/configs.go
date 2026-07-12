@@ -1,20 +1,22 @@
 package sampler
 
-import "github.com/xianxu/metis/pkg/shape"
+import (
+	"github.com/xianxu/metis/pkg/experiment"
+	"github.com/xianxu/metis/pkg/shape"
+)
 
 // GridConfigs is the static sweeper Sampler: it proposes every config-point from
 // shape.Expand at once (grid = the degenerate ask-for-every-point sampler), scores
-// each via its inner resample (the runPoint yields the config's (mean,SE)), and
-// Done-selects the winner by the objective. metis#19's 1-SE robust select is a
-// DIFFERENT Done over the same per-config (mean,SE) — no re-run. Points are the
-// pre-expanded config space (shape.Expand over the pipeline phase); Direction is
-// the objective direction; Select is the rule (M1a: "argmax-mean" only). The seed
-// comes from Ctx (single source — Winner.Seed is sourced there, not duplicated on
-// the sampler), so M1a-4 wiring can't diverge.
+// each via its inner resample (the runPoint yields the config's (mean, SE, complexity)),
+// and Done-selects via the metis#19 rule → a per-family winner map + a cross-family ship
+// pick (SweepResult) — a DIFFERENT Done over the same per-config stats, no re-run. Points
+// are the pre-expanded config space (shape.Expand over the pipeline phase); Direction is
+// the objective direction; Select is the tagged-union rule. The seed comes from Ctx (single
+// source — Winner.Seed is sourced there, not duplicated on the sampler).
 type GridConfigs struct {
 	Points    []shape.Point
-	Direction string // "maximize" | "minimize"
-	Select    string // M1a: "argmax-mean"
+	Direction string            // "maximize" | "minimize"
+	Select    experiment.Select // the metis#19 select rule (tagged union)
 }
 
 type configResult struct {
@@ -44,26 +46,16 @@ func (g GridConfigs) Tell(s configState, p shape.Point, out MeanSE) configState 
 	return s
 }
 
-// Done selects the winner. M1a: argmax-mean (highest mean for "maximize", lowest
-// for "minimize"). Deterministic tie-break: the strict comparison keeps the FIRST
-// among equals, i.e. the earliest in shape.Expand order (stable/sorted).
-func (g GridConfigs) Done(s configState) Winner {
-	best := -1
+// Done selects via the metis#19 rule: build a per-config ConfigStat (tagging each
+// point's model family off its With bundling) and hand off to the pure SelectConfigs →
+// a per-family winner map + the cross-family ship pick. The rule is a re-reduction over
+// the already-cached per-config stats (no re-run); grouping/parsimony live in select.go.
+func (g GridConfigs) Done(s configState) SweepResult {
+	stats := make([]ConfigStat, len(s.results))
 	for i, r := range s.results {
-		if best < 0 || betterMean(r.meanSE.Mean, s.results[best].meanSE.Mean, g.Direction) {
-			best = i
-		}
+		stats[i] = ConfigStat{Point: r.point, Family: FamilyOf(r.point), Score: r.meanSE}
 	}
-	if best < 0 {
-		return Winner{Seed: s.seed}
-	}
-	w := s.results[best]
-	return Winner{
-		Point:    w.point,
-		Seed:     s.seed,
-		FoldKeys: w.meanSE.ToldSet,
-		Score:    w.meanSE,
-	}
+	return SelectConfigs(g.Select, g.Direction, s.seed, stats)
 }
 
 // betterMean reports whether a is strictly better than b for the objective
@@ -76,4 +68,4 @@ func betterMean(a, b float64, direction string) bool {
 	return a > b
 }
 
-var _ Sampler[configState, shape.Point, MeanSE, Winner] = GridConfigs{}
+var _ Sampler[configState, shape.Point, MeanSE, SweepResult] = GridConfigs{}

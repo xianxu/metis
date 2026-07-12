@@ -32,21 +32,21 @@ func TestBuildRecord_MintsStablePointAddress(t *testing.T) {
 	steps := sampleSteps()
 	oh := map[string]record.Hash{"prep": "h1", "train": "h2"}
 
-	rec1, err := buildRecord(run, stepsOf(steps), steps, oh, "metis", "sha1", false)
+	rec1, err := buildRecord(run, stepsOf(steps), steps, oh, "blob1", "sha1", false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	rec2, err := buildRecord(run, stepsOf(steps), steps, oh, "metis", "sha1", false)
+	rec2, err := buildRecord(run, stepsOf(steps), steps, oh, "blob1", "sha1", false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if rec1.PointAddress == "" || rec1.PointAddress != rec2.PointAddress {
 		t.Errorf("point-address must be stable across identical runs: %q vs %q", rec1.PointAddress, rec2.PointAddress)
 	}
-	// Sensitive to the repo SHA (a determinant).
-	rec3, _ := buildRecord(run, stepsOf(steps), steps, oh, "metis", "sha2", false)
+	// Sensitive to the shape blob-hash (a determinant of the intent-address, metis#27).
+	rec3, _ := buildRecord(run, stepsOf(steps), steps, oh, "blob2", "sha1", false)
 	if rec3.PointAddress == rec1.PointAddress {
-		t.Error("point-address must change with the repo SHA")
+		t.Error("point-address must change with the shape blob-hash")
 	}
 
 	// Per-step records carry resolved config, output hash, code commit, metrics.
@@ -59,8 +59,8 @@ func TestBuildRecord_MintsStablePointAddress(t *testing.T) {
 	if rec1.Steps[1].Metrics["acc"] != 0.9 {
 		t.Errorf("step 1 metrics not carried: %+v", rec1.Steps[1])
 	}
-	if rec1.RepoSHAs["metis"] != "sha1" || rec1.Dirty {
-		t.Errorf("repo provenance wrong: shas=%v dirty=%v", rec1.RepoSHAs, rec1.Dirty)
+	if rec1.Steps[0].Code.Commit != "sha1" || rec1.Dirty {
+		t.Errorf("code provenance wrong: commit=%v dirty=%v", rec1.Steps[0].Code.Commit, rec1.Dirty)
 	}
 	// Upstream/D/Deps are metis#2-populated slots — #3 leaves them empty.
 	if len(rec1.Steps[0].Upstream) != 0 || len(rec1.Steps[0].Code.D) != 0 {
@@ -78,7 +78,7 @@ func TestBuildRecord_PopulatesUpstreamFromNeeds(t *testing.T) {
 		{Step: experiment.Step{ID: "train", Uses: "metis/train", Needs: []string{"prep"}}},
 	}
 	oh := map[string]record.Hash{"prep": "hp", "train": "ht"}
-	rec, err := buildRecord(run, stepsOf(steps), steps, oh, "metis", "sha", false)
+	rec, err := buildRecord(run, stepsOf(steps), steps, oh, "blob", "sha", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +94,7 @@ func TestBuildRecord_PopulatesUpstreamFromNeeds(t *testing.T) {
 func TestBuildRecord_PropagatesConfigError(t *testing.T) {
 	run := experiment.Run{ID: "r", Seed: 0}
 	steps := []experiment.StepRun{{Step: experiment.Step{ID: "s", With: map[string]any{"lr": math.Inf(1)}}}}
-	if _, err := buildRecord(run, stepsOf(steps), steps, nil, "m", "sha", false); err == nil {
+	if _, err := buildRecord(run, stepsOf(steps), steps, nil, "blob", "sha", false); err == nil {
 		t.Error("buildRecord must propagate the point-address error on non-finite config")
 	}
 }
