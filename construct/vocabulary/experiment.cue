@@ -132,8 +132,8 @@ _pipeline: {
 	run_id:        string
 	experiment:    string
 	seed:          int
-	point_address: string          // the minted L0 run-identity
-	repo_shas?: {[string]: string} // repo-name → SHA at run time
+	point_address:     string // the minted L0 intent-identity (config + shape-blob + seed)
+	code_fingerprint?: string // the realized code identity over the run's D closure (metis#27)
 	dirty: bool
 	steps: [...#StepRecord]
 	started:   string

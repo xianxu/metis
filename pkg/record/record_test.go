@@ -176,7 +176,7 @@ func TestOutputHash_EmptyIsDefined(t *testing.T) {
 func TestRunRecord_JSONRoundTrip(t *testing.T) {
 	rec := RunRecord{
 		RunID: "run-001", Experiment: "exp1", Seed: 7,
-		PointAddress: "abc", RepoSHAs: map[string]string{"metis": "sha"}, Dirty: false,
+		PointAddress: "abc", CodeFingerprint: "cf1", Dirty: false,
 		Steps: []StepRecord{{
 			StepID: "prep", Uses: "metis/cv-split",
 			With:       map[string]any{"k": float64(5)}, // JSON numbers decode to float64

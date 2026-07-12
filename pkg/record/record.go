@@ -65,17 +65,20 @@ type StepRecord struct {
 }
 
 // RunRecord is the provenance record for one run: the DAG of step records plus the
-// minted point-address (the L0 run-identity), repo-SHAs + dirty flag, and status.
-// Small metadata → git (durable-small), never the CAS.
+// minted point-address (the L0 INTENT-identity) and the post-run code-fingerprint (the
+// realized "what code ran" identity over the run's D closure, metis#27), the dirty flag,
+// and status. repo_shas was dropped in metis#27 — code identity is the fingerprint +
+// each step's Code.Commit side-ref, not a coarse repo-HEAD proxy. Small metadata → git
+// (durable-small), never the CAS.
 type RunRecord struct {
-	RunID        string            `json:"run_id"`
-	Experiment   string            `json:"experiment"`
-	Seed         int               `json:"seed"`
-	PointAddress Hash              `json:"point_address"`
-	RepoSHAs     map[string]string `json:"repo_shas,omitempty"`
-	Dirty        bool              `json:"dirty"`
-	Steps        []StepRecord      `json:"steps"`
-	Started      string            `json:"started"`
-	Finished     string            `json:"finished,omitempty"`
-	Status       string            `json:"status"`
+	RunID           string       `json:"run_id"`
+	Experiment      string       `json:"experiment"`
+	Seed            int          `json:"seed"`
+	PointAddress    Hash         `json:"point_address"`
+	CodeFingerprint Hash         `json:"code_fingerprint,omitempty"`
+	Dirty           bool         `json:"dirty"`
+	Steps           []StepRecord `json:"steps"`
+	Started         string       `json:"started"`
+	Finished        string       `json:"finished,omitempty"`
+	Status          string       `json:"status"`
 }
