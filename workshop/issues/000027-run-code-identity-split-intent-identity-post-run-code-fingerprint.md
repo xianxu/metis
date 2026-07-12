@@ -123,7 +123,7 @@ estimate — the test-migration surface here is broad; watch at close.)
 Durable plan: `workshop/plans/000027-run-code-identity-split-plan.md` (9 tasks, TDD). Single-pass, one
 review boundary at `sdlc close`.
 
-- [ ] Implement the identity split per the durable plan: `PointAddress` = `hash(resolved_with,
+- [x] Implement the identity split per the durable plan: `PointAddress` = `hash(resolved_with,
   shape_blob_hash, seed)` + pure `CodeFingerprint` over the run-end `D` closure; `RunRecord`/CUE drop
   `repo_shas` + add `code_fingerprint`; fingerprint computed in `backfillCodeManifest`; ledger dedups
   on `(point_addr, code_fingerprint)` (`--sweep`→`--fingerprint`); content-addressed single-run dir;
