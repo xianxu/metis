@@ -9,11 +9,11 @@ entrypoints (metis.steps.*) are the only place these meet the filesystem.
 from __future__ import annotations
 
 import numpy as np
-from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import HistGradientBoostingClassifier, RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score
 
-MODELS = frozenset({"logreg", "rf"})
+MODELS = frozenset({"logreg", "rf", "hist_gbm"})
 
 
 def parse_model_config(raw) -> tuple[str, dict]:
@@ -51,6 +51,11 @@ def make_model(kind: str, seed: int, params: dict | None = None):
         return RandomForestClassifier(
             n_estimators=p.get("n_estimators", 100), max_depth=p.get("max_depth"),
             random_state=seed)
+    if kind == "hist_gbm":
+        return HistGradientBoostingClassifier(
+            learning_rate=p.get("learning_rate", 0.1), max_iter=p.get("max_iter", 100),
+            max_leaf_nodes=p.get("max_leaf_nodes", 31), max_depth=p.get("max_depth"),
+            random_state=seed)
     raise ValueError(f"unknown model {kind!r}; want one of {sorted(MODELS)}")
 
 
@@ -75,12 +80,23 @@ def complexity(fitted, kind: str) -> float:
     - rf → MEAN leaves per tree (mean, not total, so it's n_estimators-neutral per
       Breiman's LLN — more trees reduce variance, not overfitting-capacity).
     - logreg → coefficient count (L2 zeroes nothing → all non-zero = feature count).
+    - hist_gbm → TOTAL leaves SUMMED across all boosted trees (sum, NOT mean). Boosting is
+      ADDITIVE (F(x)=Σ trees; ESL §10.2, Friedman 2001), so capacity SUMS and MORE iterations
+      DO overfit (ESL §10.12; Bühlmann–Hothorn df(m)=trace(𝐁ₘ)↑m) — the exact inverse of rf's
+      n_estimators-neutral mean. XGBoost's own Ω=γT penalizes total leaves across the ensemble.
+      CAVEAT: total leaves is a clean monotone capacity proxy only WITHIN a fixed learning_rate;
+      shrinkage (small ν needs more trees yet regularizes better) decouples leaf-count from
+      effective DoF across ν, so a ν-sweeping shape would need a ν-weighted measure (deferred).
     """
     if kind == "rf":
         leaves = [t.tree_.n_leaves for t in fitted.estimators_]
         return float(sum(leaves) / len(leaves))
     if kind == "logreg":
         return float(fitted.coef_.size)
+    if kind == "hist_gbm":
+        # _predictors is a list-of-lists: one inner list per boosting iteration, holding K
+        # TreePredictors for K classes (binary → 1) — flatten and sum realized leaf counts.
+        return float(sum(t.get_n_leaf_nodes() for stage in fitted._predictors for t in stage))
     raise ValueError(f"complexity: unknown model kind {kind!r}; want one of {sorted(MODELS)}")
 
 

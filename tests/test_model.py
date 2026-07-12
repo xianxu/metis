@@ -16,7 +16,7 @@ def _separable(n=120, seed=0):
     return X, y
 
 
-@pytest.mark.parametrize("kind", ["logreg", "rf"])
+@pytest.mark.parametrize("kind", ["logreg", "rf", "hist_gbm"])
 def test_train_predict_shapes(kind):
     X, y = _separable()
     model = train(X, y, kind, seed=42)
@@ -25,7 +25,7 @@ def test_train_predict_shapes(kind):
     assert set(np.unique(preds)).issubset(set(np.unique(y)))
 
 
-@pytest.mark.parametrize("kind", ["logreg", "rf"])
+@pytest.mark.parametrize("kind", ["logreg", "rf", "hist_gbm"])
 def test_deterministic(kind):
     X, y = _separable()
     p1 = predict(train(X, y, kind, seed=7), X)
@@ -45,9 +45,15 @@ def test_make_model_applies_hyperparams():
     rf = make_model("rf", seed=0, params={"n_estimators": 7, "max_depth": 2})
     assert rf.n_estimators == 7
     assert rf.max_depth == 2
+    gbm = make_model("hist_gbm", seed=0,
+                     params={"learning_rate": 0.05, "max_iter": 7, "max_leaf_nodes": 15})
+    assert gbm.learning_rate == 0.05
+    assert gbm.max_iter == 7
+    assert gbm.max_leaf_nodes == 15
     # Defaults hold when a param is absent / params is None (backward-compat).
     assert make_model("logreg", seed=0).C == 1.0
     assert make_model("rf", seed=0, params={"max_depth": 3}).n_estimators == 100
+    assert make_model("hist_gbm", seed=0, params={"learning_rate": 0.2}).max_iter == 100
 
 
 def test_hyperparams_change_the_fit():
@@ -96,6 +102,24 @@ def test_complexity_logreg_is_coef_count():
     m = train(X, y, "logreg", seed=42)
     assert complexity(m, "logreg") == float(m.coef_.size)
     assert complexity(m, "logreg") == 4.0  # _separable has 4 features
+
+
+def test_complexity_hist_gbm_total_leaves():
+    """hist_gbm complexity = TOTAL leaves summed across ALL boosted trees (metis#19) —
+    SUM, not mean, because boosting is ADDITIVE (F(x)=Σ trees; ESL §10.2): each iteration
+    adds capacity. The deliberate INVERSE of rf's n_estimators-neutrality (mean-per-tree
+    would be max_iter-blind → blind to boosting's primary regularizer)."""
+    X, y = _separable()
+    m = train(X, y, "hist_gbm", seed=42, params={"max_iter": 20, "max_leaf_nodes": 8})
+    # _predictors is a list-of-lists (one inner list per boosting iteration; K predictors
+    # per iteration for K-class — binary Titanic → 1), so the count flattens.
+    expected = float(sum(t.get_n_leaf_nodes() for stage in m._predictors for t in stage))
+    assert complexity(m, "hist_gbm") == expected
+    # max_iter-SENSITIVE (the inverse of rf's neutrality): more boosting rounds add trees,
+    # so total leaves STRICTLY grows — the parsimony rule can then prefer fewer rounds.
+    m10 = train(X, y, "hist_gbm", seed=42, params={"max_iter": 10, "max_leaf_nodes": 8})
+    m40 = train(X, y, "hist_gbm", seed=42, params={"max_iter": 40, "max_leaf_nodes": 8})
+    assert complexity(m40, "hist_gbm") > complexity(m10, "hist_gbm")
 
 
 def test_complexity_unknown_raises():
