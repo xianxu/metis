@@ -93,6 +93,48 @@ func TestPointAddress_ErrorsOnNonFiniteConfig(t *testing.T) {
 	}
 }
 
+// CodeFingerprint content-addresses the run-end D closure: order-independent, blob-
+// sensitive, portable (the absolute Repo root must not perturb it), empty is defined.
+func TestCodeFingerprint(t *testing.T) {
+	base := []CodeRef{
+		{Repo: "/abs/metis", Path: "model.py", BlobHash: "b1"},
+		{Repo: "/abs/kbench", Path: "features.py", BlobHash: "b2"},
+	}
+	h, err := CodeFingerprint(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(h) != 64 {
+		t.Errorf("fingerprint should be a 64-hex hash, got %d chars", len(h))
+	}
+	// order-independent (sorted inside)
+	if h2, _ := CodeFingerprint([]CodeRef{base[1], base[0]}); h2 != h {
+		t.Errorf("CodeFingerprint must be order-independent: %q != %q", h2, h)
+	}
+	// a changed blob → a changed fingerprint
+	changed := []CodeRef{{Repo: "/abs/metis", Path: "model.py", BlobHash: "bX"}, base[1]}
+	if hc, _ := CodeFingerprint(changed); hc == h {
+		t.Error("a changed blob must change the fingerprint")
+	}
+	// the absolute Repo root must NOT affect the hash (portability across machines/checkouts)
+	moved := []CodeRef{
+		{Repo: "/other/machine/metis", Path: "model.py", BlobHash: "b1"},
+		{Repo: "/other/machine/kbench", Path: "features.py", BlobHash: "b2"},
+	}
+	if hm, _ := CodeFingerprint(moved); hm != h {
+		t.Errorf("absolute Repo root must not affect the fingerprint: %q != %q", hm, h)
+	}
+	// empty → a defined, stable hash (nil == empty)
+	e1, _ := CodeFingerprint(nil)
+	e2, _ := CodeFingerprint([]CodeRef{})
+	if e1 != e2 {
+		t.Error("nil and empty D must hash equally")
+	}
+	if len(e1) != 64 {
+		t.Error("empty D must still yield a well-formed hash")
+	}
+}
+
 // OutputHash reduces a *set* of artifact files to one address — independent of the
 // order they're listed in.
 func TestOutputHash_OrderIndependent(t *testing.T) {
