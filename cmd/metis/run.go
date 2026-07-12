@@ -98,12 +98,22 @@ func runExperiment(o runOpts) (experiment.Run, error) {
 		}
 		return experiment.Run{}, runShapeSweep(o, sh, now, out)
 	}
-	return runResolvedExperiment(exp, o, defaultRunID(o.runID, now), now, out)
+	return runResolvedExperiment(exp, o, singleRunID(o, exp, now), now, out)
 }
 
-func defaultRunID(runID string, now func() time.Time) string {
-	if runID != "" {
-		return runID
+// singleRunID names a single run's dir. metis#27: content-address it by the run's
+// point-address (symmetric with a sweep point's dir), so the dir name IS the run identity.
+// An explicit --run overrides; the timestamp form survives only as the no-git fallback
+// (when the shape blob-hash — hence the point-address — can't be computed).
+func singleRunID(o runOpts, exp experiment.Experiment, now func() time.Time) string {
+	if o.runID != "" {
+		return o.runID
+	}
+	sbh, err := shapeBlobHash(o.expPath)
+	if err == nil {
+		if addr, err := pointAddressOf(exp, sbh); err == nil {
+			return addr
+		}
 	}
 	return "run-" + now().UTC().Format("20060102T150405Z")
 }
@@ -161,7 +171,11 @@ func runResolvedExperiment(exp experiment.Experiment, o runOpts, runID string, n
 	// Assemble + persist the provenance record (metis#3): repo provenance, per-step
 	// output hashes, and the minted point-address. A config that can't be
 	// canonicalized (e.g. a non-finite value) surfaces here as a run error.
-	rec, err := assembleRecord(o.git, out, expDir, runDir, exp, run, steps)
+	// The shape's blob-hash content-addresses the intent (metis#27); computed the SAME way
+	// singleRunID/pointAddressOf did, so the record's point_address matches the run dir.
+	// A no-git spec yields "" (a degraded, non-content-addressed run — warned via capture status).
+	sbh, _ := shapeBlobHash(o.expPath)
+	rec, err := assembleRecord(o.git, out, expDir, runDir, exp, run, steps, sbh)
 	if err != nil {
 		return run, err
 	}

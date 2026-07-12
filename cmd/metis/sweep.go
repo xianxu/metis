@@ -66,16 +66,16 @@ type configScore struct {
 // the manifest + per-config estimates, and captures the first fatal error (the pure Run
 // has no error channel, so a fatal fold sets ss.err and short-circuits the rest).
 type shapeSweep struct {
-	o        runOpts
-	sh       experiment.Shape
-	now      func() time.Time
-	out      io.Writer
-	repoSHAs map[string]string
-	codeID   string // the frozen HEAD sha; a mid-sweep change detect-and-aborts
-	partRef  sampler.PartitionRef
-	man      sweepManifest
-	configs  []configScore
-	err      error
+	o             runOpts
+	sh            experiment.Shape
+	now           func() time.Time
+	out           io.Writer
+	shapeBlobHash string // metis#27: the shape .md's blob-hash — the intent-address term
+	codeID        string // the frozen HEAD sha; a mid-sweep change detect-and-aborts
+	partRef       sampler.PartitionRef
+	man           sweepManifest
+	configs       []configScore
+	err           error
 }
 
 // runShapeSweep drives the metis#18 nested Sampler loop: the sweeper (GridConfigs over the
@@ -86,8 +86,10 @@ type shapeSweep struct {
 // + the manifest + the raw per-fold ledger. Per-fold failure is fatal to the sweep (surfaced,
 // not swallowed — a partial resample is not an honest estimate).
 func runShapeSweep(o runOpts, sh experiment.Shape, now func() time.Time, out io.Writer) error {
-	repoName, sha, _ := probeRepo(o.git, filepath.Dir(o.expPath))
-	repoSHAs := repoSHAsOf(repoName, sha)
+	// probeRepo's HEAD sha still drives the mid-sweep code-freeze guard (codeID) — NOT the
+	// identity (metis#27 dropped repo_shas). The shape's blob-hash content-addresses the intent.
+	_, sha, _ := probeRepo(o.git, filepath.Dir(o.expPath))
+	sbh, _ := shapeBlobHash(o.expPath)
 
 	configPts, err := shape.Expand(sh.Pipeline, 0)
 	if err != nil {
@@ -108,12 +110,12 @@ func runShapeSweep(o runOpts, sh experiment.Shape, now func() time.Time, out io.
 		return nil
 	}
 
-	shapeRunID, err := shapeRunIdentity(sh, repoSHAs)
+	shapeRunID, err := shapeRunIdentity(sh, sbh)
 	if err != nil {
 		return err
 	}
 	ss := &shapeSweep{
-		o: o, sh: sh, now: now, out: out, repoSHAs: repoSHAs, codeID: sha,
+		o: o, sh: sh, now: now, out: out, shapeBlobHash: sbh, codeID: sha,
 		partRef: partitionRef(sh),
 		man:     sweepManifest{ShapeRunID: shapeRunID, Shape: sh.ID, Sampler: sh.Sweeper.Sampler, Seed: sh.Seed},
 	}
@@ -195,7 +197,7 @@ func (ss *shapeSweep) shipWinner(w sampler.Winner) error {
 		return nil
 	}
 	shipExp := shapeConfigToExperiment(ss.sh, w.Point)
-	shipRunID, err := pointAddressOf(shipExp, ss.repoSHAs)
+	shipRunID, err := pointAddressOf(shipExp, ss.shapeBlobHash)
 	if err != nil {
 		return fmt.Errorf("ship winner %s: %w", freeParamStrFromParams(w.Point.FreeParams), err)
 	}
@@ -226,7 +228,7 @@ func (ss *shapeSweep) runPipelineFold(c shape.Point, f sampler.FoldPoint) sample
 	}
 
 	exp := ss.buildFoldExperiment(c, f)
-	runID, err := pointAddressOf(exp, ss.repoSHAs)
+	runID, err := pointAddressOf(exp, ss.shapeBlobHash)
 	if err != nil {
 		ss.err = fmt.Errorf("config %s fold %d: %w", freeParamStr(c), f.Idx, err)
 		return sampler.FoldOutcome{}
@@ -340,12 +342,12 @@ func partitionRef(sh experiment.Shape) sampler.PartitionRef {
 // pointAddressOf pre-computes a (config, fold) run's content-address (== its run-dir id),
 // minted from its FULL resolved config the SAME way buildRecord mints the record's address —
 // so the manifest run_id and the record.json point_address can't desync (metis#8's handoff).
-func pointAddressOf(exp experiment.Experiment, repoSHAs map[string]string) (string, error) {
+func pointAddressOf(exp experiment.Experiment, shapeBlobHash string) (string, error) {
 	resolved := make(map[string]map[string]any, len(exp.Steps))
 	for _, s := range exp.Steps {
 		resolved[s.ID] = s.With
 	}
-	h, err := record.PointAddress(resolved, repoSHAs, exp.Seed)
+	h, err := record.PointAddress(resolved, shapeBlobHash, exp.Seed)
 	return string(h), err
 }
 
@@ -398,16 +400,16 @@ func betterMeanSE(a, b float64, direction string) bool {
 // shapeRunIdentity mints the invocation identity that groups the sweep's point-runs:
 // hash(shape id + phases + sweeper + repo SHAs + seed). The config × fold set is derivable
 // from the shape, so the manifest stays thin.
-func shapeRunIdentity(sh experiment.Shape, repoSHAs map[string]string) (string, error) {
+func shapeRunIdentity(sh experiment.Shape, shapeBlobHash string) (string, error) {
 	h, err := record.CanonicalHash(struct {
-		Shape    string             `json:"shape"`
-		Data     []experiment.Step  `json:"data"`
-		Pipeline []experiment.Step  `json:"pipeline"`
-		Ship     []experiment.Step  `json:"ship"`
-		Sweeper  experiment.Sweeper `json:"sweeper"`
-		RepoSHAs map[string]string  `json:"repo_shas"`
-		Seed     int                `json:"seed"`
-	}{sh.ID, sh.Data, sh.Pipeline, sh.Ship, sh.Sweeper, repoSHAs, sh.Seed})
+		Shape         string             `json:"shape"`
+		Data          []experiment.Step  `json:"data"`
+		Pipeline      []experiment.Step  `json:"pipeline"`
+		Ship          []experiment.Step  `json:"ship"`
+		Sweeper       experiment.Sweeper `json:"sweeper"`
+		ShapeBlobHash string             `json:"shape_blob_hash"`
+		Seed          int                `json:"seed"`
+	}{sh.ID, sh.Data, sh.Pipeline, sh.Ship, sh.Sweeper, shapeBlobHash, sh.Seed})
 	return string(h), err
 }
 
@@ -434,16 +436,6 @@ func probeRepo(git gitProbe, dir string) (name, sha string, dirty bool) {
 		return "", "", false
 	}
 	return n, s, d
-}
-
-// repoSHAsOf builds the {repoName: sha} map buildRecord uses — same construction, so a
-// pre-computed PointAddress matches the record's internal one (incl. the no-git case).
-func repoSHAsOf(repoName, sha string) map[string]string {
-	m := map[string]string{}
-	if repoName != "" {
-		m[repoName] = sha
-	}
-	return m
 }
 
 // freeParamMap renders a config point's free-param path as a {path: value} map (for the
