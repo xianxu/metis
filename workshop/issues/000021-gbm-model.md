@@ -1,12 +1,13 @@
 ---
 id: 000021
-status: working
+status: codecomplete
 deps: []
 github_issue:
 created: 2026-07-07
 updated: 2026-07-11
 estimate_hours: 0.6
 started: 2026-07-11T21:50:20-07:00
+actual_hours: 0.62
 ---
 
 # GBM model branch — HistGradientBoosting model step-type
@@ -92,6 +93,7 @@ total: 0.6
 - Filed as metis-v2 M4a. Independent additive win (startable in parallel with M1). Design in the project/pensive.
 
 ### 2026-07-11 (claimed; design converged — literature-grounded)
+- 2026-07-11: closed — Python 50 pass incl. new test_complexity_hist_gbm_total_leaves (pins exact total-leaves sum + max_iter-sensitivity m40>m10) + test_steps per-fold gbm complexity>0; Go 9/9 ok, zero Go edits (FamilyOf structural); metis run -dry-run → 33 configs incl 12 hist_gbm at fixed learning_rate. Real-data ledger run operator-gated (Kaggle).; review verdict: SHIP
 - Recon + design in Spec above. Core decision (hist_gbm complexity = total realized leaves, sum not mean)
   validated by a boosting-complexity **literature pass**: Friedman 2001 (stagewise additive expansion);
   ESL §10.2 (boosting = additive model, Eq.10.4), §10.11 (tree size J → interaction order J−1), §10.12

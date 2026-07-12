@@ -96,6 +96,8 @@ def complexity(fitted, kind: str) -> float:
     if kind == "hist_gbm":
         # _predictors is a list-of-lists: one inner list per boosting iteration, holding K
         # TreePredictors for K classes (binary → 1) — flatten and sum realized leaf counts.
+        # (Private attr: sklearn 1.9.0 exposes no public per-tree accessor; if an upgrade
+        # breaks this, that's the regression site.)
         return float(sum(t.get_n_leaf_nodes() for stage in fitted._predictors for t in stage))
     raise ValueError(f"complexity: unknown model kind {kind!r}; want one of {sorted(MODELS)}")
 

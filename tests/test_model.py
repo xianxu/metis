@@ -105,7 +105,8 @@ def test_complexity_logreg_is_coef_count():
 
 
 def test_complexity_hist_gbm_total_leaves():
-    """hist_gbm complexity = TOTAL leaves summed across ALL boosted trees (metis#19) —
+    """hist_gbm complexity = TOTAL leaves summed across ALL boosted trees (metis#21,
+    extending #19's measured-complexity) —
     SUM, not mean, because boosting is ADDITIVE (F(x)=Σ trees; ESL §10.2): each iteration
     adds capacity. The deliberate INVERSE of rf's n_estimators-neutrality (mean-per-tree
     would be max_iter-blind → blind to boosting's primary regularizer)."""
