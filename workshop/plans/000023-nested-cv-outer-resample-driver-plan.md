@@ -363,3 +363,10 @@ Reason: fold M1 milestone-review recommendations into the plan so the M2 impleme
 - **Step renamed** — the step is **`outer-split`** (`outer_split.py`), not "outer-partition" (the layer/milestone concept keeps the "outer-partition" name; the *step* matches the shipped `outer_split.py`/`steps/metis/outer-split`).
 - **M2 orchestration note added** — M2 runs `outer-split` above the driver and must leave `METIS_READ_ROOT` unset for it (it reads the full dataset legitimately).
 - **exec.go hardening** (M1 minor): inherited `METIS_READ_ROOT` is now stripped from the subprocess env when `readRoot==""`, so an ambient shell value can never confine the flat `driver:single` path.
+
+### 2026-07-12 — post-M2-review (verdict FIX-THEN-SHIP, no Critical)
+Reason: fold M2 milestone-review findings into the plan + code.
+- **I1 (selection-correctness gap):** `GuardComplexity` is NOT ship-only — it belongs on BOTH paths. Task 2.2's tail-fork listed it among "flat-path-only" steps forked out of the nested path, but a `driver:cv` + parsimony-select + non-reporting-model shape would then SILENTLY mis-select per outer fold (the flat path loudly rejects it). Fixed: `configStats()` → free `configStatsOf([]configScore)` (ARCH-DRY), and `runOuterFold` guards the sealed sweep's `pass.configs` before trusting the winner. Regression test: `TestNestedCV_ParsimonyGuardOnMissingComplexity`.
+- **I2 (stale restatements):** two "rejected at validate in M1a" claims (`shape.go:112`, `construct/datatype/experiment-shape.md:85`) now contradicted the shipped accept-with-`k>=2`; both corrected.
+- **Provenance (Minor, now documented decision):** `driver:cv` deliberately writes no grouped manifest/ledger/code-side-ref — it's estimation-only (no shippable/reproducible winner). Stated in a `runNestedCV` comment + atlas.
+- **atlas/experiment.md** — the `driver:cv` runtime surface (`runNestedCV`/`runOuterFold`/`reportEstimate`/no-ship + the per-fold guard) is now mirrored there (Task 2.6 named it; M2 initially only updated `index.md`).

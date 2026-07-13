@@ -212,18 +212,20 @@ func runShapeSweep(o runOpts, sh experiment.Shape, now func() time.Time, out io.
 	// quietly wrong. The raw fold rows are already persisted (re-selectable after a fix); only
 	// the ship/report is gated. Checked here (post-fold) because HasComplexity is only known
 	// after the folds run.
-	if err := sampler.GuardComplexity(sh.Sweeper.Objective.Select, ss.configStats()); err != nil {
+	if err := sampler.GuardComplexity(sh.Sweeper.Objective.Select, configStatsOf(ss.configs)); err != nil {
 		return err
 	}
 	ss.reportWinner(res)
 	return ss.shipWinner(res.Ship)
 }
 
-// configStats builds the per-config stats (with each config's family) from the completed
-// sweep — the guard's input, matching the shape GridConfigs.Done reduces internally.
-func (ss *shapeSweep) configStats() []sampler.ConfigStat {
-	stats := make([]sampler.ConfigStat, len(ss.configs))
-	for i, c := range ss.configs {
+// configStatsOf builds the per-config stats (with each config's family) from a completed
+// sweep pass — the GuardComplexity input, matching what GridConfigs.Done reduces internally.
+// Free over a []configScore so BOTH the flat path (ss.configs) and each driver:cv sealed
+// outer fold (pass.configs) guard the same way (ARCH-DRY, metis#23 I1).
+func configStatsOf(configs []configScore) []sampler.ConfigStat {
+	stats := make([]sampler.ConfigStat, len(configs))
+	for i, c := range configs {
 		stats[i] = sampler.ConfigStat{Point: c.point, Family: sampler.FamilyOf(c.point), Score: c.meanSE}
 	}
 	return stats
@@ -268,6 +270,13 @@ func (ss *shapeSweep) shipWinner(w sampler.Winner) error {
 // held outer-assessment — a plain full-data fold run at OUTER k, held=i (post-selection, so
 // unconfined and leakage-free; cv_folds's determinism reproduces the exact analysis_i partition).
 // Aggregate(outer scores) → mean±SE: the estimate. It ships NO winner (estimation ≠ selection).
+//
+// PROVENANCE (deliberate, metis#23): the nested path writes NO grouped sweepManifest / ledger and
+// does NO captureSweepCode. Each inner run's record.json still exists (via runResolvedExperiment),
+// but a driver:cv run is estimation-only — it produces no shippable/reproducible winner — so the
+// flat path's manifest+ledger+code-side-ref provenance (which exists to re-select/ship a winner
+// without a re-run) has no consumer here. If a durable procedure-estimate provenance is later
+// wanted (e.g. to compare estimates across code revisions), wire a thin nested manifest then.
 func (ss *shapeSweep) runNestedCV(ctx sampler.Ctx, configPts []shape.Point, innerK, outerK int, shapeRunID string) error {
 	fmt.Fprintf(ss.out, "metis: nested-CV %s (%s) — %d outer folds × (%d configs × %d inner folds)\n",
 		ss.sh.ID, shapeRunID[:12], outerK, len(configPts), innerK)
@@ -346,6 +355,14 @@ func (ss *shapeSweep) runOuterFold(ctx sampler.Ctx, configPts []shape.Point, inn
 	sres := ss.runSweeper(ctx, configPts, pass)
 	if pass.err != nil {
 		return 0, fmt.Errorf("outer fold %d sealed sweep: %w", i, pass.err)
+	}
+	// Guard (metis#19/#23 I1): the parsimony select rule needs a measured complexity for every
+	// swept family — same guard the flat path runs before trusting its winner. Without it, a
+	// driver:cv + parsimony-select + non-reporting-model shape would SILENTLY mis-select in each
+	// outer fold (the flat path loudly rejects it), and the "honest" estimate would be computed
+	// over quietly-wrong winners. Guard per fold (complexity is only known post-fold).
+	if err := sampler.GuardComplexity(ss.sh.Sweeper.Objective.Select, configStatsOf(pass.configs)); err != nil {
+		return 0, fmt.Errorf("outer fold %d: %w", i, err)
 	}
 	winner := sres.Ship
 
@@ -440,6 +457,7 @@ func (ss *shapeSweep) buildFoldExperiment(c shape.Point, f sampler.FoldPoint, ba
 	sh := ss.sh
 	steps := make([]experiment.Step, 0, len(sh.Data)+1+len(sh.Pipeline))
 	baseOut, baseID := baseDatasetRef(sh)
+	origOut := baseOut // the declared base, captured before the sealed branch reassigns baseOut
 	var partNeeds []string
 	if baseRef == nil {
 		steps = append(steps, sh.Data...)
@@ -451,7 +469,6 @@ func (ss *shapeSweep) buildFoldExperiment(c shape.Point, f sampler.FoldPoint, ba
 	}
 	steps = append(steps, cvSplitStep(baseOut, partNeeds, splitK, stratify))
 	dataIDs := dataStepIDs(sh)
-	origOut, _ := baseDatasetRef(sh)
 	for _, ps := range sh.Pipeline {
 		s := ps
 		s.With = foldWith(c.With[ps.ID], partRef, f.Idx)

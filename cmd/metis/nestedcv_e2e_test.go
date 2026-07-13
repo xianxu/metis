@@ -2,10 +2,34 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+// TestNestedCV_ParsimonyGuardOnMissingComplexity: driver:cv must run the SAME GuardComplexity the
+// flat path does (metis#23 I1). A parsimony select rule + a model that emits no complexity would
+// otherwise SILENTLY mis-select in EACH outer fold (all Complexity=0 → tie-break to mean) and report
+// an "honest" procedure estimate over quietly-wrong winners — the exact silent-wrongness the guard
+// exists to prevent. The flat path loudly rejects this shape; driver:cv must too.
+func TestNestedCV_ParsimonyGuardOnMissingComplexity(t *testing.T) {
+	ws := t.TempDir()
+	cvPctLoss := strings.Replace(foldShapePctLossMD("[a, b]"),
+		"driver:\n  single: {}", "driver:\n  cv: {k: 2}", 1)
+	expPath := writeShapeFile(t, ws, cvPctLoss)
+	_, err := runExperiment(runOpts{
+		expPath: expPath, now: fixedNow(),
+		git:  fakeGitProbe{name: "metis", sha: "sha", dirty: false},
+		exec: foldFakeExec{noComplexity: true}, out: io.Discard,
+	})
+	if err == nil {
+		t.Fatal("driver:cv + pct-loss with no emitted complexity must error, not silently mis-select per outer fold")
+	}
+	if !strings.Contains(err.Error(), "complexity") {
+		t.Errorf("the guard error should mention complexity; got %v", err)
+	}
+}
 
 // foldShapeCVMD is foldShapeShipMD with driver:cv (nested-CV, outerK outer folds) replacing
 // driver:single — a ship phase is present specifically to prove driver:cv ships NOTHING.
