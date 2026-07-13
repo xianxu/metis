@@ -9,6 +9,8 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"runtime"
+	"strconv"
 )
 
 func main() {
@@ -39,6 +41,7 @@ func cmdRun(args []string) error {
 	runID := fs.String("run", "", "run id (default: run-<UTC timestamp>; ignored for a multi-point sweep — each point keys off its content-address)")
 	cache := fs.Bool("cache", true, "use the metis#2 validating-trace step cache (<expDir>/.metis-cache); --cache=false to disable")
 	dryRun := fs.Bool("dry-run", false, "metis#18 sweep: list the swept configs without running them")
+	parallel := fs.Int("parallel", defaultParallel(), "metis#31: max concurrent step subprocesses across ALL sweep levels (driver×sweeper×resample share one global cap); <=1 = serial (exact pre-#31 behavior). Default runtime.NumCPU(), overridable by METIS_MAX_PARALLEL. Caveat: each leaf is a Python process that may itself multi-thread (BLAS / sklearn n_jobs) — n=NumCPU can oversubscribe cores; pin OMP_NUM_THREADS=1 or set n below NumCPU. On a COLD cache the first batch's ≤n points may each recompute the shared upstream (a bounded thundering herd).")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -46,13 +49,27 @@ func cmdRun(args []string) error {
 	if len(rest) != 1 {
 		return fmt.Errorf("run: want exactly one <experiment.md>, got %d", len(rest))
 	}
+	// cmdRun just passes maxParallel; runExperiment establishes the parallel invariant
+	// (leafSem + syncWriter) in one home so no runOpts caller can forget it (#31).
 	_, err := runExperiment(runOpts{
-		expPath:  rest[0],
-		runID:    *runID,
-		stepPath: stepPath(rest[0]),
-		cache:    *cache,
-		dryRun:   *dryRun,
-		out:      os.Stdout,
+		expPath:     rest[0],
+		runID:       *runID,
+		stepPath:    stepPath(rest[0]),
+		cache:       *cache,
+		dryRun:      *dryRun,
+		out:         os.Stdout,
+		maxParallel: *parallel,
 	})
 	return err
+}
+
+// defaultParallel is the default subprocess concurrency: METIS_MAX_PARALLEL if set to
+// a valid positive int, else runtime.NumCPU() (metis#31).
+func defaultParallel() int {
+	if v := os.Getenv("METIS_MAX_PARALLEL"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 1 {
+			return n
+		}
+	}
+	return runtime.NumCPU()
 }

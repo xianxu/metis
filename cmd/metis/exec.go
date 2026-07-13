@@ -31,6 +31,10 @@ type execStep struct {
 	seed     int       // the experiment's seed, exposed to every step for reproducibility
 	readRoot string    // metis#23: outer-fold analysis root; when set, confines base-dataset reads (empty = unconfined)
 	out      io.Writer // plain streaming progress
+	sem      chan struct{} // metis#31: the GLOBAL leaf budget — acquired around the subprocess
+	//                        spawn ONLY (a cache HIT never reaches here). One shared channel across
+	//                        all nesting levels ⇒ ≤ cap(sem) concurrent step subprocesses no matter
+	//                        how driver×sweeper×resample fans out. nil = unbounded (the serial path).
 }
 
 func (e execStep) Execute(step experiment.Step, runDir string) (experiment.StepResult, error) {
@@ -78,10 +82,22 @@ func (e execStep) Execute(step experiment.Step, runDir string) (experiment.StepR
 		// driver:single path leaves the var unset (unconfined).
 		cmd.Env = append(cmd.Env, "METIS_READ_ROOT="+e.readRoot)
 	}
-	if combined, err := cmd.CombinedOutput(); err != nil {
+	// metis#31: acquire the global leaf budget around the ONLY real subprocess spawn
+	// (resolve/mkdir/with.json above are cheap, non-subprocess — they draw no budget).
+	// Release immediately after the process exits, before the cheap metrics/artifact
+	// reads, so a slot is held only while a subprocess is actually running. An
+	// orchestration goroutine never reaches here holding another slot ⇒ deadlock-free.
+	if e.sem != nil {
+		e.sem <- struct{}{}
+	}
+	combined, cmdErr := cmd.CombinedOutput()
+	if e.sem != nil {
+		<-e.sem
+	}
+	if cmdErr != nil {
 		// Runner.Run already prefixes `step %q:`; name the executable, not the id
 		// again, to avoid a doubled "step first: step first" prefix.
-		return experiment.StepResult{}, fmt.Errorf("exec %s: %w\n%s", exe, err, combined)
+		return experiment.StepResult{}, fmt.Errorf("exec %s: %w\n%s", exe, cmdErr, combined)
 	}
 
 	metrics, err := readMetrics(filepath.Join(stepDir, "metrics.json"))
