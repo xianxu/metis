@@ -23,7 +23,7 @@ func TestSingleDriver_PassesSweeperResultThrough(t *testing.T) {
 	got := Run(Ctx{Seed: 42}, SingleDriver{}, func(SinglePoint) SweepResult {
 		calls++
 		return want
-	})
+	}, SeqExec[SinglePoint, SweepResult])
 	if calls != 1 {
 		t.Errorf("sweeper ran %d times, want exactly 1 (driver:single)", calls)
 	}
@@ -55,7 +55,7 @@ func TestCVDriver_RunsSweeperPerOuterFoldAndAggregates(t *testing.T) {
 	got := Run(Ctx{Seed: 1}, CVDriver{K: 3}, func(p OuterFoldPoint) float64 {
 		seen = append(seen, p.Idx)
 		return float64(p.Idx) // outer scores 0,1,2 → mean 1.0
-	})
+	}, SeqExec[OuterFoldPoint, float64])
 	if len(seen) != 3 {
 		t.Fatalf("sweeper ran %d times, want 3 (one per outer fold)", len(seen))
 	}
@@ -90,7 +90,7 @@ func TestCVDriver_AsksAllOuterFoldsOnceThenDone(t *testing.T) {
 
 func TestCVDriver_ZeroKIsDoneImmediately(t *testing.T) {
 	// k=0 must not spin the Run loop (empty non-done batch → panic guard). Done → empty MeanSE.
-	got := Run(Ctx{}, CVDriver{K: 0}, func(OuterFoldPoint) float64 { return 1 })
+	got := Run(Ctx{}, CVDriver{K: 0}, func(OuterFoldPoint) float64 { return 1 }, SeqExec[OuterFoldPoint, float64])
 	if got.Mean != 0 || len(got.ToldSet) != 0 {
 		t.Errorf("k=0 Done = %+v, want zero MeanSE", got)
 	}

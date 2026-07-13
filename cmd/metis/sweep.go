@@ -109,10 +109,12 @@ func (ss *shapeSweep) runSweeper(ctx sampler.Ctx, configPts []shape.Point, pass 
 		sampler.GridConfigs{Points: configPts, Direction: ss.sh.Sweeper.Objective.Direction, Select: ss.sh.Sweeper.Objective.Select},
 		func(c shape.Point) sampler.MeanSE {
 			ms := sampler.Run(ctx, sampler.FixedKFolds{K: pass.splitK},
-				func(f sampler.FoldPoint) sampler.FoldOutcome { return pass.runPipelineFold(c, f) })
+				func(f sampler.FoldPoint) sampler.FoldOutcome { return pass.runPipelineFold(c, f) },
+				sampler.SeqExec[sampler.FoldPoint, sampler.FoldOutcome])
 			pass.configs = append(pass.configs, configScore{point: c, meanSE: ms})
 			return ms
-		})
+		},
+		sampler.SeqExec[shape.Point, sampler.MeanSE])
 }
 
 // runShapeSweep drives the metis#18 nested Sampler loop: the sweeper (GridConfigs over the
@@ -186,7 +188,7 @@ func runShapeSweep(o runOpts, sh experiment.Shape, now func() time.Time, out io.
 	pass := &sweepPass{ss: ss, splitK: k, stratify: sh.Sweeper.Resample.CV.Stratify, partRef: ss.partRef}
 	res := sampler.Run(ctx, sampler.SingleDriver{}, func(sampler.SinglePoint) sampler.SweepResult {
 		return ss.runSweeper(ctx, configPts, pass)
-	})
+	}, sampler.SeqExec[sampler.SinglePoint, sampler.SweepResult])
 	ss.man.Points = pass.points
 	ss.configs = pass.configs
 	if pass.err != nil {
@@ -301,7 +303,8 @@ func (ss *shapeSweep) runNestedCV(ctx sampler.Ctx, configPts []shape.Point, inne
 				return 0
 			}
 			return score
-		})
+		},
+		sampler.SeqExec[sampler.OuterFoldPoint, float64])
 	if firstErr != nil {
 		return firstErr
 	}
