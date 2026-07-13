@@ -1,11 +1,12 @@
 ---
 id: 000031
-status: open
+status: working
 deps: []
 github_issue:
 created: 2026-07-13
 updated: 2026-07-13
 estimate_hours:
+started: 2026-07-13T14:15:42-07:00
 ---
 
 # parallel batch executor — concurrent Ask-batch execution in Run (determinism-preserving)
