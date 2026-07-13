@@ -148,7 +148,7 @@ func TestValidateShape_v2(t *testing.T) {
 		"mean-std lambda < 0":        func(s *Shape) { s.Sweeper.Objective.Select = Select{MeanStd: &MeanStd{Lambda: -1}} },
 		"driver none":                func(s *Shape) { s.Driver = Driver{} },
 		"driver both":                func(s *Shape) { s.Driver.CV = &CVDriver{K: 5} },
-		"driver cv (is #23)":         func(s *Shape) { s.Driver = Driver{CV: &CVDriver{K: 5}} },
+		"driver cv k<2":              func(s *Shape) { s.Driver = Driver{CV: &CVDriver{K: 1}} },
 	}
 	for name, mut := range bad {
 		s, err := ParseShape(mdOf(validShapeV2))
@@ -159,6 +159,19 @@ func TestValidateShape_v2(t *testing.T) {
 		if err := ValidateShape(s); err == nil {
 			t.Errorf("%s: expected ValidateShape to fail, got nil", name)
 		}
+	}
+}
+
+// metis#23: driver:cv (nested-CV) is now a valid driver (the M1a stub-rejection is gone) — a
+// shape with driver:cv.k >= 2 must validate.
+func TestValidateShape_AcceptsDriverCV(t *testing.T) {
+	s, err := ParseShape(mdOf(validShapeV2))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Driver = Driver{CV: &CVDriver{K: 5}}
+	if err := ValidateShape(s); err != nil {
+		t.Errorf("driver:cv (k=5) must validate now that metis#23 landed, got: %v", err)
 	}
 }
 

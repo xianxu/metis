@@ -68,8 +68,12 @@ identical on a non-Kaggle platform?* — if yes, it lives here.
   emits the whole point-set at once and whose `Tell` ignores feedback — `GridConfigs` (the sweeper — every
   `shape.Expand` config), `FixedKFolds` (the inner resample — k folds over the materialized partition),
   `SingleDriver` (the degenerate outer driver:single). Adaptive Samplers use the feedback edge and are
-  later impls against the SAME node: metis#23 nested-CV = an outer resample Sampler swapping `SingleDriver`,
-  racing/Bayesian = feedback-driven `Ask`. **metis#23 M1 (landed)** is the outer-fold **sealing spine** the
+  later impls against the SAME node: metis#23 nested-CV **(landed)** = `CVDriver`, an outer resample Sampler
+  that swaps `SingleDriver` — it emits k outer folds, and per fold runs the sweeper SEALED on `analysis_i`
+  → a winner, refits+scores it on the held outer-assessment, and `Done`-`Aggregate`s the k outer scores →
+  `mean±SE`, the **honest procedure estimate** (`runNestedCV`/`runOuterFold`, `cmd/metis/sweep.go`). It
+  produces NO shippable winner (estimation ≠ selection; ship stays on `driver:single`) and costs ~outerK×.
+  racing/Bayesian = feedback-driven `Ask`. **metis#23 M1** is the outer-fold **sealing spine** the
   driver builds on: `outer-split` materializes k `analysis_i/` **subset dataset dirs** (L1 structural — assessment
   rows physically absent from selection) + a `METIS_READ_ROOT` confinement asserted at `metis/io.py:exp_path`
   (L2 chokepoint — a base-dataset read outside the analysis root is a loud error; handoffs bypass it). Shared by
@@ -96,7 +100,10 @@ identical on a non-Kaggle platform?* — if yes, it lives here.
   rebuild the exact run DIRECTLY, not by re-expanding the grid. The **driver** is `cmd/metis`: `metis run` on an experiment-shape
   drives the real three-level loop (`runShapeSweep`: `Run(SingleDriver) ⊃ Run(GridConfigs) ⊃
   Run(FixedKFolds)`), running each `(config, fold)` through the shared `runResolvedExperiment` (cached
-  runner) keyed by its content-address. Each fold builds a per-fold experiment (`data ++ engine-synthesized
+  runner) keyed by its content-address. The sweeper (`GridConfigs ⊃ FixedKFolds`) is extracted as
+  `runSweeper`/`sweepPass` (per-call accumulators) so `driver:cv` can run it once **per outer fold**,
+  each pass repointed at that fold's sealed `analysis_i` + confined (`METIS_READ_ROOT`) — the flat
+  `driver:single` path is `runSweeper` with `baseRef=nil`, unconfined. Each fold builds a per-fold experiment (`data ++ engine-synthesized
   cv-split ++ pipeline`, config + `_fold` overlaid so `Kpre` is fold-distinct); a **failing fold is FATAL**
   (a partial resample is not an honest estimate — unlike a v1 flat point). **`driver:single` ships the
   winner** (`shipWinner`): reconstruct the winner's runnable experiment from its `Point` (`data ++ pipeline

@@ -198,8 +198,8 @@ func ValidateShape(sh Shape) error {
 	if n != 1 {
 		return fmt.Errorf("shape %q: driver must set exactly one of single|cv, got %d", sh.ID, n)
 	}
-	if sh.Driver.CV != nil {
-		return fmt.Errorf("shape %q: driver:cv (nested-CV) is metis#23 — M1a supports driver:single only", sh.ID)
+	if c := sh.Driver.CV; c != nil && c.K < 2 {
+		return fmt.Errorf("shape %q: driver:cv.k must be >= 2 (nested-CV needs ≥2 outer folds), got %d", sh.ID, c.K)
 	}
 	return nil
 }
