@@ -61,7 +61,7 @@ Deps **metis#18** (the sweeper substrate + fold-as-artifact + read-time reductio
 
 Two review boundaries (full task breakdown in the durable plan). Each `Mx` closes with its own `sdlc milestone-close`.
 
-- [ ] **M1 — structural outer-partition + trace-enforced read-confinement** (the sealing spine; #20/kbench#8 inherit it). `within_root` predicate + `exp_path` chokepoint assertion; `METIS_READ_ROOT` threaded through `exec.go`/`StepContext`; the `outer-split` step materializing `analysis_i/` subset dirs. Load-bearing tests: an out-of-root data read is caught + named; a legit run-dir handoff read passes (the C1 regression).
+- [x] **M1 — structural outer-partition + trace-enforced read-confinement** (the sealing spine; #20/kbench#8 inherit it). `within_root` predicate + `exp_path` chokepoint assertion; `METIS_READ_ROOT` threaded through `exec.go`/`StepContext`; the `outer-split` step materializing `analysis_i/` subset dirs. Load-bearing tests: an out-of-root data read is caught + named; a legit run-dir handoff read passes (the C1 regression).
 - [x] **M2 — `CVDriver` nested loop + honest e2e** (built on M1). Pure `CVDriver` Sampler; extract the sweeper-as-callable (per-fold accumulators + whole-pipeline repoint to `analysis_i` + forked tail); refit-and-score as a fold; delete the `ValidateShape` stub-reject; ~5× cost surfaced; honest e2e (mean±SE over outer folds, no ship); reporting + atlas.
 
 Honest-estimate-tracks-public acceptance is **operator-gated** (real Titanic, Kaggle) — the offline e2e proves plumbing + seal, not the gap magnitude.
