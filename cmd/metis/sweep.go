@@ -93,6 +93,7 @@ type sweepPass struct {
 	baseRef  any
 	readRoot string
 	splitK   int                  // the cv-split / FixedKFolds fold count for this pass
+	stratify bool                 // the cv-split stratify flag for this pass
 	partRef  sampler.PartitionRef // this pass's partition identity (fed into each point's address)
 	configs  []configScore
 	points   []pointRun
@@ -182,7 +183,7 @@ func runShapeSweep(o runOpts, sh experiment.Shape, now func() time.Time, out io.
 	// its SweepResult through. The sweeper (GridConfigs) grids over configs, Done-selecting via
 	// the metis#19 rule → a per-family winner map + the cross-family ship pick; the inner
 	// FixedKFolds scores each config over k folds → (mean, SE, complexity).
-	pass := &sweepPass{ss: ss, splitK: k, partRef: ss.partRef}
+	pass := &sweepPass{ss: ss, splitK: k, stratify: sh.Sweeper.Resample.CV.Stratify, partRef: ss.partRef}
 	res := sampler.Run(ctx, sampler.SingleDriver{}, func(sampler.SinglePoint) sampler.SweepResult {
 		return ss.runSweeper(ctx, configPts, pass)
 	})
@@ -339,8 +340,9 @@ func (ss *shapeSweep) runOuterFold(ctx sampler.Ctx, configPts []shape.Point, inn
 	if err != nil {
 		return 0, err
 	}
-	// (a) sealed selection: the sweeper's inner-CV runs entirely within analysis_i.
-	pass := &sweepPass{ss: ss, baseRef: analysisRef, readRoot: analysisAbs, splitK: innerK, partRef: ss.partRef}
+	// (a) sealed selection: the sweeper's inner-CV runs entirely within analysis_i (inner k/stratify).
+	pass := &sweepPass{ss: ss, baseRef: analysisRef, readRoot: analysisAbs, splitK: innerK,
+		stratify: ss.sh.Sweeper.Resample.CV.Stratify, partRef: ss.partRef}
 	sres := ss.runSweeper(ctx, configPts, pass)
 	if pass.err != nil {
 		return 0, fmt.Errorf("outer fold %d sealed sweep: %w", i, pass.err)
@@ -348,7 +350,9 @@ func (ss *shapeSweep) runOuterFold(ctx sampler.Ctx, configPts []shape.Point, inn
 	winner := sres.Ship
 
 	// (b) refit-and-score on the held outer-assessment — post-selection, so unconfined and honest.
-	scoreExp := ss.buildFoldExperiment(winner.Point, sampler.FoldPoint{Idx: i}, nil, outerK, outerPart)
+	// The cv-split MUST use the OUTER k + OUTER stratify so cv_folds's determinism reproduces the
+	// exact partition outer-split materialized (else the held fold ≠ analysis_i's assessment rows).
+	scoreExp := ss.buildFoldExperiment(winner.Point, sampler.FoldPoint{Idx: i}, nil, outerK, ss.sh.Driver.CV.Stratify, outerPart)
 	scoreID, err := pointAddressOf(scoreExp, ss.shapeBlobHash)
 	if err != nil {
 		return 0, fmt.Errorf("outer fold %d score: %w", i, err)
@@ -391,7 +395,7 @@ func (p *sweepPass) runPipelineFold(c shape.Point, f sampler.FoldPoint) sampler.
 		return sampler.FoldOutcome{}
 	}
 
-	exp := ss.buildFoldExperiment(c, f, p.baseRef, p.splitK, p.partRef)
+	exp := ss.buildFoldExperiment(c, f, p.baseRef, p.splitK, p.stratify, p.partRef)
 	runID, err := pointAddressOf(exp, ss.shapeBlobHash)
 	if err != nil {
 		p.err = fmt.Errorf("config %s fold %d: %w", freeParamStr(c), f.Idx, err)
@@ -432,7 +436,7 @@ func (p *sweepPass) runPipelineFold(c shape.Point, f sampler.FoldPoint) sampler.
 // is already the adapted base) and cv-split + every pipeline step that read the declared base are
 // repointed to baseRef (analysis_i), so their reads route through exp_path → confined to the
 // outer-analysis root and the sweeper's inner-CV structurally cannot see outer-assessment.
-func (ss *shapeSweep) buildFoldExperiment(c shape.Point, f sampler.FoldPoint, baseRef any, splitK int, partRef sampler.PartitionRef) experiment.Experiment {
+func (ss *shapeSweep) buildFoldExperiment(c shape.Point, f sampler.FoldPoint, baseRef any, splitK int, stratify bool, partRef sampler.PartitionRef) experiment.Experiment {
 	sh := ss.sh
 	steps := make([]experiment.Step, 0, len(sh.Data)+1+len(sh.Pipeline))
 	baseOut, baseID := baseDatasetRef(sh)
@@ -445,7 +449,7 @@ func (ss *shapeSweep) buildFoldExperiment(c shape.Point, f sampler.FoldPoint, ba
 	} else {
 		baseOut = baseRef // sealed: cv-split + pipeline read analysis_i, no data phase
 	}
-	steps = append(steps, cvSplitStep(sh, baseOut, partNeeds, splitK))
+	steps = append(steps, cvSplitStep(baseOut, partNeeds, splitK, stratify))
 	dataIDs := dataStepIDs(sh)
 	origOut, _ := baseDatasetRef(sh)
 	for _, ps := range sh.Pipeline {
@@ -492,11 +496,11 @@ func dropNeeds(needs []string, drop map[string]bool) []string {
 // cv-split in the shape): it splits `dataset` into k folds, writing folds.json the per-fold
 // pipeline reads. `dataset`/`needs`/`k` are passed so BOTH the flat path (declared base, inner k)
 // and metis#23's sealed sweep (analysis_i, inner k) / outer-score run (full base, OUTER k) reuse it.
-func cvSplitStep(sh experiment.Shape, dataset any, needs []string, k int) experiment.Step {
+func cvSplitStep(dataset any, needs []string, k int, stratify bool) experiment.Step {
 	with := map[string]any{
 		"dataset":  dataset,
 		"k":        k,
-		"stratify": sh.Sweeper.Resample.CV.Stratify,
+		"stratify": stratify,
 	}
 	return experiment.Step{ID: partitionStepID, Uses: "metis/cv-split", Needs: needs, With: with}
 }
