@@ -3,6 +3,7 @@ package main
 import (
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -74,6 +75,52 @@ func TestExecStep_ReadRootInjectedOnlyWhenSet(t *testing.T) {
 	}
 	if got := readEnvDump(t, runDir2); !strings.Contains(got, "READ_ROOT=<unset>") {
 		t.Errorf("readRoot empty but METIS_READ_ROOT was injected; got:\n%s", got)
+	}
+}
+
+// TestExecStep_ConfinesRealUvStep_OutOfRootRead is the metis#23 confinement seal proven
+// end-to-end through the REAL chain: Go execStep injects METIS_READ_ROOT → a real uv
+// metis/cv-split subprocess → metis.io's exp_path assertion. M1 proved exp_path catches an
+// out-of-root read (via _run_step, which sets the env directly) and TestExecStep_ReadRoot…
+// proved execStep injects the var (via the non-uv env-dump step); THIS test closes the seam
+// between them — a real DATA step, launched by execStep, reading outside its analysis root is
+// caught. Combined with runOuterFold setting readRoot=analysis_i on the sealed sweep, a leaked
+// outer-assessment read in a driver:cv sweep cannot pass silently.
+func TestExecStep_ConfinesRealUvStep_OutOfRootRead(t *testing.T) {
+	if _, err := exec.LookPath("uv"); err != nil {
+		t.Skip("uv not on PATH; skipping the real-step confinement-chain test")
+	}
+	root := repoRoot(t)
+	ws := t.TempDir()
+	expDir := filepath.Join(ws, "experiment")
+	if err := os.MkdirAll(filepath.Join(expDir, "analysis_0"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// The dataset lives at ws/dataset/toy; a step resolves `../dataset/toy` against
+	// METIS_EXP_DIR=ws/experiment → ws/dataset/toy.
+	copyDir(t, filepath.Join(root, "testdata", "dataset", "toy"), filepath.Join(ws, "dataset", "toy"))
+	split := experiment.Step{ID: "split", Uses: "metis/cv-split",
+		With: map[string]any{"dataset": "../dataset/toy", "k": 3, "stratify": true}}
+	stepPath := []string{filepath.Join(root, "steps")}
+
+	// (a) readRoot = ws/experiment/analysis_0 EXCLUDES ws/dataset/toy → the sealed sweep's
+	// dataset read is outside its analysis root → confinement fires through the real chain.
+	confined := execStep{stepPath: stepPath, expDir: expDir, seed: 42,
+		readRoot: filepath.Join(expDir, "analysis_0"), out: io.Discard}
+	_, err := confined.Execute(split, filepath.Join(ws, "run-a"))
+	if err == nil {
+		t.Fatal("confinement did NOT fire: a real sealed-sweep read outside its analysis root must be caught")
+	}
+	if !strings.Contains(err.Error(), "confinement") {
+		t.Errorf("expected the metis#23 confinement error, got: %v", err)
+	}
+
+	// (b) readRoot = ws/dataset CONTAINS ws/dataset/toy → the same read is within-root and
+	// succeeds — the confinement is SCOPED to the root, not a blanket failure.
+	within := execStep{stepPath: stepPath, expDir: expDir, seed: 42,
+		readRoot: filepath.Join(ws, "dataset"), out: io.Discard}
+	if _, err := within.Execute(split, filepath.Join(ws, "run-b")); err != nil {
+		t.Fatalf("within-root read must succeed (confinement over-fired): %v", err)
 	}
 }
 
