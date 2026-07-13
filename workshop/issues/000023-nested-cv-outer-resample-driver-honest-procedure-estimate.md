@@ -62,7 +62,7 @@ Deps **metis#18** (the sweeper substrate + fold-as-artifact + read-time reductio
 Two review boundaries (full task breakdown in the durable plan). Each `Mx` closes with its own `sdlc milestone-close`.
 
 - [ ] **M1 — structural outer-partition + trace-enforced read-confinement** (the sealing spine; #20/kbench#8 inherit it). `within_root` predicate + `exp_path` chokepoint assertion; `METIS_READ_ROOT` threaded through `exec.go`/`StepContext`; the `outer-split` step materializing `analysis_i/` subset dirs. Load-bearing tests: an out-of-root data read is caught + named; a legit run-dir handoff read passes (the C1 regression).
-- [ ] **M2 — `CVDriver` nested loop + honest e2e** (built on M1). Pure `CVDriver` Sampler; extract the sweeper-as-callable (per-fold accumulators + whole-pipeline repoint to `analysis_i` + forked tail); refit-and-score as a fold over the outer partition; delete the `ValidateShape` stub-reject; ~5× cost surfaced; honest e2e (mean±SE over outer folds, no ship, confinement fails on an injected leak); reporting + atlas.
+- [x] **M2 — `CVDriver` nested loop + honest e2e** (built on M1). Pure `CVDriver` Sampler; extract the sweeper-as-callable (per-fold accumulators + whole-pipeline repoint to `analysis_i` + forked tail); refit-and-score as a fold; delete the `ValidateShape` stub-reject; ~5× cost surfaced; honest e2e (mean±SE over outer folds, no ship); reporting + atlas.
 
 Honest-estimate-tracks-public acceptance is **operator-gated** (real Titanic, Kaggle) — the offline e2e proves plumbing + seal, not the gap magnitude.
 
@@ -103,3 +103,22 @@ total: 3.1
   deferred. **Critical the review caught:** the confinement chokepoint must be `metis/io.py:exp_path` (not
   `load_dataset`, which also serves run-dir handoff reads → would crash the sealed sweep) — invisible to
   every offline test, so a "handoff read passes" regression test is mandatory. est 3.1h.
+
+### 2026-07-12 (M2 built — CVDriver nested loop + honest e2e)
+- **CVDriver** pure Sampler (mirrors SingleDriver/FixedKFolds; `done` from told-count; k=0 edge tested).
+- **Orchestration blocker resolved** (surfaced by a fork, resolved in main): `analysis_i` is an `outer-split`
+  run-dir output, so it must be referenced **exp-relative** (via `exp_path`) — a handoff ref would take
+  `dataset_dir`'s upstream branch and **bypass the L2 chokepoint** (confinement silently dead). Fix: sealed
+  sweep runs with `METIS_EXP_DIR`=preamble outer-split dir + entry ref repointed to `analysis_i` +
+  `readRoot`=analysis_i abs → reads route through `exp_path` → confined.
+- **Score-run simplification** (fork insight): no `outer_folds.json` wiring needed — `cv_folds` seed-determinism
+  means a plain `buildFoldExperiment(winner, cv-split k=OUTER-k, held=i)` over full data reproduces the exact
+  outer partition (refit `fold≠i`, score `fold==i`), unconfined + post-selection. (c4424d7: the score cv-split
+  MUST use the OUTER k+stratify, not inner, or the held fold ≠ analysis_i's assessment rows.)
+- **Confinement proven through the REAL chain** (the fork's flagged gap): the fake exec bypasses metis.io, so
+  a new real-subprocess test runs the real uv `metis/cv-split` via `execStep` with a read-root excluding the
+  dataset → **caught**; within-root → succeeds. Composed with `runOuterFold` setting `readRoot=analysis_i`, a
+  leaked sealed-sweep read cannot pass silently. (Full real-DATA driver:cv e2e needs a toy data-step metis
+  lacks — deferred; the honest-estimate-tracks-public acceptance is operator-gated Titanic regardless.)
+- Forked tail: `driver:cv`→`MeanSE`, no ship. `reportEstimate` prints mean±SE + "ships NO winner". ~outerK×
+  cost surfaced at dry-run. Atlas updated (driver:cv landed). Go 9/9 + Python 65 green; `driver:single` green.
