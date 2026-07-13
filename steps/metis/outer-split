@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# metis/outer-split — step-type wrapper (metis#23). The runner invokes this with
+# cwd == the step dir, so resolve the metis root from $0 (NOT cwd) and exec the
+# entrypoint in the hermetic uv env, through the read-sensor. See atlas/experiment.md.
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+exec uv run --project "$ROOT" python -m metis.trace metis.steps.outer_split

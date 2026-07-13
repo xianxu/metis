@@ -108,8 +108,9 @@ type Driver struct {
 // SingleDriver carries no config — it's the "no outer resample, ship the winner" case.
 type SingleDriver struct{}
 
-// CVDriver is the outer k-fold resample (metis#23 nested-CV). Parsed here so #23 is a
-// purely additive change (no schema churn), but M1a rejects it at validate time.
+// CVDriver is the outer k-fold resample (metis#23 nested-CV): the honest procedure estimate
+// wrapping the black-box sweeper. ValidateShape accepts it with k>=2 (the M1a stub-reject was
+// removed when #23 landed the driver).
 type CVDriver struct {
 	K        int  `yaml:"k"`
 	Stratify bool `yaml:"stratify,omitempty"`
@@ -198,8 +199,8 @@ func ValidateShape(sh Shape) error {
 	if n != 1 {
 		return fmt.Errorf("shape %q: driver must set exactly one of single|cv, got %d", sh.ID, n)
 	}
-	if sh.Driver.CV != nil {
-		return fmt.Errorf("shape %q: driver:cv (nested-CV) is metis#23 — M1a supports driver:single only", sh.ID)
+	if c := sh.Driver.CV; c != nil && c.K < 2 {
+		return fmt.Errorf("shape %q: driver:cv.k must be >= 2 (nested-CV needs ≥2 outer folds), got %d", sh.ID, c.K)
 	}
 	return nil
 }

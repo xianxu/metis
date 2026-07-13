@@ -1,6 +1,7 @@
 package sampler
 
 import (
+	"sort"
 	"testing"
 
 	"github.com/xianxu/metis/pkg/shape"
@@ -43,5 +44,54 @@ func TestSingleDriver_AskOnceThenDone(t *testing.T) {
 	s = d.Tell(s, SinglePoint{}, SweepResult{Ship: Winner{Seed: 1}})
 	if _, done := d.Ask(s); !done {
 		t.Error("Ask after tell: done=false, want true")
+	}
+}
+
+func TestCVDriver_RunsSweeperPerOuterFoldAndAggregates(t *testing.T) {
+	// metis#23: the runPoint = the sealed sweeper + refit-and-score, returning one outer
+	// fold's honest held-out score. The driver must run it once per outer fold and
+	// aggregate the k scores → the honest procedure estimate (mean ± SE).
+	var seen []int
+	got := Run(Ctx{Seed: 1}, CVDriver{K: 3}, func(p OuterFoldPoint) float64 {
+		seen = append(seen, p.Idx)
+		return float64(p.Idx) // outer scores 0,1,2 → mean 1.0
+	})
+	if len(seen) != 3 {
+		t.Fatalf("sweeper ran %d times, want 3 (one per outer fold)", len(seen))
+	}
+	sort.Ints(seen)
+	for i, v := range seen {
+		if v != i {
+			t.Errorf("outer fold idx[%d] = %d, want %d", i, v, i)
+		}
+	}
+	if got.Mean != 1.0 {
+		t.Errorf("Done mean = %v, want 1.0 (Aggregate of 0,1,2 — the honest estimate)", got.Mean)
+	}
+	if len(got.ToldSet) != 3 {
+		t.Errorf("ToldSet has %d addrs, want 3 (distinct outer folds)", len(got.ToldSet))
+	}
+}
+
+func TestCVDriver_AsksAllOuterFoldsOnceThenDone(t *testing.T) {
+	d := CVDriver{K: 3}
+	s := d.Init(Ctx{})
+	batch, done := d.Ask(s)
+	if done || len(batch) != 3 {
+		t.Fatalf("first Ask = (%d, done=%v), want (3, false)", len(batch), done)
+	}
+	for _, p := range batch {
+		s = d.Tell(s, p, float64(p.Idx))
+	}
+	if _, done := d.Ask(s); !done {
+		t.Error("Ask after all outer folds told: done=false, want true")
+	}
+}
+
+func TestCVDriver_ZeroKIsDoneImmediately(t *testing.T) {
+	// k=0 must not spin the Run loop (empty non-done batch → panic guard). Done → empty MeanSE.
+	got := Run(Ctx{}, CVDriver{K: 0}, func(OuterFoldPoint) float64 { return 1 })
+	if got.Mean != 0 || len(got.ToldSet) != 0 {
+		t.Errorf("k=0 Done = %+v, want zero MeanSE", got)
 	}
 }

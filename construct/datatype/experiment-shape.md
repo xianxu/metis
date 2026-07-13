@@ -82,7 +82,8 @@ Exactly one mode:
 - `single: {}` — the degenerate outer Sampler (M1a): fit the sweeper on all data, ship the winner. No
   honest procedure estimate.
 - `cv: {k, stratify?}` — nested-CV: run the sweeper on each outer-train, score the sealed outer-test,
-  aggregate → the honest procedure estimate. **metis#23** (parsed but rejected at validate in M1a).
+  aggregate → the honest procedure estimate (ships **no** winner). **metis#23** — accepted at validate
+  with `k>=2`.
 
 ### The `$`-descriptor algebra (in `pipeline` `with` leaves)
 

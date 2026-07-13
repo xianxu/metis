@@ -1,5 +1,7 @@
 package sampler
 
+import "fmt"
+
 // SinglePoint is the driver:single degenerate outer point — "the whole training
 // set, once". Exported so the cmd/metis driver loop names it as the sweeper's outer
 // point type (metis#18 M1a-5: the driver level is now real, not inlined).
@@ -38,3 +40,59 @@ func (SingleDriver) Tell(s driverState, _ SinglePoint, r SweepResult) driverStat
 func (SingleDriver) Done(s driverState) SweepResult { return s.result }
 
 var _ Sampler[driverState, SinglePoint, SweepResult, SweepResult] = SingleDriver{}
+
+// OuterFoldPoint is one outer resample fold (metis#23 nested-CV): the driver hands the
+// sweeper this fold's sealed outer-analysis data and scores the winner on the held
+// outer-assessment. Mirrors FoldPoint at the outer level (just the index; the analysis
+// subset is materialized by the IO shell, not carried in the pure point).
+type OuterFoldPoint struct{ Idx int }
+
+// CVDriver is the nested-CV outer Sampler (metis#23) — the honest counterpart to
+// SingleDriver's pass-through. It proposes k outer folds; the runPoint runs the black-box
+// sweeper on each fold's SEALED outer-analysis → a winner, then refits + scores that winner
+// on the held outer-assessment (the runPoint's float64). Done aggregates the k outer scores
+// → MeanSE, the HONEST procedure estimate. Result-dependent (folds may select different
+// winners) and produces NO shippable winner — estimation ≠ selection; the ship stays on
+// driver:single. A new Sampler impl over the UNCHANGED Run loop (no engine change).
+type CVDriver struct {
+	K        int
+	Stratify bool
+}
+
+type cvDriverState struct {
+	points []OuterFoldPoint
+	scores []FoldScore
+}
+
+// Init enumerates the k outer fold-points (mirror FixedKFolds.Init).
+func (d CVDriver) Init(ctx Ctx) cvDriverState {
+	pts := make([]OuterFoldPoint, d.K)
+	for i := range pts {
+		pts[i] = OuterFoldPoint{Idx: i}
+	}
+	return cvDriverState{points: pts}
+}
+
+// Ask proposes the not-yet-told outer folds as one batch; done once all k are told —
+// derived from the told count (mirror FixedKFolds; no separate flag, so k=0 is done
+// immediately rather than emitting an empty non-done batch).
+func (d CVDriver) Ask(s cvDriverState) ([]OuterFoldPoint, bool) {
+	if len(s.scores) >= len(s.points) {
+		return nil, true
+	}
+	return s.points[len(s.scores):], false
+}
+
+// Tell folds one outer fold's held-out score in. FoldScore.Addr is the outer fold's
+// identity (keeps MeanSE.ToldSet meaningful); complexity is not measured at the outer
+// level (the honest estimate is over scores, not parsimony).
+func (d CVDriver) Tell(s cvDriverState, p OuterFoldPoint, out float64) cvDriverState {
+	s.scores = append(s.scores, FoldScore{Addr: fmt.Sprintf("outer#%d", p.Idx), Score: out})
+	return s
+}
+
+// Done aggregates the k outer scores → the honest procedure estimate (mean ± SE),
+// reusing the SAME reducer as the resample level (sampler.Aggregate).
+func (d CVDriver) Done(s cvDriverState) MeanSE { return Aggregate(s.scores) }
+
+var _ Sampler[cvDriverState, OuterFoldPoint, float64, MeanSE] = CVDriver{}
