@@ -41,8 +41,10 @@ func ParExec[P, O any](points []P, runPoint func(P) O) []O {
 	return out
 }
 
-// execFor selects the batch strategy — the single Seq/Par branch point (ARCH-DRY).
-func execFor[P, O any](parallel bool) func([]P, func(P) O) []O {
+// ExecFor selects the batch strategy — the single Seq/Par branch point (ARCH-DRY):
+// ParExec when parallel, else the serial SeqExec. cmd/metis passes ss.parallel here
+// at each of the nested Run call sites so the choice lives in exactly one place.
+func ExecFor[P, O any](parallel bool) func([]P, func(P) O) []O {
 	if parallel {
 		return ParExec[P, O]
 	}
