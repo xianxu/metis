@@ -1,12 +1,13 @@
 ---
 id: 000031
-status: working
+status: codecomplete
 deps: []
 github_issue:
 created: 2026-07-13
 updated: 2026-07-13
 estimate_hours: 2.8
 started: 2026-07-13T14:15:42-07:00
+actual_hours: N/A
 ---
 
 # parallel batch executor — concurrent Ask-batch execution in Run (determinism-preserving)
@@ -107,6 +108,7 @@ Single-pass atomic work — one close boundary (no `Mx` milestones).
 ## Log
 
 ### 2026-07-13
+- 2026-07-13: closed — Build clean + full `go test ./... -race` green across all 9 packages (independently re-run in the main session, not just the impl fork). 7 load-bearing tests present & passing: reader-vs-writer atomicity (I1), real-execStep serialization (I5), sampler+cmd determinism parallel≡serial (M3), peak-≤-n under nested driver:cv no-deadlock, C1 no-false-abort regression, ParExec order-preservation — the atomicity/C1/determinism trio verified RED-first by the fork. --parallel flag wired (default NumCPU, METIS_MAX_PARALLEL override) with the BLAS/thundering-herd caveats in help. Hermetic wall-clock demo: serial 432ms → parallel(8) 95ms = 4.5× (10ms sleeping leaf through the real orchestration). Fresh-eyes plan review (1 Critical + 5 Important + 3 Minor) + both change-code judges (plan-quality + estimate-quality INFO) preceded impl. ACTUAL = N/A (--no-actual): sdlc actual attributes 1.74h across #30/#31/#32/#33 by mention-fallback (interleaved-session, no clean per-issue commit boundary) AND the impl ran in a fork the commit-based measure captures imperfectly — recording N/A rather than polluting velocity calibration with a contaminated number (per the interleaved-sessions lesson).; review verdict: SHIP
 - Filed from the kbench#8 sweep-scale discussion (operator, metis-v2). Parallelism = the `Ask` **batch
   width**, a property the sampler already declares — so it's one injected `exec` on the shared `Run`
   loop, not a grid-specific runner. Sibling: metis#30 (progress). The content-addressed, order-independent
