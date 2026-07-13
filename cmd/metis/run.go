@@ -6,12 +6,28 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/xianxu/metis/internal/repo"
 	"github.com/xianxu/metis/pkg/cas"
 	"github.com/xianxu/metis/pkg/experiment"
 )
+
+// syncWriter serializes concurrent Write calls — the metis#31 parallel fan-out's
+// progress output. Minimal: it prevents torn lines + the data race on a shared
+// writer; it does NOT reorder or buffer per goroutine (clean per-k/n progress is
+// metis#30's scope). Established in runExperiment when maxParallel>1.
+type syncWriter struct {
+	mu sync.Mutex
+	w  io.Writer
+}
+
+func (s *syncWriter) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.w.Write(p)
+}
 
 // cacheProjectRoot resolves the metis code root (the module dir above steps/) that D
 // paths are relative to and `git hash-object` runs in — the same root metis.trace
@@ -59,6 +75,8 @@ type runOpts struct {
 	//                              execStep (nil → the production execStep). Composes with
 	//                              cache: the caching decorator still wraps it.
 	readRoot string // metis#23: when set, the production execStep confines base-dataset reads to this root
+	maxParallel int          // metis#31: >1 ⇒ ParExec batches + a leaf semaphore; sizes leafSem
+	leafSem     chan struct{} // metis#31: the shared global subprocess budget (nil = serial/cache-only)
 }
 
 // runExperiment reads the experiment at o.expPath and dispatches: a `type:
@@ -76,6 +94,17 @@ func runExperiment(o runOpts) (experiment.Run, error) {
 	out := o.out
 	if out == nil {
 		out = io.Discard
+	}
+	// metis#31: establish the parallel invariant in ONE home — maxParallel>1 ⇒ a
+	// non-nil SHARED leaf semaphore AND a synchronized writer. Doing it here (not in
+	// cmdRun) means no direct-runOpts caller (the tests) can enable maxParallel>1 yet
+	// forget the sem or race the fan-out's progress writes on a bare buffer.
+	if o.maxParallel > 1 {
+		if o.leafSem == nil {
+			o.leafSem = make(chan struct{}, o.maxParallel)
+		}
+		out = &syncWriter{w: out}
+		o.out = out
 	}
 
 	raw, err := os.ReadFile(o.expPath)
@@ -139,7 +168,7 @@ func runResolvedExperiment(exp experiment.Experiment, o runOpts, runID string, n
 		return experiment.Run{}, err
 	}
 
-	var exec experiment.StepExecutor = execStep{stepPath: o.stepPath, expDir: expDir, seed: exp.Seed, readRoot: o.readRoot, out: out}
+	var exec experiment.StepExecutor = execStep{stepPath: o.stepPath, expDir: expDir, seed: exp.Seed, readRoot: o.readRoot, out: out, sem: o.leafSem}
 	if o.exec != nil {
 		exec = o.exec // test seam: drive the loop/cache with a fake, no subprocess
 	}

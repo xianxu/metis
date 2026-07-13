@@ -1,16 +1,82 @@
 package main
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/xianxu/metis/pkg/experiment"
 )
+
+// TestExecStep_SemaphoreSerializesRealSubprocess (metis#31 I5) proves the leaf
+// semaphore is actually wired into the PRODUCTION execStep — the fake-exec e2e
+// tests bypass execStep, so nothing else catches a forgotten acquire or a
+// mis-threaded runOpts.leafSem → execStep.sem. A real "sleeper" step-type logs
+// start/end around a sleep to a SHARED file (under the common expDir); with a
+// cap-1 sem two concurrent Execute calls must serialize (peak concurrency 1),
+// while a nil sem overlaps (peak 2 — proving the test can detect concurrency).
+func TestExecStep_SemaphoreSerializesRealSubprocess(t *testing.T) {
+	mkStep := func(t *testing.T) (stepPath []string, expDir string) {
+		root := t.TempDir()
+		bin := filepath.Join(root, "steps", "test")
+		if err := os.MkdirAll(bin, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		script := "#!/bin/sh\nlog=\"$METIS_EXP_DIR/concurrency.log\"\necho start >> \"$log\"\nsleep 0.1\necho end >> \"$log\"\n"
+		if err := os.WriteFile(filepath.Join(bin, "sleeper"), []byte(script), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		expDir = filepath.Join(root, "exp")
+		if err := os.MkdirAll(expDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		return []string{filepath.Join(root, "steps")}, expDir
+	}
+	// peak concurrency from the start/end log (POSIX O_APPEND writes are atomic).
+	peak := func(logPath string) int {
+		b, _ := os.ReadFile(logPath)
+		cur, mx := 0, 0
+		for _, line := range strings.Split(strings.TrimSpace(string(b)), "\n") {
+			switch line {
+			case "start":
+				cur++
+				if cur > mx {
+					mx = cur
+				}
+			case "end":
+				cur--
+			}
+		}
+		return mx
+	}
+	runTwo := func(t *testing.T, sem chan struct{}) int {
+		sp, expDir := mkStep(t)
+		e := execStep{stepPath: sp, expDir: expDir, out: io.Discard, sem: sem}
+		var wg sync.WaitGroup
+		for i := 0; i < 2; i++ {
+			wg.Add(1)
+			go func(i int) {
+				defer wg.Done()
+				_, _ = e.Execute(experiment.Step{ID: fmt.Sprintf("s%d", i), Uses: "test/sleeper"},
+					filepath.Join(expDir, fmt.Sprintf("run-%d", i)))
+			}(i)
+		}
+		wg.Wait()
+		return peak(filepath.Join(expDir, "concurrency.log"))
+	}
+	if p := runTwo(t, make(chan struct{}, 1)); p != 1 {
+		t.Fatalf("cap-1 semaphore: peak concurrency = %d, want 1 (execStep acquire not wired?)", p)
+	}
+	if p := runTwo(t, nil); p != 2 {
+		t.Fatalf("nil-sem control: peak concurrency = %d, want 2 (test blind to overlap — sleep too short?)", p)
+	}
+}
 
 // TestExecStep_InjectsEnv asserts the subprocess executor sets the full step
 // contract env — including the M3 additions METIS_EXP_DIR (the experiment-dir

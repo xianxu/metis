@@ -160,6 +160,22 @@ wrapped by **thin step-executables** honoring the contract above. Hermetic via *
   manifest/ledger/code-side-ref (deliberate — no winner to reproduce). Honesty of the score-over-full-data
   refit holds while features are stateless; stateful features (metis#20) inherit fold-safety via the
   fold-expressed score run.
+- **Parallel batch executor (metis#31) — `pkg/sampler/exec.go` + `cmd/metis/{exec,run,sweep}.go`:**
+  `Run` takes an injected `exec(batch, runPoint) []O` that runs one `Ask` batch and returns outputs
+  **in batch order** (`SeqExec` serial default · `ParExec` goroutine fan-out · `ExecFor(parallel)`
+  selects). A batch is independent by construction, so the order-independent reduce (metis#18) yields a
+  byte-identical `Done` either way — parallelism is a pure speedup, not a semantic change. The ONE
+  budgeted resource is the real subprocess spawn: a single shared `chan struct{}` semaphore (cap
+  `--parallel`, default `NumCPU`, `METIS_MAX_PARALLEL`) acquired around `cmd.CombinedOutput()` in
+  `execStep` — a cache HIT never reaches there, so only misses draw budget, and orchestration
+  goroutines never hold a slot while awaiting children ⇒ **≤ n concurrent step subprocesses across ALL
+  driver×sweeper×resample nesting, deadlock-free**. `runExperiment` establishes the parallel invariant
+  (non-nil sem + a `syncWriter` over `out`) in one home. Determinism of persisted artifacts: the fan-out's
+  completion-order `pass.points` are `sortPointRuns`-sorted before the manifest/ledger write; the
+  `sweepPass` mutex guards the shared `configs`/`points`/`err` bookkeeping (the honest reduce stays pure
+  in the sampler). Caveats (flag help): each leaf is a Python process that may itself multi-thread
+  (BLAS/`n_jobs`) so `n=NumCPU` can oversubscribe; a COLD cache thundering-herds the shared upstream;
+  clean per-`k/n` progress is deferred to metis#30.
 - **Step entrypoints — `metis/steps/{cv_split,train,predict,outer_split}.py`:** thin `io → pure core → io`.
   - `cv-split`: load Dataset (`with.dataset`, exp-relative) → `cv_folds` → `folds.json` + `{k,n}`.
   - `train`: load Dataset + upstream `folds.json` → `cv_score` + fit-on-all → `model.pkl` + `{cv_score}`.

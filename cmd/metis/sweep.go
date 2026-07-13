@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/xianxu/metis/pkg/experiment"
@@ -79,6 +80,7 @@ type shapeSweep struct {
 	partRef       sampler.PartitionRef
 	man           sweepManifest
 	configs       []configScore
+	parallel      bool // metis#31: >1 max-parallel ⇒ the sweeper/resample/driver batches run via ParExec
 }
 
 // sweepPass accumulates ONE black-box sweeper run (the sweeper ⊃ resample loop): its per-config
@@ -95,9 +97,46 @@ type sweepPass struct {
 	splitK   int                  // the cv-split / FixedKFolds fold count for this pass
 	stratify bool                 // the cv-split stratify flag for this pass
 	partRef  sampler.PartitionRef // this pass's partition identity (fed into each point's address)
-	configs  []configScore
-	points   []pointRun
-	err      error
+	// metis#31: under ParExec the sweeper fans out over configs and each config's
+	// resample fans out over folds — all appending to this ONE pass. `mu` guards the
+	// orchestration bookkeeping (configs/points/err); the honest reduce stays in the
+	// sampler's pure Tell/Done, not here.
+	mu      sync.Mutex
+	configs []configScore
+	points  []pointRun
+	err     error
+}
+
+// setErr records the FIRST fatal error of the pass (set-once, mutex-guarded — the
+// fan-out writes it concurrently). A no-op once an error is already latched.
+func (p *sweepPass) setErr(err error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.err == nil {
+		p.err = err
+	}
+}
+
+// firstError returns the latched error (mutex-guarded read — a concurrent read+write
+// is a race even when the write is set-once).
+func (p *sweepPass) firstError() error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.err
+}
+
+// addConfigScore / addPoint append the per-config estimate / per-fold row under the
+// pass lock (concurrent under ParExec).
+func (p *sweepPass) addConfigScore(cs configScore) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.configs = append(p.configs, cs)
+}
+
+func (p *sweepPass) addPoint(pr pointRun) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.points = append(p.points, pr)
 }
 
 // runSweeper runs the black-box sweeper (GridConfigs ⊃ FixedKFolds) over configPts, folding each
@@ -109,10 +148,12 @@ func (ss *shapeSweep) runSweeper(ctx sampler.Ctx, configPts []shape.Point, pass 
 		sampler.GridConfigs{Points: configPts, Direction: ss.sh.Sweeper.Objective.Direction, Select: ss.sh.Sweeper.Objective.Select},
 		func(c shape.Point) sampler.MeanSE {
 			ms := sampler.Run(ctx, sampler.FixedKFolds{K: pass.splitK},
-				func(f sampler.FoldPoint) sampler.FoldOutcome { return pass.runPipelineFold(c, f) })
-			pass.configs = append(pass.configs, configScore{point: c, meanSE: ms})
+				func(f sampler.FoldPoint) sampler.FoldOutcome { return pass.runPipelineFold(c, f) },
+				sampler.ExecFor[sampler.FoldPoint, sampler.FoldOutcome](ss.parallel))
+			pass.addConfigScore(configScore{point: c, meanSE: ms})
 			return ms
-		})
+		},
+		sampler.ExecFor[shape.Point, sampler.MeanSE](ss.parallel))
 }
 
 // runShapeSweep drives the metis#18 nested Sampler loop: the sweeper (GridConfigs over the
@@ -165,8 +206,9 @@ func runShapeSweep(o runOpts, sh experiment.Shape, now func() time.Time, out io.
 	}
 	ss := &shapeSweep{
 		o: o, sh: sh, now: now, out: out, shapeBlobHash: sbh, codeID: sha,
-		partRef: partitionRef(sh),
-		man:     sweepManifest{ShapeRunID: shapeRunID, Shape: sh.ID, Sampler: sh.Sweeper.Sampler, Seed: sh.Seed},
+		partRef:  partitionRef(sh),
+		man:      sweepManifest{ShapeRunID: shapeRunID, Shape: sh.ID, Sampler: sh.Sweeper.Sampler, Seed: sh.Seed},
+		parallel: o.maxParallel > 1, // metis#31: fan out the sweeper/resample/driver batches
 	}
 	ctx := sampler.Ctx{Seed: sh.Seed, Partition: ss.partRef}
 
@@ -186,11 +228,16 @@ func runShapeSweep(o runOpts, sh experiment.Shape, now func() time.Time, out io.
 	pass := &sweepPass{ss: ss, splitK: k, stratify: sh.Sweeper.Resample.CV.Stratify, partRef: ss.partRef}
 	res := sampler.Run(ctx, sampler.SingleDriver{}, func(sampler.SinglePoint) sampler.SweepResult {
 		return ss.runSweeper(ctx, configPts, pass)
-	})
+	}, sampler.ExecFor[sampler.SinglePoint, sampler.SweepResult](ss.parallel))
+	// metis#31: sort the fan-out's completion-order bookkeeping to a stable content key
+	// BEFORE persisting, so manifest.json + the ledger are byte-deterministic across
+	// serial/parallel runs (the winner/estimate are already deterministic; this makes
+	// the on-disk artifacts match metis's content-addressing posture).
+	sortPointRuns(pass.points)
 	ss.man.Points = pass.points
 	ss.configs = pass.configs
-	if pass.err != nil {
-		return pass.err
+	if err := pass.firstError(); err != nil {
+		return err
 	}
 
 	if err := writeManifest(o.expPath, ss.man); err != nil {
@@ -289,21 +336,40 @@ func (ss *shapeSweep) runNestedCV(ctx sampler.Ctx, configPts []shape.Point, inne
 	}
 	outerPart := sampler.PartitionRef(fmt.Sprintf("outer-cv-k%d-strat%t-seed%d", outerK, ss.sh.Driver.CV.Stratify, ss.sh.Seed))
 
+	// metis#31: CVDriver.Ask emits all outer folds as one batch, so ParExec runs these
+	// closures concurrently — firstErr's read+write must be mutex-guarded (a set-once
+	// write racing a read is still a data race). Each outer fold has its OWN sweepPass
+	// (created in runOuterFold), so the inner fan-out is guarded there; this guards only
+	// the outer-fold error latch.
+	var errMu sync.Mutex
 	var firstErr error
+	setFirst := func(err error) {
+		errMu.Lock()
+		defer errMu.Unlock()
+		if firstErr == nil {
+			firstErr = err
+		}
+	}
+	getFirst := func() error {
+		errMu.Lock()
+		defer errMu.Unlock()
+		return firstErr
+	}
 	est := sampler.Run(ctx, sampler.CVDriver{K: outerK, Stratify: ss.sh.Driver.CV.Stratify},
 		func(p sampler.OuterFoldPoint) float64 {
-			if firstErr != nil {
+			if getFirst() != nil {
 				return 0
 			}
 			score, ferr := ss.runOuterFold(ctx, configPts, innerK, outerK, analysisRefs[p.Idx], outerPart, p.Idx)
 			if ferr != nil {
-				firstErr = ferr
+				setFirst(ferr)
 				return 0
 			}
 			return score
-		})
-	if firstErr != nil {
-		return firstErr
+		},
+		sampler.ExecFor[sampler.OuterFoldPoint, float64](ss.parallel))
+	if err := getFirst(); err != nil {
+		return err
 	}
 	ss.reportEstimate(est, outerK)
 	return nil
@@ -353,8 +419,8 @@ func (ss *shapeSweep) runOuterFold(ctx sampler.Ctx, configPts []shape.Point, inn
 	pass := &sweepPass{ss: ss, baseRef: analysisRef, readRoot: analysisAbs, splitK: innerK,
 		stratify: ss.sh.Sweeper.Resample.CV.Stratify, partRef: ss.partRef}
 	sres := ss.runSweeper(ctx, configPts, pass)
-	if pass.err != nil {
-		return 0, fmt.Errorf("outer fold %d sealed sweep: %w", i, pass.err)
+	if err := pass.firstError(); err != nil {
+		return 0, fmt.Errorf("outer fold %d sealed sweep: %w", i, err)
 	}
 	// Guard (metis#19/#23 I1): the parsimony select rule needs a measured complexity for every
 	// swept family — same guard the flat path runs before trusting its winner. Without it, a
@@ -401,21 +467,25 @@ func (ss *shapeSweep) reportEstimate(est sampler.MeanSE, outerK int) {
 // going; runShapeSweep checks ss.err before using the winner).
 func (p *sweepPass) runPipelineFold(c shape.Point, f sampler.FoldPoint) sampler.FoldOutcome {
 	ss := p.ss
-	if p.err != nil {
+	if p.firstError() != nil {
 		return sampler.FoldOutcome{}
 	}
 	// Detect-and-abort: a mid-sweep HEAD-sha change breaks the shape-run's one-code
 	// identity (per-fold records stay correct). Compares the HEAD sha only, not the dirty
 	// flag — the sweep's own writes (runs/, manifest) dirty the tree (see codeID freeze).
-	if _, s, _ := probeRepo(ss.o.git, filepath.Dir(ss.o.expPath)); s != ss.codeID {
-		p.err = fmt.Errorf("code changed mid-sweep (%s → %s) — re-run to sweep the new revision", ss.codeID, s)
+	// metis#31: only a DEFINITE sha change aborts — `s != ""`. probeRepo swallows any
+	// probe error to "", and under parallel fan-out concurrent `git status` contends on
+	// .git/index.lock so a transient probe failure is expected; treating "" as a change
+	// would false-abort the whole honest run.
+	if _, s, _ := probeRepo(ss.o.git, filepath.Dir(ss.o.expPath)); s != "" && s != ss.codeID {
+		p.setErr(fmt.Errorf("code changed mid-sweep (%s → %s) — re-run to sweep the new revision", ss.codeID, s))
 		return sampler.FoldOutcome{}
 	}
 
 	exp := ss.buildFoldExperiment(c, f, p.baseRef, p.splitK, p.stratify, p.partRef)
 	runID, err := pointAddressOf(exp, ss.shapeBlobHash)
 	if err != nil {
-		p.err = fmt.Errorf("config %s fold %d: %w", freeParamStr(c), f.Idx, err)
+		p.setErr(fmt.Errorf("config %s fold %d: %w", freeParamStr(c), f.Idx, err))
 		return sampler.FoldOutcome{}
 	}
 	pointOpts := ss.o
@@ -426,10 +496,10 @@ func (p *sweepPass) runPipelineFold(c shape.Point, f sampler.FoldPoint) sampler.
 	// PARTIAL fold set is not an honest (mean, SE) estimate. Any error (a step failure, a
 	// validation never-start, a persistence error) aborts — surfaced, never a half-scored config.
 	if runErr != nil {
-		p.err = fmt.Errorf("config %s fold %d (%s): %w", freeParamStr(c), f.Idx, runID, runErr)
+		p.setErr(fmt.Errorf("config %s fold %d (%s): %w", freeParamStr(c), f.Idx, runID, runErr))
 		return sampler.FoldOutcome{}
 	}
-	p.points = append(p.points, pointRun{
+	p.addPoint(pointRun{
 		RunID:      runID,
 		FreeParams: freeParamMap(c),
 		Fold:       f.Idx,
@@ -638,6 +708,19 @@ func shapeRunIdentity(sh experiment.Shape, shapeBlobHash string) (string, error)
 		Seed          int                `json:"seed"`
 	}{sh.ID, sh.Data, sh.Pipeline, sh.Ship, sh.Sweeper, shapeBlobHash, sh.Seed})
 	return string(h), err
+}
+
+// sortPointRuns orders the per-fold rows by a stable content key (RunID, then Fold)
+// so a parallel sweep's completion-order appends persist byte-identically to a serial
+// run (metis#31). The winner/estimate are already order-independent (the sampler
+// reduce); this makes the manifest + ledger artifacts match metis's content-addressing.
+func sortPointRuns(pts []pointRun) {
+	sort.SliceStable(pts, func(i, j int) bool {
+		if pts[i].RunID != pts[j].RunID {
+			return pts[i].RunID < pts[j].RunID
+		}
+		return pts[i].Fold < pts[j].Fold
+	})
 }
 
 func writeManifest(expPath string, man sweepManifest) error {

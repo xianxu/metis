@@ -47,12 +47,12 @@ func TestRun_PanicsOnNonProgressingAsk(t *testing.T) {
 			t.Fatal("Run did not panic on an empty-batch/not-done Ask (would hang forever)")
 		}
 	}()
-	Run(Ctx{}, stuckSampler{}, func(p int) int { return p })
+	Run(Ctx{}, stuckSampler{}, func(p int) int { return p }, SeqExec[int, int])
 }
 
 func TestRun_DrivesAskTellDone(t *testing.T) {
 	c := &countSampler{}
-	got := Run(Ctx{}, c, func(p int) int { return p }) // runPoint = identity
+	got := Run(Ctx{}, c, func(p int) int { return p }, SeqExec[int, int]) // runPoint = identity
 	if got != 6 {
 		t.Fatalf("Run sum = %d, want 6", got)
 	}
@@ -94,12 +94,12 @@ func TestRun_NestedComposition(t *testing.T) {
 	}
 	// sweeper's runPoint = run the inner resample for this config.
 	sweeperRun := func(p shape.Point) MeanSE {
-		return Run(ctx, FixedKFolds{K: 3}, func(FoldPoint) FoldOutcome { return FoldOutcome{Score: scoreOf(p)} })
+		return Run(ctx, FixedKFolds{K: 3}, func(FoldPoint) FoldOutcome { return FoldOutcome{Score: scoreOf(p)} }, SeqExec[FoldPoint, FoldOutcome])
 	}
 	// driver's runPoint = run the whole sweeper (R = SweepResult).
-	driverRun := func(SinglePoint) SweepResult { return Run(ctx, sweeper, sweeperRun) }
+	driverRun := func(SinglePoint) SweepResult { return Run(ctx, sweeper, sweeperRun, SeqExec[shape.Point, MeanSE]) }
 
-	res := Run(ctx, SingleDriver{}, driverRun)
+	res := Run(ctx, SingleDriver{}, driverRun, SeqExec[SinglePoint, SweepResult])
 	winner := res.Ship // the cross-family ship pick: rf (0.85) beats logreg (0.75)
 
 	if got := winner.Point.FreeParams[0].Value; got != "rf" {

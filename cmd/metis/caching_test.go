@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -13,6 +14,50 @@ import (
 	"github.com/xianxu/metis/pkg/experiment"
 	"github.com/xianxu/metis/pkg/record"
 )
+
+// TestWriteEntry_ReaderNeverSeesTornIndex (metis#31 I1) proves the atomic
+// (temp+rename) index write. This is a READER-vs-WRITER test on purpose: a
+// writer-vs-writer test with identical content + a post-join read passes even
+// against the buggy non-atomic os.WriteFile (the torn state is only observable by a
+// reader racing a mid-write O_TRUNC). We alternate long/short payloads to widen the
+// torn-read window and assert the concurrent lookup NEVER sees a partial/parse-
+// failing file. Against the pre-fix writeEntry this fails (a torn DecodeEntry).
+func TestWriteEntry_ReaderNeverSeesTornIndex(t *testing.T) {
+	c := &cachingExecutor{indexDir: filepath.Join(t.TempDir(), "index")}
+	short := cache.Entry{Kpre: "k", TransitiveD: []record.CodeRef{}, Output: "s"}
+	long := cache.Entry{Kpre: "k", TransitiveD: make([]record.CodeRef, 60), Output: "loooooooong-output-hash"}
+	if err := c.writeEntry(short); err != nil {
+		t.Fatal(err)
+	}
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() { // writer: alternate lengths to widen the torn-read window
+		defer wg.Done()
+		for i := 0; ; i++ {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			if i%2 == 0 {
+				_ = c.writeEntry(long)
+			} else {
+				_ = c.writeEntry(short)
+			}
+		}
+	}()
+	for i := 0; i < 5000; i++ { // reader: must never observe a torn index
+		_, ok, err := c.lookup("k")
+		if err != nil || !ok {
+			close(stop)
+			wg.Wait()
+			t.Fatalf("reader saw a torn index at iter %d: ok=%v err=%v", i, ok, err)
+		}
+	}
+	close(stop)
+	wg.Wait()
+}
 
 // The cheap-sweeps payoff (metis#2): a second identical run HITs every step (no
 // subprocess), and changing one downstream knob HITs the shared upstream while
