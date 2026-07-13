@@ -96,6 +96,7 @@ total: 3.1
   substrate — cleanly separable. Design in the pensive (driver/sweeper/pipeline).
 
 ### 2026-07-12 (claimed; design converged + reviewed)
+- 2026-07-12: closed M1 — M1 sealing spine: Python 65 pass incl. both seal halves (out-of-root base-dataset read caught+named via exp_path chokepoint; C1 regression — legit run-dir handoff read passes) + outer-split materializes k analysis subset dirs + within_root unit tests; Go 9/9 ok, METIS_READ_ROOT injected iff-non-empty so driver:single is untouched. Atlas updated (confinement chokepoint + outer-split, shared spine for #20/kbench#8).; review verdict: FIX-THEN-SHIP
 - 2 recon passes (nested-CV architecture + read-trace machinery) → design → durable plan
   (`workshop/plans/000023-*.md`) → fresh-eyes plan review (1 Critical + 4 Important + minors, all fixed).
   Operator confirmed: (a) structural separation, (b) trace-enforced read-confinement (L1+L2), syscall-level

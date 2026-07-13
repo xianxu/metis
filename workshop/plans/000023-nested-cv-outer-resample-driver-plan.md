@@ -52,16 +52,16 @@ Only the **selection** phase must be sealed: the sweeper's inner-CV must never s
 
 | Name | Lives in | Status | Wraps |
 |------|----------|--------|-------|
-| `outer-partition` step | `metis/steps/outer_split.py` + `steps/metis/outer-split` wrapper | new | filesystem (subset dirs) |
+| `outer-split` step | `metis/steps/outer_split.py` + `steps/metis/outer-split` wrapper | new | filesystem (subset dirs) |
 | `METIS_READ_ROOT` injection | `cmd/metis/exec.go:59-65` | modified | subprocess env |
-| chokepoint assertion | `metis/io.py` (`load_dataset`/`dataset_dir`/`exp_path`) | modified | data-path resolution |
+| chokepoint assertion | `metis/io.py` (`exp_path` **only** — C1; NOT `load_dataset`/`dataset_dir`) | modified | data-path resolution |
 | `read_root` in `StepContext` | `metis/io.py:76-94` | modified | env contract |
 | sweeper-as-callable | `cmd/metis/sweep.go` (extract from `:131-140`) | modified | the inlined sweeper Run |
 | driver dispatch | `cmd/metis/sweep.go:88-169` (`runShapeSweep`) | modified | outer loop composition |
 | `ValidateShape` stub-delete | `pkg/experiment/shape.go:201-203` | modified | the #23 gate |
 | cost surfacing | `cmd/metis/sweep.go:105-111, 123` | modified | dry-run + run header |
 
-- **outer-partition step** — reads the base dataset, computes a k-fold outer assignment (`split.py:cv_folds`), and writes k `analysis_i/` subset dataset dirs (train rows where `outer_fold != i`, + `schema.json`), plus an `outer_folds.json` (positional assignment, for the scoring mask). **Only analysis dirs are materialized** (assessment is reached via the mask at score time; see insight above).
+- **outer-split step** (`outer_split.py`) — reads the base dataset, computes a k-fold outer assignment (`split.py:cv_folds`), and writes k `analysis_i/` subset dataset dirs (train rows where `outer_fold != i`, + `schema.json`), plus an `outer_folds.json` (positional assignment, for the scoring mask). **Only analysis dirs are materialized** (assessment is reached via the mask at score time; see insight above). **M2 note (from M1 review):** when M2 runs this step *above* the driver, it must leave `METIS_READ_ROOT` **unset** for it — the step legitimately reads the full dataset, and `exp_path` would raise if confined.
   - **Injected into:** the `CVDriver`'s per-outer-fold IO (via the driver's `runPoint` closure in `sweep.go`), which points the sweeper's `METIS_EXP_DIR`/base-dataset at `analysis_i/`.
   - **Future extensions:** stratified outer folds (already carried by `CVDriver.Stratify`); grouped outer folds (leave-one-group-out) for kbench#8's ticket groups.
 - **chokepoint assertion** — `metis/io.py` is the single place dataset paths resolve. When `METIS_READ_ROOT` is set, every resolved data path is asserted under it; violation → `RuntimeError` naming the offending file (mirroring #28's "loud error naming the file" ergonomics). Covers parquet (assertion is at path-resolution, not the audit hook).
@@ -171,7 +171,7 @@ def assert_within_read_root(path: str) -> None:
 - [ ] **Step 4: Run Go + Python tests green.**
 - [ ] **Step 5: Commit** — `#23 M1: thread METIS_READ_ROOT through exec.go + StepContext`.
 
-### Task 1.4: the `outer-partition` step — materialize analysis subset dirs
+### Task 1.4: the `outer-split` step — materialize analysis subset dirs
 
 **Files:**
 - Create: `metis/steps/outer_split.py`, `steps/metis/outer-split` (wrapper: `exec uv run … python -m metis.trace metis.steps.outer_split`, mirror `steps/metis/cv-split`).
@@ -352,3 +352,14 @@ func (d CVDriver) Done(s cvDriverState) MeanSE { return Aggregate(s.scores) }
 - **Sealing = L1 structural + L2 chokepoint**; syscall-level (rogue non-`metis.io` reads, parquet-via-C) documented-and-deferred. (Operator-confirmed.)
 - **Refit-and-score reuses full-data + outer-mask** (post-selection, no leakage) → no new Python primitive; only analysis subset dirs are materialized.
 - **No shippable winner** — ship stays on `driver:single` (estimation ≠ selection).
+
+---
+
+## Revisions
+
+### 2026-07-12 — post-M1-review (verdict FIX-THEN-SHIP, no Critical/Important)
+Reason: fold M1 milestone-review recommendations into the plan so the M2 implementor isn't misled.
+- **Chokepoint row corrected** — the integration table said the assertion lives in `load_dataset`/`dataset_dir`/`exp_path`; it lives in **`exp_path` ONLY** (the C1 fix Task 1.2 already stated). Adding it to `load_dataset`/`dataset_dir`-upstream would crash legit run-dir handoff reads. M2: keep confinement at `exp_path`.
+- **Step renamed** — the step is **`outer-split`** (`outer_split.py`), not "outer-partition" (the layer/milestone concept keeps the "outer-partition" name; the *step* matches the shipped `outer_split.py`/`steps/metis/outer-split`).
+- **M2 orchestration note added** — M2 runs `outer-split` above the driver and must leave `METIS_READ_ROOT` unset for it (it reads the full dataset legitimately).
+- **exec.go hardening** (M1 minor): inherited `METIS_READ_ROOT` is now stripped from the subprocess env when `readRoot==""`, so an ambient shell value can never confine the flat `driver:single` path.

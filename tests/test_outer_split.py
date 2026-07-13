@@ -59,7 +59,6 @@ def test_outer_split_analysis_rows_carry_the_right_data(tmp_path, monkeypatch):
     full = io.load_dataset(str(TOY_PARENT / "toy"))
     kept0 = [j for j, f in enumerate(folds) if f != 0]
     a0 = io.load_dataset(str(sd / "analysis_0"))
-    assert list(a0.train.index) != list(range(len(a0.train))) or True  # index-agnostic
     assert len(a0.train) == len(kept0)
     # the kept rows match the source's non-fold-0 rows, in order
     assert a0.train.reset_index(drop=True).equals(full.train.iloc[kept0].reset_index(drop=True))

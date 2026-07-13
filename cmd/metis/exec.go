@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/xianxu/metis/pkg/experiment"
 )
@@ -57,7 +58,15 @@ func (e execStep) Execute(step experiment.Step, runDir string) (experiment.StepR
 	fmt.Fprintf(e.out, "→ step %s (uses %s)\n", step.ID, step.Uses)
 	cmd := exec.Command(exe)
 	cmd.Dir = stepDir
-	cmd.Env = append(os.Environ(),
+	// metis#23: strip any inherited METIS_READ_ROOT so an ambient shell value can never
+	// confine the flat (driver:single) path — we set it ourselves below only when sealing.
+	base := make([]string, 0, len(os.Environ()))
+	for _, kv := range os.Environ() {
+		if !strings.HasPrefix(kv, "METIS_READ_ROOT=") {
+			base = append(base, kv)
+		}
+	}
+	cmd.Env = append(base,
 		"METIS_STEP_DIR="+stepDir,
 		"METIS_RUN_DIR="+runDir,
 		"METIS_STEP_ID="+step.ID,
@@ -65,8 +74,8 @@ func (e execStep) Execute(step experiment.Step, runDir string) (experiment.StepR
 		"METIS_SEED="+strconv.Itoa(e.seed),
 	)
 	if e.readRoot != "" {
-		// metis#23 confinement: only inject when sealing an outer-fold sweep, so the
-		// flat driver:single path leaves the var unset (unconfined).
+		// confinement: only inject when sealing an outer-fold sweep, so the flat
+		// driver:single path leaves the var unset (unconfined).
 		cmd.Env = append(cmd.Env, "METIS_READ_ROOT="+e.readRoot)
 	}
 	if combined, err := cmd.CombinedOutput(); err != nil {
