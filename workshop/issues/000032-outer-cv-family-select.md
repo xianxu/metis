@@ -1,11 +1,12 @@
 ---
 id: 000032
-status: open
+status: working
 deps: [metis#23]
 github_issue:
 created: 2026-07-13
 updated: 2026-07-13
 estimate_hours:
+started: 2026-07-13T15:52:26-07:00
 ---
 
 # outer-CV model-family selection — close the loop (nested-CV selects, not just reports)
