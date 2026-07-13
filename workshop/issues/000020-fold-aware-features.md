@@ -1,11 +1,12 @@
 ---
 id: 000020
-status: open
+status: working
 deps: [metis#18]
 github_issue:
 created: 2026-07-07
-updated: 2026-07-07
+updated: 2026-07-12
 estimate_hours:
+started: 2026-07-12T19:10:02-07:00
 ---
 
 # leakage-safe target features — internal cross-fit (features already per-fold via M1a)
