@@ -179,6 +179,23 @@ wrapped by **thin step-executables** honoring the contract above. Hermetic via *
   Done-when. `cmd/metis` `TestToyPipeline_EndToEnd` drives the real wrappers (skips without uv);
   the pure core + contract are pytested under `tests/`. The Titanic thread is kbench#1.
 
+### Leakage-safe target features (metis#20)
+
+A *target* feature (value derived from other rows' labels, e.g. group-survival) has two leak
+layers. Cross-**fold** leakage is already structural (features live in the `pipeline` phase → fit
+per-fold via `fit_mask`). The remaining *within*-fold self-leak (a row's own label building its own
+feature) is the **feature step's own job** — no engine `fit_scope` marker (dropped, pensive).
+
+- **`metis/encode.py::cross_fit_target_encode(groups, y, *, fit_mask, strategy, n_folds, m, loo_noise, seed)`**
+  — the reusable, competition-agnostic primitive. Fit rows get an internal cross-fit encoding (own
+  label never enters via the group aggregate); non-fit rows (assessment + test) get the full-fit
+  shrunk group mean (prior when unseen). `strategy ∈ {kfold (default, reuses `metis.split.cv_folds`
+  for the internal folds), loo}`; m-estimate shrinkage toward the global prior. Pure, seed-deterministic.
+- **Consumer protocol** lives downstream in the competition workspace: `kbench/titanic/features.py`
+  carries a `TARGET_GROUPS` registry (separate from the stateless `GROUPS`) + a `target_encode_group`
+  adapter that concats train+test keys, marks analysis rows as fit, and calls the primitive. Metis
+  owns the leakage-safe math; the step owns the wiring. kbench#8 adds the `ticket` group on top.
+
 ## Ownership & instances
 
 The type + (M2) runner are **metis's** — platform-independent. *Instances* live in a
