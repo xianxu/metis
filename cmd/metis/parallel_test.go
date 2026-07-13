@@ -129,6 +129,51 @@ func TestNestedCV_PeakConcurrencyWithinCap(t *testing.T) {
 	}
 }
 
+// sleepExec is foldFakeExec with a fixed per-step delay, so a sweep has real
+// wall-clock cost — the wall-clock demo runs it serial vs parallel through the REAL
+// runExperiment + sampler nesting (only the leaf is a sleeping fake, no subprocess).
+type sleepExec struct {
+	in foldFakeExec
+	d  time.Duration
+}
+
+func (s sleepExec) Execute(step experiment.Step, runDir string) (experiment.StepResult, error) {
+	res, err := s.in.Execute(step, runDir)
+	time.Sleep(s.d)
+	return res, err
+}
+
+// TestSweep_ParallelWallClockDemo (metis#31 done-when: "a wall-clock drop vs
+// sequential is demonstrated") measures the real speedup through the whole
+// orchestration with a 10ms-per-step leaf. Logs both durations; asserts parallel is
+// meaningfully faster (loose bound — the fan-out is 3 configs × 2 folds).
+func TestSweep_ParallelWallClockDemo(t *testing.T) {
+	body := foldShapeMD("[a, b, c]") // 3 configs × 2 folds; each point runs 4 steps
+	timeRun := func(maxPar int) time.Duration {
+		ws := t.TempDir()
+		expPath := writeShapeFile(t, ws, body)
+		start := time.Now()
+		if _, err := runExperiment(runOpts{
+			expPath:     expPath,
+			now:         fixedNow(),
+			git:         fakeGitProbe{name: "metis", sha: "sha"},
+			cache:       false, // every step sleeps → the fan-out has real cost
+			exec:        sleepExec{in: foldFakeExec{}, d: 10 * time.Millisecond},
+			out:         io.Discard,
+			maxParallel: maxPar,
+		}); err != nil {
+			t.Fatalf("maxParallel=%d: %v", maxPar, err)
+		}
+		return time.Since(start)
+	}
+	serial := timeRun(1)
+	par := timeRun(8)
+	t.Logf("wall-clock: serial=%v  parallel(8)=%v  speedup=%.1fx", serial, par, float64(serial)/float64(par))
+	if par >= serial {
+		t.Errorf("parallel (%v) not faster than serial (%v)", par, serial)
+	}
+}
+
 // flakyGitProbe returns a valid sha on the FIRST call (the sweep-start codeID freeze)
 // and an error on every call after — simulating a per-fold `git status` that fails
 // under .git/index.lock contention once the fan-out is writing runs/.

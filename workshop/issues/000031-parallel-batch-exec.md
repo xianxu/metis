@@ -5,7 +5,7 @@ deps: []
 github_issue:
 created: 2026-07-13
 updated: 2026-07-13
-estimate_hours:
+estimate_hours: 2.8
 started: 2026-07-13T14:15:42-07:00
 ---
 
@@ -66,12 +66,43 @@ runner** (sibling metis#30) — one seam:
   in flight at once, even though driver×sweeper fans out to hundreds of orchestration goroutines
   (test via an instrumented leaf exec that records peak concurrency ≤ n). No deadlock under nesting.
 
+## Estimate
+
+Derived against estimate-logic-v3.1 (impl = ship-wall-clock, AI-paired). The design decisions
+(leaf-semaphore placement, deadlock-avoidance, determinism contract) are resolved — but that design
+was done IN this issue's window (durable plan + recon + fresh-eyes review, all post-claim), so those
+design hours are counted (they're part of what `sdlc actual` measures), not free. The impl weight is
+the fiddly concurrency test surface (reader-vs-writer atomicity, real-`execStep` serialization,
+peak-≤-n under nesting, parallel≡serial determinism).
+
+```estimate
+model: estimate-logic-v3.1
+familiarity: 1.0
+item: smaller-go-module      design=0.3 impl=0.4
+item: smaller-go-module      design=0.4 impl=0.6
+item: cross-cutting-refactor design=0.2 impl=0.3
+item: milestone-review       design=0.0 impl=0.2
+item: atlas-docs             design=0.1 impl=0.15
+design-buffer: 0.15
+total: 2.80
+```
+
+- `smaller-go-module` ×1 (design=0.3 impl=0.4) — `pkg/sampler` exec seam: `SeqExec`/`ParExec`/`execFor` + the `Run` change + barrier-based concurrency tests.
+- `smaller-go-module` ×1 (design=0.4 impl=0.6) — `cmd/metis` wiring: leaf semaphore in `execStep`, `--parallel`/env, `syncWriter`, atomic `writeEntry`, the C1 git-probe fix, sort-side-records + the reader-vs-writer / real-`execStep` / peak-≤-n / determinism tests (the bulk).
+- `cross-cutting-refactor` (design=0.2 impl=0.3) — thread the `exec` param through the 4 `Run` call sites + every test call site (signature ripple across `pkg/sampler` + `cmd/metis`).
+- `milestone-review` (impl=0.2) — the single close-boundary review (single-pass, no `Mx`).
+- `atlas-docs` (design=0.1 impl=0.15) — RUNBOOK `--parallel` note (BLAS/thundering-herd caveats) + atlas run/sweep-flow update.
+
 ## Plan
 
-- [ ] (spec at claim) `exec` seam on `Run` (order-preserving return) + sequential default; a **global
-  leaf semaphore** (cap `n`, default `NumCPU`, flag/env) acquired at the `execStep` spawn — NOT per-level;
-  determinism test (parallel ≡ sequential `Done`); peak-concurrency ≤ n test under nested `driver: cv`;
-  wall-clock demo.
+Durable plan: `workshop/plans/000031-parallel-batch-exec-plan.md` (fresh-eyes reviewed; findings folded in).
+Single-pass atomic work — one close boundary (no `Mx` milestones).
+
+- [x] `exec` seam on `Run` (order-preserving) + `SeqExec`/`ParExec`/`ExecFor`; backward-compat (existing sampler tests green).
+- [x] Global leaf semaphore in `execStep` + `--parallel`/`METIS_MAX_PARALLEL` (default `NumCPU`) + `syncWriter`; real-`execStep` serialization test.
+- [x] Atomic cache-index write (reader-vs-writer test) + the C1 git-probe false-abort fix.
+- [x] Thread `ExecFor` into the 4 sweep `Run` sites; guard `configs`/`points`/`err`/`firstErr`; sort side-records; determinism + peak-≤-n tests.
+- [x] Atlas docs + wall-clock demo. *(`sdlc close` pending — the boundary review is run in the main session, not the impl fork.)*
 
 ## Log
 
@@ -87,3 +118,20 @@ runner** (sibling metis#30) — one seam:
   awaiting children (deadlock-free); only real `execStep` spawns draw from the budget. Peak-concurrency ≤ n
   under nested `driver: cv` is the guard test. BLAS/`n_jobs` per-process threading can oversubscribe → a
   documented tuning caveat.
+- **BUILT (fork, full SDLC: claim → start-plan → durable plan → fresh-eyes review → change-code judges
+  [plan+estimate INFO] → TDD).** 5 commits (T1+T2 seam/strategies · T3 semaphore+flag+syncWriter · T4
+  atomic index · T5 sweep wiring+guards+C1 · T6 atlas+demo). **Full `go test ./... -race` green** (all 9
+  packages). Load-bearing tests: `TestRun_ParExecEqualsSeqExec` (sampler-level determinism) ·
+  `TestSweep_ParallelEqualsSerial` (byte-identical ledger+manifest, cmd-level) ·
+  `TestNestedCV_PeakConcurrencyWithinCap` (peak ≤ cap under 3×3×2 nesting, no deadlock) ·
+  `TestExecStep_SemaphoreSerializesRealSubprocess` (I5 — the REAL execStep acquire, not a fake) ·
+  `TestWriteEntry_ReaderNeverSeesTornIndex` (I1 — reader-vs-writer, verified RED against the old
+  non-atomic write) · `TestSweep_ProbeFailureDoesNotFalseAbort` (C1 — verified RED against `s != codeID`).
+- **Wall-clock demo** (`TestSweep_ParallelWallClockDemo`, hermetic — 10ms sleeping leaf through the real
+  orchestration, 3 configs × 2 folds × 4 steps = 24 leaf calls): **serial 432ms → parallel(8) 95ms =
+  4.5× speedup.** (The real 99×5 Titanic sweep demo is operator-run — needs kbench's data + would write
+  the peer repo; deferred to the operator.)
+- **Deviation from plan:** `execFor` exported as `sampler.ExecFor` (cmd/metis is a different package).
+  The `out` sync-writer + `leafSem` are built inside `runExperiment` (plan-quality judge INFO #1), not
+  `cmdRun`. Task 6 docs pinned to the metis atlas (INFO #2); the kbench RUNBOOK `--parallel` note is a
+  deferred peer write. All other steps as planned.
