@@ -40,11 +40,11 @@ feature. **No engine `fit_scope` marker** (dropped as error-prone); the step own
 Single-pass atomic (one review boundary, closes in one `sdlc close`). TDD. Durable plan +
 full code: `workshop/plans/000020-fold-aware-features-plan.md` (3 chunks, plan-reviewed → APPROVED).
 
-- [ ] **metis primitive** `metis/encode.py::cross_fit_target_encode` — internal K-fold cross-fit (reuses `metis.split.cv_folds`) + m-estimate shrinkage; `strategy ∈ {kfold(default), loo}` (LOO = seeded-noise + shrinkage, the safe form). Fit rows → OOF encoding; non-fit → full-fit shrunk mean.
-- [ ] **metis leak test** `tests/test_encode.py` — no-signal small-group data: naive-incl-self `corr≈0.7` with own label, cross-fit `corr≈0`; real-signal counter-test (`std>0` kills return-prior cheat); LOO within-group invertibility (`1/(n−1)` gap, deterministic); fit-mask/unseen/determinism/ship-path/edge tests.
-- [ ] **kbench protocol** `kbench/titanic/features.py` — `apply_features` gains `seed` + a `TARGET_GROUPS` branch (6 stateless groups byte-identical); `target_encode_group` adapter (concat train+test / mark analysis-only / call primitive / split back); register demonstrator `pclass_survival` (NOT wired into the sweep shape); thread `seed=ctx.seed` in `main()`.
-- [ ] **kbench tests** — adapter OOF-train/full-fit-holdout; step-level e2e through `_run_features_step`; existing-features-unchanged regression; `TARGET_*` drift guard.
-- [ ] **verify + atlas** — full metis + kbench suites green; `metis run … -dry-run` config count unchanged (demonstrator absent from shape); `atlas/experiment.md` note the primitive + protocol.
+- [x] **metis primitive** `metis/encode.py::cross_fit_target_encode` — internal K-fold cross-fit (reuses `metis.split.cv_folds`) + m-estimate shrinkage; `strategy ∈ {kfold(default), loo}` (LOO = seeded-noise + shrinkage, the safe form). Fit rows → OOF encoding; non-fit → full-fit shrunk mean.
+- [x] **metis leak test** `tests/test_encode.py` — no-signal small-group data: naive-incl-self `corr≈0.7` with own label, cross-fit `corr≈0`; real-signal counter-test (`std>0` kills return-prior cheat); LOO within-group invertibility (`1/(n−1)` gap, deterministic); fit-mask/unseen/determinism/ship-path/edge tests.
+- [x] **kbench protocol** `kbench/titanic/features.py` — `apply_features` gains `seed` + a `TARGET_GROUPS` branch (6 stateless groups byte-identical); `target_encode_group` adapter (concat train+test / mark analysis-only / call primitive / split back); register demonstrator `pclass_survival` (NOT wired into the sweep shape); thread `seed=ctx.seed` in `main()`.
+- [x] **kbench tests** — adapter OOF-train/full-fit-holdout; step-level e2e through `_run_features_step`; existing-features-unchanged regression; `TARGET_*` drift guard.
+- [x] **verify + atlas** — full metis + kbench suites green; `metis run … -dry-run` config count unchanged (demonstrator absent from shape); `atlas/experiment.md` note the primitive + protocol.
 
 ## Estimate
 
