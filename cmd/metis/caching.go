@@ -345,7 +345,26 @@ func (c *cachingExecutor) writeEntry(e cache.Entry) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(c.indexDir, string(e.Kpre)+".json"), b, 0o644)
+	// Atomic write (metis#31): under parallel sweeps, concurrent points computing the
+	// SAME shared step (e.g. get-data/adapt) both writeEntry the same K_pre; a bare
+	// os.WriteFile (O_TRUNC) lets a concurrent lookup os.ReadFile see a torn/short file
+	// → DecodeEntry error → the run fails. temp + same-dir os.Rename is atomic, so a
+	// reader always observes a complete entry (mirrors the CAS store's writeAtomic).
+	final := filepath.Join(c.indexDir, string(e.Kpre)+".json")
+	tmp, err := os.CreateTemp(c.indexDir, "."+string(e.Kpre)+".tmp*")
+	if err != nil {
+		return err
+	}
+	if _, err := tmp.Write(b); err != nil {
+		tmp.Close()
+		os.Remove(tmp.Name())
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmp.Name())
+		return err
+	}
+	return os.Rename(tmp.Name(), final)
 }
 
 // isImmutableLeaf reports whether a step is marked as a pinned external leaf
