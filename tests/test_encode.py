@@ -105,3 +105,26 @@ def test_loo_deterministic_and_finite_with_noise():
 def test_unknown_strategy_rejected():
     with pytest.raises(ValueError, match="unknown strategy"):
         cross_fit_target_encode(np.array([1, 1]), np.array([0.0, 1.0]), strategy="bogus")
+
+
+def test_too_few_fit_rows_falls_to_prior_without_crash():
+    """A single fit row (or all-non-fit) can't cross-fit → prior, no crash (close-review edge)."""
+    groups = np.array(["a", "b", "c"])
+    y = np.array([1.0, np.nan, np.nan])
+    fit = np.array([True, False, False])              # one fit row
+    enc = cross_fit_target_encode(groups, y, fit_mask=fit, seed=0)
+    assert enc.shape == (3,) and np.all(np.isfinite(enc))
+    assert enc[0] == pytest.approx(1.0)               # sole fit row → prior = its own mean
+    all_nonfit = cross_fit_target_encode(groups, y, fit_mask=np.zeros(3, bool), seed=0)
+    assert np.allclose(all_nonfit, 0.0)               # empty fit set → prior 0.0, no crash
+
+
+def test_length_mismatch_rejected():
+    with pytest.raises(ValueError, match="length mismatch"):
+        cross_fit_target_encode(np.array([1, 1, 1]), np.array([0.0, 1.0]))
+
+
+def test_misconfigured_n_folds_rejected():
+    """n_folds<2 is a config error (raise), distinct from too-few-fit-rows (fall to prior)."""
+    with pytest.raises(ValueError, match="n_folds must be >= 2"):
+        cross_fit_target_encode(np.array([1, 1, 0, 0]), np.array([1.0, 0.0, 1.0, 0.0]), n_folds=1)

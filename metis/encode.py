@@ -54,8 +54,10 @@ def cross_fit_target_encode(
     groups   : array of the categorical group key, all rows (fit + non-fit).
     y        : target array; used ONLY on fit rows (non-fit entries may be NaN).
     fit_mask : bool array; True = fit row (trusted label). None ⇒ all rows are fit.
-    Returns enc where fit rows get a cross-fit encoding (own label never used) and
-    non-fit rows get the full-fit shrunk group mean over fit rows (prior if unseen).
+    Returns enc where fit rows get a cross-fit encoding (own label never enters via the
+    group aggregate — a negligible O(1/N) residual persists through the global shrinkage
+    prior, as in sklearn TargetEncoder) and non-fit rows get the full-fit shrunk group
+    mean over fit rows (prior if unseen).
     """
     if strategy not in ("kfold", "loo"):
         raise ValueError(f"unknown strategy {strategy!r}; known: kfold, loo")
@@ -63,6 +65,8 @@ def cross_fit_target_encode(
     y = np.asarray(y, dtype=float)
     n = len(groups)
     fit_mask = np.ones(n, bool) if fit_mask is None else np.asarray(fit_mask, bool)
+    if len(y) != n or len(fit_mask) != n:
+        raise ValueError(f"groups/y/fit_mask length mismatch: {n}, {len(y)}, {len(fit_mask)}")
 
     fit_idx = np.flatnonzero(fit_mask)
     gf, yf = groups[fit_idx], y[fit_idx]
@@ -76,9 +80,11 @@ def cross_fit_target_encode(
         enc[i] = full_enc.get(groups[i], prior)
 
     if strategy == "kfold":
+        if n_folds < 2:                                 # misconfiguration, not a data condition
+            raise ValueError(f"n_folds must be >= 2, got {n_folds}")
         k = min(n_folds, len(fit_idx))
         if k < 2:
-            enc[fit_idx] = prior                        # too few to cross-fit → prior (no leak)
+            enc[fit_idx] = prior                        # too few FIT ROWS to cross-fit → prior (no leak)
         else:
             classes, counts = np.unique(yf, return_counts=True)
             strat = "_y" if (len(classes) > 1 and counts.min() >= k) else None
