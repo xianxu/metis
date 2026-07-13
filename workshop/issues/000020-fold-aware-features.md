@@ -1,12 +1,13 @@
 ---
 id: 000020
-status: working
+status: codecomplete
 deps: [metis#18]
 github_issue:
 created: 2026-07-07
 updated: 2026-07-12
 estimate_hours: 1.05
 started: 2026-07-12T19:10:02-07:00
+actual_hours: 1.62
 ---
 
 # leakage-safe target features — internal cross-fit (features already per-fold via M1a)
@@ -80,6 +81,7 @@ total: 1.05
   (sklearn `TargetEncoder` / tidymodels `step_lencode_mixed`). The `fit_scope` engine marker was dropped.
 
 ### 2026-07-12 (claim → design → durable plan → plan-review APPROVED)
+- 2026-07-12: closed — metis 74 passed / kbench 41 passed (full suites, both repos). Leak proof at the FEATURE level: naive-incl-self corr=0.7286 with own label vs cross-fit corr=-0.0351 on no-signal size-2-group data — the Done-when "naive inflates cv" operationalized at the encoding level (the CAUSE, isolated from model/CV noise; mapping in Log). Real-signal counter-test recovers per-group rates; LOO 1/(n-1) invertibility pinned; fit-mask/unseen/determinism/ship-path/edge covered. Fold leakage-cut proven through the real apply_features chain (assessment rows get the full-analysis shrunk mean 5/11,6/11 — never their own held-out label). 6 stateless groups byte-identical (regression pins the exact pre-#20 column list). Titanic thread green: metis run -dry-run titanic-sweep.md = 42 configs, pclass_survival absent (registered, unwired; real ticket feature -> kbench#8). kbench protocol diff (branch 000020-target-group-protocol HEAD d9955bd) fresh-eyes reviewed separately -> SHIP (no Critical/Important; the one Minor coverage gap closed). Impl via full-context fork. Project (metis-v2, lives in brain) updated separately.; review verdict: FIX-THEN-SHIP
 - Claimed; `start-plan`; recon (metis+kbench feature/step architecture) surfaced the key fact: the
   Titanic features live in **kbench** (`kbench/titanic/features.py`), metis is the leakage-agnostic
   substrate. So #20 spans two repos: the reusable primitive in **metis** + a group-protocol extension
@@ -115,3 +117,21 @@ total: 1.05
   wires `ticket`). Atlas: `experiment.md` gains a "Leakage-safe target features" subsection.
 - **No plan deviations.** `metis` binary built via `go build -o bin/metis ./cmd/metis` for the dry-run;
   `-dry-run` flag precedes the positional arg. Close boundary + `Review-Verdict` handled in main session.
+
+### 2026-07-12 (close boundary — two-repo review, both clean)
+- **kbench diff** (branch `000020-target-group-protocol`) fresh-eyes reviewed (separate repo, outside
+  the metis close window): **SHIP** — all correctness paths sound (adapter alignment, NaN-never-poisons,
+  byte-identical stateless groups, seed threading, both leakage paths). One **Minor** coverage gap closed:
+  added `test_target_group_fold_aware_through_apply_features` proving the fold leakage-cut through the
+  REAL `apply_features` chain (assessment rows pinned to 5/11, 6/11 shrunk means — not their own label).
+  kbench HEAD `d9955bd`, suite **41 passed**.
+- **metis diff** close review (`sdlc close`, window `c175e0d..HEAD`): **FIX-THEN-SHIP / severity INFO** —
+  no Critical/Important; ARCH-PURE/DRY/PURPOSE all pass. 3 **Minor** findings addressed in `metis/encode.py`:
+  (1) function docstring qualified "own label never used" → "never via the group aggregate" (the issue's
+  OWN lesson said to avoid the unqualified claim); (2) `groups/y/fit_mask` length-mismatch guard; (3)
+  `n_folds<2` now raises (config error) vs the too-few-fit-rows→prior fallback (data condition). +3 edge
+  tests (`test_encode.py` **12 passed**; full metis suite **77 passed**). Review sidecar:
+  `workshop/plans/000020-fold-aware-features-close-review.md`.
+- **est 1.05h / actual 1.62h (0.65×)** — measured, not typed; the design *conversation* (LOO-vs-kfold,
+  ads-CTR parallel) ran deeper than the "pre-resolved plan" ×0.2 design discount assumed. Logged to the
+  calibration ledger. Remaining metis-v2: M4b #22 (ensembling), M5 kbench#8 (ticket feature — now unblocked).
