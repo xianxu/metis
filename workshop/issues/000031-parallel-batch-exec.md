@@ -29,10 +29,23 @@ runner** (sibling metis#30) — one seam:
    `exec(points []P, runPoint func(P) O) []O` runs the batch and returns outputs **in batch order**;
    `Run` then `Tell`s them in that fixed order. Default `exec` = sequential map (today's behavior,
    backward-compatible; pure tests pass the sequential exec).
-2. **A bounded worker-pool exec** in `cmd/metis` — concurrency capped (flag / `GOMAXPROCS`-derived
-   default) so 2,475 subprocesses don't fork-bomb. Nesting composes: the driver's outer-fold batch and
-   each inner sweep's batch each go through `exec`, so total parallel surface = outer × inner (bound the
-   TOTAL, not per-level, to avoid k² processes).
+2. **One GLOBAL concurrency cap `n`, enforced at the leaf.** The runner owns a single limit on the total
+   number of concurrent step-subprocess executions across ALL nesting levels — **default `n =
+   runtime.NumCPU()`**, overridable by flag + env (`METIS_MAX_PARALLEL` or similar). It must be ONE global
+   budget, not a per-`exec` / per-level pool: `Run` nests (`driver ⊃ sweeper ⊃ resample`), so a per-level
+   pool composes multiplicatively (5 outer folds × a 99-wide inner sweep = up to 495 subprocesses, not n).
+   The clean enforcement — which also avoids the classic **nested-pool deadlock** (an orchestration
+   goroutine holding a slot while it waits for child work that also needs slots):
+   - **Orchestration ≠ execution.** The driver/sweeper `exec` fan-out is just goroutines — cheap,
+     unbounded; they *structure* concurrency but consume NO budget.
+   - **The global semaphore (capacity `n`) is acquired only at the LEAF** — the single point that spawns
+     a real subprocess (`execStep`, the uv/python config-fold run): acquire immediately before spawn,
+     release immediately after. Orchestration goroutines never hold a slot while awaiting children → no
+     deadlock, and at most `n` real subprocesses run at once no matter how driver×sweeper fans out.
+   - **Caveat (write it into the RUNBOOK/flag help):** each leaf is a Python process that itself may
+     multi-thread (BLAS / sklearn `n_jobs`), so `n = NumCPU` processes can oversubscribe the cores —
+     the default may want per-process threads pinned (`n_jobs=1` / `OMP_NUM_THREADS=1`) or `n` set below
+     NumCPU. A tuning knob, not a correctness issue.
 3. **Determinism contract (write it down + test it):** results reduce **order-independently** — config
    identity + fold assignment are content-addressed and `Aggregate` is order-independent (metis#18 M1a),
    so parallel and sequential runs produce an identical `Done(S)`. Parallelism is confined to WITHIN a
@@ -45,15 +58,19 @@ runner** (sibling metis#30) — one seam:
   sampler tests green with the new signature).
 - A parallel exec and the sequential exec produce a **byte-identical** `Done(S)` for a grid sampler over
   a multi-config × multi-fold set (determinism test — the load-bearing one).
-- `metis run` executes a grid sweep concurrently with a **bounded** pool (configurable); a wall-clock
-  drop vs. sequential is demonstrated on a real/fixture sweep. Concurrency never exceeds the bound
-  (incl. nested driver × sweeper).
+- `metis run` executes a grid sweep concurrently under a **single global cap `n`** (default
+  `runtime.NumCPU()`, flag/env-overridable); a wall-clock drop vs. sequential is demonstrated on a
+  real/fixture sweep.
+- **The global cap holds across nesting:** a `driver: cv` run never has more than `n` step-subprocesses
+  in flight at once, even though driver×sweeper fans out to hundreds of orchestration goroutines
+  (test via an instrumented leaf exec that records peak concurrency ≤ n). No deadlock under nesting.
 
 ## Plan
 
-- [ ] (spec at claim) `exec` seam on `Run` (order-preserving return) + sequential default; bounded
-  worker-pool exec in `cmd/metis` (total-bound across nesting); determinism test (parallel ≡ sequential
-  `Done`); wall-clock demo.
+- [ ] (spec at claim) `exec` seam on `Run` (order-preserving return) + sequential default; a **global
+  leaf semaphore** (cap `n`, default `NumCPU`, flag/env) acquired at the `execStep` spawn — NOT per-level;
+  determinism test (parallel ≡ sequential `Done`); peak-concurrency ≤ n test under nested `driver: cv`;
+  wall-clock demo.
 
 ## Log
 
@@ -63,3 +80,9 @@ runner** (sibling metis#30) — one seam:
   loop, not a grid-specific runner. Sibling: metis#30 (progress). The content-addressed, order-independent
   reduce (M1a) is what makes concurrent execution provably safe — the determinism test is the deliverable's
   spine. Bigger perf win than #30 but more care; #30 is the cheaper near-term one.
+- **Refinement (operator):** the cap is ONE **global** limit `n` (default `NumCPU`), enforced at the
+  **leaf** subprocess spawn (a shared semaphore), NOT per-`exec`/per-level — else nesting multiplies it
+  (outer × inner) and it fork-bombs. Orchestration goroutines stay unbounded+cheap and hold no slot while
+  awaiting children (deadlock-free); only real `execStep` spawns draw from the budget. Peak-concurrency ≤ n
+  under nested `driver: cv` is the guard test. BLAS/`n_jobs` per-process threading can oversubscribe → a
+  documented tuning caveat.
