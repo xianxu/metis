@@ -1,12 +1,13 @@
 ---
 id: 000023
-status: working
+status: codecomplete
 deps: [metis#18]
 github_issue:
 created: 2026-07-07
 updated: 2026-07-12
 estimate_hours: 3.1
 started: 2026-07-12T15:10:37-07:00
+actual_hours: 2.75
 ---
 
 # nested-CV outer resample driver — honest procedure estimate
@@ -96,6 +97,7 @@ total: 3.1
   substrate — cleanly separable. Design in the pensive (driver/sweeper/pipeline).
 
 ### 2026-07-12 (claimed; design converged + reviewed)
+- 2026-07-12: closed — nested-CV driver:cv shipped across M1 (sealing spine) + M2 (nested loop), both boundary-reviewed FIX-THEN-SHIP + fixed. Go 9/9 + Python 65 green; driver:single unaffected. Confinement proven through the real chain (uv cv-split via execStep catches out-of-root); GuardComplexity now runs on the nested path. Honest mean±SE estimate, no shippable winner. Honest-estimate-tracks-public is operator-gated Titanic.; review verdict: FIX-THEN-SHIP
 - 2026-07-12: closed M2 — M2 driver:cv nested-CV: Go 9/9 + Python 65 green, driver:single stayed green through the sweeper extraction (regression guard). CVDriver pure Sampler (k=0 edge tested); sealed per-fold sweep confined to analysis_i + refit-and-score reproduces the outer partition via cv_folds determinism (outer k); no shippable winner (zero ship despite a ship phase); mean±SE estimate reported; ~outerK× cost surfaced. Confinement proven through the REAL chain: real uv metis/cv-split via execStep with a read-root excluding the dataset is CAUGHT (within-root succeeds); composed with runOuterFold setting readRoot=analysis_i. Full real-DATA driver:cv e2e needs a toy data-step metis lacks (deferred); honest-estimate-tracks-public is operator-gated Titanic.; review verdict: FIX-THEN-SHIP
 - 2026-07-12: closed M1 — M1 sealing spine: Python 65 pass incl. both seal halves (out-of-root base-dataset read caught+named via exp_path chokepoint; C1 regression — legit run-dir handoff read passes) + outer-split materializes k analysis subset dirs + within_root unit tests; Go 9/9 ok, METIS_READ_ROOT injected iff-non-empty so driver:single is untouched. Atlas updated (confinement chokepoint + outer-split, shared spine for #20/kbench#8).; review verdict: FIX-THEN-SHIP
 - 2 recon passes (nested-CV architecture + read-trace machinery) → design → durable plan
@@ -123,3 +125,7 @@ total: 3.1
   lacks — deferred; the honest-estimate-tracks-public acceptance is operator-gated Titanic regardless.)
 - Forked tail: `driver:cv`→`MeanSE`, no ship. `reportEstimate` prints mean±SE + "ships NO winner". ~outerK×
   cost surfaced at dry-run. Atlas updated (driver:cv landed). Go 9/9 + Python 65 green; `driver:single` green.
+- **Close-review I-A (recorded deferral):** the L2 confinement is proven through the real chain in
+  isolation (`TestExecStep_ConfinesRealUvStep`) + the driver wiring is code-confirmed, but a leak driven
+  through `exp_path` *within a real driver:cv orchestration* is deferred (blocked on a toy data-step metis
+  lacks) → tracked by **metis#29**. The operator-gated Titanic run exercises the real path with real data.
