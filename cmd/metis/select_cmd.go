@@ -55,8 +55,9 @@ type selectOpts struct {
 	fingerprint string
 	message     string
 	stepPath    []string
-	git         gitProbe        // nil → gitCLI (production)
-	now         func() time.Time // nil → time.Now
+	git         gitProbe                    // nil → gitCLI (production)
+	now         func() time.Time            // nil → time.Now
+	exec        experiment.StepExecutor     // test seam: injected into the --promote run (nil → production execStep)
 	out         io.Writer
 }
 
@@ -305,7 +306,7 @@ func promoteSelected(o selectOpts, sh experiment.Shape, picks []familyPick) erro
 			return fmt.Errorf("select --promote %s: %w", famLabel(p.family), err)
 		}
 		runID := "best-" + familyTag(p.family) + "-" + short(addr)
-		ro := runOpts{expPath: o.shapePath, runID: runID, stepPath: o.stepPath, cache: true, git: o.git, out: o.out}
+		ro := runOpts{expPath: o.shapePath, runID: runID, stepPath: o.stepPath, cache: true, git: o.git, exec: o.exec, out: o.out}
 		if _, err := runResolvedExperiment(exp, ro, runID, now, o.out); err != nil {
 			return fmt.Errorf("select --promote %s (%s): %w", famLabel(p.family), runID, err)
 		}
