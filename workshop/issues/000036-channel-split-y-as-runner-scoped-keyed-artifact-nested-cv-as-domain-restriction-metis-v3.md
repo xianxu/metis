@@ -22,7 +22,7 @@ train+test at ship time). The protection we actually need is: **no step's fitted
 depend on a held row's label.**
 
 **Research notes (read first):**
-`brain/workshop/pensive/2026-07-14-01-pensive-feature-engineering-algebra-under-cv.md` — the full
+`workshop/pensive/2026-07-14-01-pensive-feature-engineering-algebra-under-cv.md` — the full
 model (two-channel data, fit∘apply scope signatures, aggregate classes), the verified literature
 map (two deep-research passes + a 27-agent adversarial verify), and the framing: the fit boundary
 is a **declassification point**; cross-fitting is the declassification policy for the y channel.
@@ -81,5 +81,5 @@ Replace the row-cloning seal with a runner-owned label channel:
 ### 2026-07-14
 - Filed as stage B of the three-stage plan agreed with operator (A = metis#35 one-road fix on the
   current seal, closes metis-v2; B = this, the structural redesign; C = metis#37 constructor
-  algebra). Design substance + verified literature in the brain pensive (see Problem). Depends on
+  algebra). Design substance + verified literature in the pensive (in-repo; see Problem). Depends on
   #35 landing first — stage A's honest-beat run is this issue's regression baseline.

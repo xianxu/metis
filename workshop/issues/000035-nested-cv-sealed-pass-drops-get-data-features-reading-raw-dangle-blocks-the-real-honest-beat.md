@@ -80,7 +80,7 @@ Two entangled concerns to resolve (brainstorm-first):
   selection-vs-ship), and `adapt`'s `fare_median` fits above the split. Converged on a general model
   (label = domain-restricted keyed channel; constructors = fit/apply with scope signatures; aggregate
   class decides fold-recompute) — captured in
-  `brain/workshop/pensive/2026-07-14-01-pensive-feature-engineering-algebra-under-cv.md`. Operator
+  `workshop/pensive/2026-07-14-01-pensive-feature-engineering-algebra-under-cv.md`. Operator
   redirected to a research detour (literature + framework survey toward an "ML algebra extending
   relational algebra") before speccing the fix; #35's eventual fix will be an instance of that design.
 - Detour done (2 deep-research passes + 27-agent adversarial verify; findings in the pensive).

@@ -25,7 +25,7 @@ subtracted, or re-reduced. Research status (two deep-research passes + adversari
 derives CV placement from declared signatures** — this composition is the novel part.
 
 **Research notes (read first):**
-`brain/workshop/pensive/2026-07-14-01-pensive-feature-engineering-algebra-under-cv.md` — the
+`workshop/pensive/2026-07-14-01-pensive-feature-engineering-algebra-under-cv.md` — the
 model, the verified design-space map (SystemDS = nearest system; SeLINQ = column-IFC existence
 proof; fit-as-declassification framing; Amsterdamer/Deutch/Tannen semimodules as the
 aggregation-taint bridge), and the open questions.
@@ -76,4 +76,4 @@ Make constructors the unit, signatures the contract, placement the derivation:
 ### 2026-07-14
 - Filed as stage C of the three-stage plan agreed with operator (A = metis#35, B = metis#36,
   C = this). Deliberately parked behind #36: correctness does not need it; build when scale or
-  the research/book track justifies it. Full model + verified citations in the brain pensive.
+  the research/book track justifies it. Full model + verified citations in the in-repo pensive.
