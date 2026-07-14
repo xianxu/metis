@@ -5,7 +5,7 @@ deps: [metis#23]
 github_issue:
 created: 2026-07-13
 updated: 2026-07-13
-estimate_hours:
+estimate_hours: 4.5
 started: 2026-07-13T15:52:26-07:00
 ---
 
@@ -183,12 +183,55 @@ records), metis#22 (consumes `--best-per-model-class`), metis#33 (GBM's own over
   runnable test.)*
 - The max-over-families honesty caveat is surfaced in the `select` report (as the *family's* estimate).
 
+## Estimate
+
+Derived against estimate-logic-v3.1 (impl = ship-wall-clock, AI-paired). The design is resolved (spec
+twice fresh-eyes-reviewed + durable plan), but that design was done IN this issue's window (a long
+post-claim brainstorm + 2 reviews), so its design hours are counted (part of what `sdlc actual` measures),
+not free. Two milestones: M1 (ledger schema + nested recording + driver-drop/dispatch/--fast), M2 (the
+`metis select` command + `--promote` + run-no-ship + migration). The migration surface (CUE + 2 shapes +
+RUNBOOK + ~4 tests + retiring 2 commands) is real weight.
+
+```estimate
+model: estimate-logic-v3.1
+familiarity: 1.0
+item: smaller-go-module      design=0.3 impl=0.4
+item: smaller-go-module      design=0.3 impl=0.4
+item: cross-cutting-refactor design=0.2 impl=0.3
+item: smaller-go-module      design=0.3 impl=0.4
+item: smaller-go-module      design=0.2 impl=0.3
+item: cross-cutting-refactor design=0.2 impl=0.3
+item: milestone-review       design=0.0 impl=0.2
+item: milestone-review       design=0.0 impl=0.2
+item: atlas-docs             design=0.1 impl=0.15
+design-buffer: 0.15
+total: 4.49
+```
+
+- `smaller-go-module` (M1 ledger) — `ledger.Row` `Level`+outer-fold in the key, `AggregateView` group-key + codec, `FamilyEstimate` reducer.
+- `smaller-go-module` (M1 run) — nested run records inner + per-family outer rows (`runOuterFold` scores each family's inner-winner; ledger write).
+- `cross-cutting-refactor` (M1) — drop `driver:` (shape.go + CUE + fixtures), config-count dispatch, `--fast` knob.
+- `smaller-go-module` (M2 select) — `familySelect` + `metis select` (dry): reduce, family+config, report, fingerprint-scoped.
+- `smaller-go-module` (M2 promote) — `--promote` reconstruct+ship on all data, `best-{family}-{hash}`, empty-ship guard, retire `promote`.
+- `cross-cutting-refactor` (M2) — `metis run` no-auto-ship + migration (RUNBOOK/shapes/tests, retire `ledger select`).
+- `milestone-review` ×2 — the M1 boundary + M2 close reviews.
+- `atlas-docs` — atlas run/select command model + ledger `Level` schema.
+
 ## Plan
 
 - [x] **Brainstorm** (2026-07-13, operator) — converged the mechanism (see Log): derived run mode (nested
   for sweeps, single-level CV degenerate), one nested run recording inner+outer, `metis select`
   reconstruct-and-ship on all data, `driver:` dropped, one shared run engine. Spec above.
-- [ ] Durable plan via `superpowers-writing-plans` → `workshop/plans/000032-*-plan.md`, then `change-code`.
+
+Durable plan: `workshop/plans/000032-outer-cv-family-select-plan.md` (twice-reviewed spec decomposed;
+core-concepts tables + TDD tasks). **Two review-boundary milestones:**
+
+- [ ] **M1 — measure/record side:** ledger `Row` `Level`+outer-fold in the key + `FamilyEstimate` reducer;
+  drop `driver:` + config-count dispatch + `--fast`; nested run records inner + per-family outer rows.
+  (closes via `sdlc milestone-close --milestone M1`.)
+- [ ] **M2 — choose/ship side:** `familySelect` (lowest-SE-within-1-SE); `metis select` (dry: family+config
+  report) + `--promote` (reconstruct+ship all-data, `best-{family}-{hash}`); `metis run` no-auto-ship; retire
+  `ledger select`+`promote`; migrate RUNBOOK/atlas/shapes/tests. (closes via `sdlc close --milestone M2`.)
 
 ## Log
 
