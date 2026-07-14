@@ -305,3 +305,63 @@ func TestFilter_ByFingerprint(t *testing.T) {
 		t.Errorf("filter by cf1 = %d rows, want 2", len(got.Rows))
 	}
 }
+
+// metis#32: an inner row and the outer row for the SAME winning config + fold index share
+// (fingerprint, free-params, fold) — without Level in the AggregateView group key they'd merge
+// into one group, averaging a sealed inner subset-score with an outer held-out score. Level in
+// the key MUST keep them as two distinct groups (the collision the nested-CV recording prevents).
+func TestAggregateView_LevelKeyedNoCollision(t *testing.T) {
+	f0 := 0
+	inner := Row{FreeParams: map[string]any{"train.model": "rf"}, CodeFingerprint: "abc",
+		PointAddr: "p-inner", Level: "inner", Fold: &f0,
+		Metrics: map[string]float64{"train.fold_score": 0.80}, Status: "ok"}
+	outer := Row{FreeParams: map[string]any{"train.model": "rf"}, CodeFingerprint: "abc",
+		PointAddr: "p-outer", Level: "outer", Fold: &f0,
+		Metrics: map[string]float64{"train.fold_score": 0.72}, Status: "ok"}
+	l := Ledger{}
+	l.Append(inner, outer)
+	agg := AggregateView(l, "train.fold_score")
+	if len(agg.Rows) != 2 {
+		t.Fatalf("inner + outer must stay 2 groups (not merge to 1 averaging 0.76); got %d rows", len(agg.Rows))
+	}
+	for _, r := range agg.Rows {
+		got := r.Metrics["train.fold_score"]
+		switch r.Level {
+		case "inner":
+			if got != 0.80 {
+				t.Errorf("inner group mean=%v want 0.80 (blended with outer?)", got)
+			}
+		case "outer":
+			if got != 0.72 {
+				t.Errorf("outer group mean=%v want 0.72 (blended with inner?)", got)
+			}
+		default:
+			t.Errorf("aggregate row lost its Level: %+v", r)
+		}
+	}
+}
+
+// metis#32: level + outer_fold columns round-trip through Encode/Decode (present only when
+// used; a v1 ledger without them stays column-clean).
+func TestEncodeDecode_LevelOuterFoldRoundTrip(t *testing.T) {
+	f, o := 2, 1
+	in := Ledger{}
+	in.Append(Row{FreeParams: map[string]any{"train.model": "rf"}, CodeFingerprint: "abc",
+		PointAddr: "p1", Level: "inner", Fold: &f, OuterFold: &o,
+		Metrics: map[string]float64{"train.fold_score": 0.83}, Status: "ok"})
+	b, err := Encode(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), "level") || !strings.Contains(string(b), "outer_fold") {
+		t.Fatalf("header missing level/outer_fold columns:\n%s", b)
+	}
+	out, err := Decode(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := out.Rows[0]
+	if r.Level != "inner" || r.Fold == nil || *r.Fold != 2 || r.OuterFold == nil || *r.OuterFold != 1 {
+		t.Fatalf("round-trip lost level/fold/outer_fold: %+v", r)
+	}
+}
