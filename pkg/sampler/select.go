@@ -205,7 +205,7 @@ func toWinner(s ConfigStat, seed int) Winner {
 	}
 }
 
-// familySelect picks the model FAMILY from per-family honest OUTER estimates (metis#32): among
+// FamilySelect picks the model FAMILY from per-family honest OUTER estimates (metis#32): among
 // families whose mean is within 1 SE of the best family's mean, the LOWEST-SE (most stable) one.
 // It deliberately does NOT reuse SweepResult.Ship (the cross-family inner-argmax that ships the
 // overfitter #32 exists to replace) — the family choice rides on the honest OUTER estimate.

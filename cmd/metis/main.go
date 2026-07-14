@@ -27,12 +27,12 @@ func run(args []string) error {
 	switch args[0] {
 	case "run":
 		return cmdRun(args[1:])
+	case "select":
+		return cmdSelect(args[1:])
 	case "ledger":
 		return cmdLedger(args[1:])
-	case "promote":
-		return cmdPromote(args[1:])
 	default:
-		return fmt.Errorf("unknown subcommand %q (want: run | ledger | promote)", args[0])
+		return fmt.Errorf("unknown subcommand %q (want: run | select | ledger)", args[0])
 	}
 }
 
