@@ -73,3 +73,19 @@ Two entangled concerns to resolve (brainstorm-first):
   `buildFoldExperiment` drops get-data but repoints only `dataset`, not `raw`. Confirms RUNBOOK §6.4's
   flagged risk. Deps conceptually on metis#23 (the sealing) + kbench#8 (the ticket features). Blocks the
   metis-v2 `done_when` (honest-beat) and the kbench nested smoke e2e (xfailed pending this).
+- Brainstorm (claimed, with operator) escalated the root cause from "missing repoint" to a design gap:
+  the seal substitutes a derived artifact and deletes its producers, sound only if that artifact is the
+  sole road raw→pipeline — `raw: get-data` is a second road. Two sibling defects surfaced: `analysis_i`
+  lacks `test` (features.py:233 crashes once the raw read is fixed; ticket_size would silently differ
+  selection-vs-ship), and `adapt`'s `fare_median` fits above the split. Converged on a general model
+  (label = domain-restricted keyed channel; constructors = fit/apply with scope signatures; aggregate
+  class decides fold-recompute) — captured in
+  `brain/workshop/pensive/2026-07-14-01-pensive-feature-engineering-algebra-under-cv.md`. Operator
+  redirected to a research detour (literature + framework survey toward an "ML algebra extending
+  relational algebra") before speccing the fix; #35's eventual fix will be an instance of that design.
+- Detour done (2 deep-research passes + 27-agent adversarial verify; findings in the pensive).
+  Operator agreed the 3-stage plan: **stage A = THIS issue** — the one-road fix on the current
+  seal (adapt carries source cols via a new `source` schema role; features drops `raw:`;
+  outer-split carries `test` through; declare transductive semantics; un-xfail e2e; run the real
+  honest-beat) — closes metis-v2. Stage B = metis#36 (channel split, deletes the cloning seal).
+  Stage C = metis#37 (constructor algebra, parked behind #36). This issue's scope stays stage A.

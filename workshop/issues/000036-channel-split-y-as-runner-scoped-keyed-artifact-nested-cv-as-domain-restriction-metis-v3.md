@@ -1,7 +1,7 @@
 ---
 id: 000036
 status: open
-deps: []
+deps: [metis#35]
 github_issue:
 created: 2026-07-14
 updated: 2026-07-14
@@ -12,16 +12,74 @@ estimate_hours:
 
 ## Problem
 
+metis#35's root cause is architectural: the nested-CV seal (metis#23) substitutes a derived
+artifact (`analysis_i`) and deletes its producers — sound only when that artifact is the sole road
+from raw data to the pipeline, an invariant nothing enforces (the `raw: get-data` bypass proved
+it). Row-cloning also costs O(k·N) storage, forces `test=None` shape mismatches, and hides
+*features* when only *labels* need hiding — under transductive (Kaggle) semantics, hiding held
+rows' features actively mismatches the deployment (both-frames features like ticket_size see
+train+test at ship time). The protection we actually need is: **no step's fitted parameter may
+depend on a held row's label.**
+
+**Research notes (read first):**
+`brain/workshop/pensive/2026-07-14-01-pensive-feature-engineering-algebra-under-cv.md` — the full
+model (two-channel data, fit∘apply scope signatures, aggregate classes), the verified literature
+map (two deep-research passes + a 27-agent adversarial verify), and the framing: the fit boundary
+is a **declassification point**; cross-fitting is the declassification policy for the y channel.
+
 ## Spec
+
+Replace the row-cloning seal with a runner-owned label channel:
+
+- **y is a separately-keyed artifact** (id → label), split from X at `adapt` (the demultiplexer —
+  the first schema'd node). A fold context = a **domain restriction of y alone**: outer fold i
+  hands the pipeline `y|dom(y)\Oᵢ`; inner folds restrict further ((y|A)|B = y|A∩B — nesting
+  composes). X is never restricted (transductive; see estimand knob below).
+- **fit_mask is derived, not passed**: `fit_mask ≡ k ∈ dom(y)`. Steps stop receiving a mask they
+  are trusted to honor; a label absent from the artifact cannot be used.
+- **The scorer is the declassification boundary**: split `metis/train` into fit/predict (label-
+  restricted) + a terminal `score` step — the only step handed held labels (`y|B`), and its output
+  is a scalar. No dataset-shaped artifact downstream of held labels.
+- **Estimand declared in the shape header**: `semantics: transductive` (default — Kaggle) vs
+  `prospective` (mask labels AND drop rows — the current behavior, kept reachable). Decides
+  whether label-free constructors are hoisted or per-fold.
+- **Static one-road rule**: y has exactly one producer; no pipeline step's `with` may reference a
+  data-phase step other than the base (kills the #35 bug class at parse time). The runner (split/
+  stratification) is the one sanctioned full-y reader.
+- **Deletions**: `analysis_i` cloning, `METIS_READ_ROOT` + `readRoot` plumbing (run.go/exec.go/
+  sweep.go), `buildFoldExperiment`'s sealed branch (`baseRef`/`dropNeeds` surgery). Nested CV
+  becomes the same experiment as flat, run under a mask pair. O(k·N) → O(1) storage.
+- **Fold-level caching shape** (from the SystemDS finding, CIDR'20/LIMA): folds are a partition,
+  so a fold complement-θ = merge of the other parts' per-fold partials — monoid suffices at the
+  fold level; subtraction (abelian-group aggregates) is only needed for per-row S(k) (LOO/
+  cross-fit). Don't build subtraction machinery for the fold axis.
+- **Acceptance experiment (answers an open research question)**: run ticket_size hoisted vs
+  fold-scoped; compare which honest family estimate tracks the public leaderboard. Moscovich &
+  Rosset 2022 is inductive-only; the transductive case is verifiably open in the literature.
 
 ## Done when
 
--
+- Nested CV runs the real kbench sweep with NO analysis_i materialization and NO METIS_READ_ROOT;
+  results match the metis#35-era honest-beat baseline (the stage-A run is the regression anchor).
+- A leakage e2e proves structurally that a target-encoding feature cannot see held labels: a
+  step attempting to read `y` beyond its restricted domain fails loudly (label absent, not
+  convention violated).
+- `score` is the only step receiving held labels; `train` no longer both fits and scores.
+- Shape header declares transductive/prospective; prospective mode reproduces row-hiding.
+- The ticket_size hoisted-vs-fold-scoped experiment ran; finding recorded (pensive/project).
+- Sealed-branch code, readRoot plumbing, and outer-split cloning are deleted; e2e green.
 
 ## Plan
 
-- [ ]
+- [ ] Brainstorm-first with operator (design via superpowers-writing-plans; durable plan in
+  workshop/plans/). Key open questions from the pensive: y-artifact on-disk shape; how the
+  runner injects restricted y (per-step artifact vs env-pointed file); score-step metric contract;
+  where prospective mode's row-drop lives.
 
 ## Log
 
 ### 2026-07-14
+- Filed as stage B of the three-stage plan agreed with operator (A = metis#35 one-road fix on the
+  current seal, closes metis-v2; B = this, the structural redesign; C = metis#37 constructor
+  algebra). Design substance + verified literature in the brain pensive (see Problem). Depends on
+  #35 landing first — stage A's honest-beat run is this issue's regression baseline.
