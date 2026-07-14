@@ -151,3 +151,38 @@ Durable plan: `workshop/plans/000035-stage-a-one-road-fix-plan.md` (review-harde
   outer-split carries `test` through; declare transductive semantics; un-xfail e2e; run the real
   honest-beat) — closes metis-v2. Stage B = metis#36 (channel split, deletes the cloning seal).
   Stage C = metis#37 (constructor algebra, parked behind #36). This issue's scope stays stage A.
+
+### 2026-07-14 — session summary: stage A built + the real honest-beat ran
+- **Build (Tasks 1–6, all TDD, all green):** metis `source` role (schema.py + test) · outer-split
+  carries `test` (analysis_i shape-identical; test) · kbench adapt carries SOURCE_COLS (role
+  `source`, verbatim incl. NaN) · features reads base only (signature drops raw frames; loud
+  pre-#35-cache guard; 12 test call sites, the 2 ticket ones moved onto base fixtures) · 3 shapes
+  drop `raw:` from features (adapt's stays — it IS the demultiplexer) · 4 relic winner .md DELETED
+  (pre-#32, JSON-form "raw":"get-data") · RUNBOOK §6 reframed (outer = row absence, inner =
+  fit_mask; transductive estimand declared; threshold pre-committed) · kbench atlas + metis atlas
+  reconciled. Nested smoke e2e un-xfailed → **first-ever green nested run through the real
+  pipeline** (one test-side fix: inner-score bound 0.0<s → 0.0<=s; 0.0 is legitimate on ~3-row
+  fixture folds; the bound had never executed).
+- **Honest-beat (operator-run, 891 rows, 5 outer × 99 × 5 inner = 2,490 ledger rows):**
+  per-family honest outer estimates: hist_gbm 0.8361±0.0103 · rf 0.8328±0.0045 · logreg
+  0.7879±0.0074. Selector picked **rf** (lowest-SE-within-1-SE — declined GBM's higher-variance
+  mean; the 0.749-overfitter trap avoided by rule, not luck), config `[title,family,age]`
+  md=4 n=500 → promote → **public 0.77751**.
+- **Leakage tell (§6 item 5, threshold pre-committed): PASSES.** 15 (fold×family) winners,
+  outer−inner deltas mean ≈ −0.002 (−0.038…+0.042, two-sided); the one ticket_survival winner
+  (fold 3 rf) +0.0068 ≪ 1 SE. Outer-level leakage ruled out on the real pipeline.
+- **Interpretation:** internal honesty holds (outer≈inner); public sits ~0.055 below the honest
+  estimate — a train↔test distribution gap + LB subsample noise (public ≈209 rows → binomial SE
+  ±0.029; today's 0.77751, v1's 0.77990, rf-ticket's 0.79186 are all within ~1.4 LB-SE of each
+  other — the public LB cannot resolve differences at this size). Nested CV delivered what it
+  promises (same-distribution honesty); the project done_when's "public tracks the estimate"
+  clause conflated that with cross-distribution prediction — flagged to operator for a done_when
+  revision decision. The selector's no-ticket pick vs rf-ticket's 0.79186 (Δ0.014, inside LB
+  noise) feeds metis#36's transductive experiment.
+- **Incidents (all filed/recorded):** #32 cohort guard fired correctly (ledger spanned last
+  session's flat 495 rows + today's 2,490; identified by row-count arithmetic; pinned
+  b7aee3de) → **#39 filed** (fingerprint visibility). Zero-output minutes during the run →
+  **#38 filed** (parallel-run TUI). PATH gotcha: the kaggle#5 wrapper shadows the official
+  `kaggle` CLI if prepended (get-data dies: unknown subcommand "competitions") — RUNBOOK-worthy.
+  Suspected bug to verify: `metis select --best` WITHOUT --fingerprint printed nothing (expected
+  the cohort guard error) — check exit code / file if real.
