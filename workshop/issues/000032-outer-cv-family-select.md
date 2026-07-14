@@ -49,35 +49,63 @@ submit` **uploads**. The outer CV is a pure *measure* of ~3 per-family procedure
 (outer-scoring all configs + selecting on them would be "yet another sweep" on the held-out fold →
 dishonest; it reintroduces the optimism #23 removed).
 
-**1. `metis run <shape>` — MEASURE (never ships). The mode is DERIVED from the shape, not declared:**
+**1. `metis run <shape>` — MEASURE (never ships). The mode is DERIVED from the shape (a clean branch on
+`len(configs)`, replacing the deleted `driver:` dispatch — NOT "no special-casing"; the paths genuinely differ):**
 
-| Shape | `metis run` does | records |
+| Shape (`shape.Expand`) | `metis run` does | records |
 |---|---|---|
-| **sweep** (has `$any` free vars) | **nested CV** (outer × inner; outer reuses `sweeper.resample.cv`) | inner + outer rows |
-| **no free vars**, has a resample | **single-level CV** — the outer selection loop has one candidate, so nested-CV mathematically *degenerates* to a plain k-fold of that config (no special-casing) | inner rows |
+| **sweep** (`>1` config) | **nested CV** (outer × inner; outer folds reuse `sweeper.resample.cv.k`) | inner + outer rows |
+| **1 config** (no free vars, has resample) | **flat single-level CV on all data** — a different, cheaper path (a plain k-fold of the one config on the FULL dataset, not the nested subset-sweep). NB: this inner-CV is on all data, whereas a config inside a multi-config nested sweep is measured on the `analysis_i` subset — different data, so don't claim "identical signal" | inner rows |
 | **bare experiment** (no sweeper) | run the steps as-is | — |
 
-The nested run **records the whole thing to the ledger** (today it records NOTHING): per-`(outer-fold,
-config)` **inner-CV** rows AND per-`(outer-fold, family)` **outer-CV** rows (each = that fold's family
-inner-winner + its outer-held-out score), **level/fold-marked so the two never collide**. Family is
-DERIVED from the recorded `train.model` free-param (`FamilyOf`) — no new family column. Per-family honest
-estimate = `mean ± SE` over the outer folds of that family's outer scores.
+- **`metis run --fast`** = one outer fold (outerK=1) instead of `sweeper.resample.cv.k`: one sealed inner
+  sweep on `analysis_0` + one holdout scoring ≈ **~1/5 the cost**, and gives an **honest single-point**
+  per-family holdout number (no SE — one fold). Replaces a naive `--inner-only`: same cost, but honest.
+  For iteration; the full nested pass is what you run before selecting/shipping (where the SE-based family
+  rule applies). Mechanically the outer-fold count is a run knob (default = `sweeper.resample.cv.k`,
+  `--fast` = 1; room for a general `--outer-folds N` later).
+
+**Ledger recording (C2 — the one substantial new backend piece; today the nested path records NOTHING).**
+The `ledger.Row` gains a **`Level` discriminant** (`inner` | `outer`) **and an outer-fold coordinate**, and
+BOTH must enter the dedup/group **key** (a column alone does not prevent collision):
+- **inner rows**: per `(outer-fold, config, inner-fold)` — the sealed inner-CV fold scores (keyed by
+  `config × outer-fold × inner-fold × Level=inner`).
+- **outer rows**: per `(outer-fold, family-winner-config)` — that fold's family inner-winner + its
+  outer-held-out score (keyed by `config × outer-fold × Level=outer`).
+
+Without the `Level` in the key, an inner row and the outer row for the same winning-config+fold share
+`(fingerprint, free-params, fold)` and `AggregateView` would **average the inner subset-score with the
+outer held-out score** — the exact collision C2 exists to prevent.
+
+**Two reductions, not one.** `AggregateView` (groups by exact free-params) stays for the **config/inner**
+side. The **per-family honest estimate needs a NEW reducer** that groups the *outer* rows by
+`FamilyOf(free-params)` (a family's winner *differs* across outer folds → different free-params → they'd
+never group under `AggregateView`) and reduces the outer score over the outer folds → per-family
+`mean ± SE`. Family is derived (`FamilyOf`), but the *grouping key* is the family, not the raw config.
 
 **2. `metis select <shape> [--best | --best-per-model-class] [--promote]`** — new top-level command;
 **retires `metis ledger select` + `metis promote`**.
 - Reduces the ledger: **family** from the outer rows, **config-within-family** from the inner rows.
-- **Family rule:** among families whose honest mean is within **1 SE of the best family's mean**, pick the
-  **lowest-SE** one (documented tiebreak; not over-designed — revisit only if real runs show families
-  tying). NOT a static family-complexity order — class complexity isn't statically orderable (a
-  regularized gbm can use fewer effective params than a deep rf), so a static order just smuggles
-  cross-family complexity comparison back in.
+- **Family rule (NEW code over the outer rows — do NOT reuse `SweepResult.Ship`, which is the cross-family
+  inner-argmax that overfits, the exact behavior #32 replaces; only `SelectConfigs.PerFamily` is reused,
+  for the config-within-family pick):** among families whose honest mean is within **1 SE of the best
+  family's mean**, pick the **lowest-SE** one (documented tiebreak; not over-designed — revisit only if real
+  runs show families tying). NOT a static family-complexity order — class complexity isn't statically
+  orderable (a regularized gbm can use fewer effective params than a deep rf), so a static order just
+  smuggles cross-family complexity comparison back in. (Under `--fast`: one fold → no SE → the rule degrades
+  to argmax-mean over the single honest holdout; `select` says so.)
 - **Config rule (within family):** inner CV + `sweeper.objective.select` (the metis#19 rule, e.g. pct-loss).
 - **`--best`** → single ship rec. **`--best-per-model-class`** → one pick per family (the metis#22 seam).
 - **Dry (no `--promote`):** print the selected config(s) + per-family honest `mean±SE` + the honesty caveat.
-- **`--promote`:** for each selected config, **reconstruct it from the ledger** (never a pre-materialized
-  winner) and run it in **ship mode — `data + pipeline + ship`, fit on ALL data, no CV → `submission.csv`**,
-  into `runs/best-{family}-{hash}/`. **Prints the run ids** (the handles for `kaggle submit`). Config always
-  reconstructed from the ledger → no committed winner `.md`, no `--point` selector (retires that friction).
+- **`--promote`:** for each selected config, **reconstruct it from the ledger** (config free-params from the
+  ledger row; the `data`/`pipeline`/`ship` steps from the shape `.md` `select` already has) via the existing
+  pure `shapeConfigToExperiment` (all-data fit = no `_fold` injected) → run it in **ship mode — `data +
+  pipeline + ship`, fit on ALL data, no CV → `submission.csv`**, into `runs/best-{family}-{hash}/`. **Prints
+  the run ids** (the handles for `kaggle submit`). Config always reconstructed from the ledger → no committed
+  winner `.md`, no `--point` selector (retires that friction). **Error** if the shape's `ship:` is empty
+  (today `shipWinner` silently no-ops — but `--promote` promises a `submission.csv`). NB: `best-{family}-{hash}`
+  makes the run **dir name ≠ point-address** (reversing metis#27's "dir name IS the identity" for auto-named
+  single runs) — fine as a human handle; `record.json` still carries the true point_address.
 
 **3. `kaggle submit --run best-{family}-{hash}`** → uploads that run's `submission.csv` (+ slug from
 `record.json`). Never runs the pipeline.
@@ -95,13 +123,14 @@ shape* and needs its `ship` steps) — so it lives in the sweep shape but `metis
 
 **Workflow:**
 ```
-metis run titanic-sweep.md                              # nested CV → ledger (inner + outer rows)
+metis run titanic-sweep.md --fast                       # iterate: one outer fold, ~1/5 cost, honest single-point
+metis run titanic-sweep.md                              # decide: full nested CV → ledger (inner + outer rows)
 metis select titanic-sweep.md --best                    # dry: print the pick + honest mean±SE + caveat
 metis select titanic-sweep.md --best-per-model-class --promote   # reconstruct + ship each on ALL data →
                                                         #   runs/best-{family}-{hash}/submission.csv (prints ids)
 kaggle submit --run best-rf-{hash}
 ```
-metis#31's parallelism makes the nested `run` affordable — the reason it was sequenced first.
+metis#31's parallelism makes the full nested `run` affordable — the reason it was sequenced first.
 
 **Honesty caveat (reported, not hidden).** The *selected family's* honest estimate is mildly optimistic — a
 1-SE pick over ~3 families, ~0.01 upward bias (NOT a per-config claim — the shipped config has no outer
@@ -114,25 +143,41 @@ surfaces the caveat alongside the number.
 `workshop/lessons.md` footgun). `select` errors sharply if the ledger lacks the rows it needs (e.g. a
 non-sweep ledger with no outer rows) rather than nil-deref.
 
-**Scope.** IN #32: the nested-run ledger recording (inner+outer, level-marked); the derived run mode +
-`driver:`-drop; `metis select` (the select+promote merge, reconstruct-and-ship); the family rule; the
-caveat. OUT (separate issues): the **repo-root-relative path key** (metis#34). COMPOSES with: metis#19
-(intra-family, unchanged), metis#23 (the estimator this extends + records), metis#22 (consumes
-`--best-per-model-class`), metis#33 (GBM's own overfit — orthogonal).
+**Breaking change (state it, don't hide it).** `metis run` **no longer auto-ships** — today the flat
+`driver: single` path selects AND ships the winner (`sweep.go` `shipWinner`); under #32 `run` only measures,
+and ALL shipping moves to `select --promote`. Justified: the auto-shipped argmax winner IS the overfitter
+#32 exists to stop shipping; `--fast` preserves cheap iteration. **Migration surface** (delete `driver:` +
+rewire): the CUE schema `construct/vocabulary/experiment.cue` (the `driver` field); two shape files
+(`testdata/experiment/titanic-baseline-shape.md`, `kbench …/titanic-sweep.md`, both `driver: single`); the
+four `sh.Driver.CV`/`Driver.Single` reads in `cmd/metis/sweep.go` → `sweeper.resample.cv`; `kbench …
+/RUNBOOK-sweep.md` (§§1–4 + the "edit `driver:` to `cv`" honest-estimate flow — all rewritten to
+`run`/`select --promote`/`--fast`); and the tests asserting the retired behavior (`TestShapeSweep_ShipsWinner`,
+`TestNestedCV_ProducesHonestEstimateNoShip` — which asserts the nested path records *nothing*, the exact
+inverse of the new contract — + `ledger_cmd_test.go`/`select_cmd_test.go` for the retired `ledger select`+`promote`).
+One-time: deleting `driver:` changes every shape's blob-hash once (invalidates cached run dirs — regenerable).
+
+**Scope.** IN #32: the nested-run ledger recording (inner+outer, `Level`-keyed); the derived run mode +
+`--fast` + `driver:`-drop + migration; `metis select` (the select+promote merge, reconstruct-and-ship, the
+family reducer); the family rule; the caveat. OUT (separate issues): the **repo-root-relative path key**
+(metis#34). COMPOSES with: metis#19 (intra-family, unchanged), metis#23 (the estimator this extends +
+records), metis#22 (consumes `--best-per-model-class`), metis#33 (GBM's own overfit — orthogonal).
 
 ## Done when
 
-- **`metis run` on a sweep records the full nested CV to the ledger** — per-`(outer-fold, config)` inner-CV
-  rows + per-`(outer-fold, family)` outer-CV rows, level/fold-marked so inner and outer rows for the same
-  config+fold don't collide (today the nested path records nothing). A no-free-var shape degenerates to a
-  single-level CV automatically (hermetic test).
-- **`metis select <shape>`** reduces those → per-family honest `mean±SE`; **`--best`** applies the
-  lowest-SE-within-1-SE family rule + inner-CV config choice; **`--best-per-model-class`** reports per family;
+- **`metis run` on a sweep records the full nested CV to the ledger** — per-`(outer-fold, config, inner-fold)`
+  inner rows + per-`(outer-fold, family-winner)` outer rows, with a **`Level` discriminant + outer-fold coord
+  in the group/dedup key** so an inner row and the outer row for the same config+fold do NOT merge in
+  `AggregateView` (a hermetic collision test proves it). Today the nested path records nothing.
+- **The run mode is derived by config-count** (`>1` → nested; `==1` → flat single-level CV on all data;
+  `--fast` → outerK=1), and a hermetic test covers the 1-config degenerate path. **The `driver:` block is
+  removed** from the CUE schema + shapes; migration surface (RUNBOOK, 2 shapes, ~4 tests) updated; `ship` is
+  retained and activated by `--promote`.
+- **`metis select <shape>`** reduces the outer rows via a **`FamilyOf`-keyed reducer** (distinct from
+  `AggregateView`) → per-family honest `mean±SE`; **`--best`** applies the lowest-SE-within-1-SE family rule
+  (does NOT reuse `SweepResult.Ship`) + inner-CV config choice; **`--best-per-model-class`** reports per family;
   **`--promote`** reconstructs each config from the ledger and ships it on ALL data (`runs/best-{family}-{hash}/`),
-  printing the run ids; **retires `metis ledger select` + `metis promote`**; the family↔config join is
-  fingerprint-scoped and errors sharply when required rows are absent.
-- **The `driver:` block is removed** from the shape schema; the run mode is derived; `ship` is retained and
-  activated by `--promote`.
+  printing the run ids (errors on empty `ship:`); **retires `metis ledger select` + `metis promote`**; the
+  family↔config join is fingerprint-scoped and errors sharply when required rows are absent.
 - On a fixture cv+inner ledger, `select --best` picks the **rf** family over the **gbm** overfitter
   (hermetic gate). *(The real-Kaggle numbers — GBM 0.749 vs rf 0.79186 — are recorded evidence, not a
   runnable test.)*
@@ -188,3 +233,19 @@ caveat. OUT (separate issues): the **repo-root-relative path key** (metis#34). C
   - **Verbs:** `metis run` (kept, not `metis sweep`) / `metis select` / `kaggle submit` — three commands.
   - Spec `## Spec` rewritten to this model; the C2 ledger extension (inner+outer rows, level-marked) is the
     one substantial new backend piece — everything else reassembles existing parts.
+- **Spec review round 2 (fresh-eyes) + fixes folded — spec now plannable.** C1 confirmed dissolved. Fixes:
+  - **C2 made concrete:** a `Level` (+ outer-fold coord) discriminant enters the ledger group/dedup KEY
+    (a column alone still collides); the per-family estimate uses a NEW `FamilyOf`-keyed reducer (each outer
+    fold's family-winner is a different config → `AggregateView`'s free-param grouping would never collect them).
+  - **Dispatch (I-1):** branch on `len(configs)` (1 → flat all-data single-level CV, a cheaper distinct path;
+    >1 → nested). Dropped the false "no special-casing"/"identical inner signal" framing (1-config inner CV
+    is on all data; a nested config's is on the `analysis_i` subset).
+  - **`--fast` (operator, I-2):** one outer fold — replaces a naive `--inner-only` (same ~1/5 cost, but an
+    honest single-point holdout beats the optimistic inner-CV leaderboard for the family read). Full nested
+    reserved for select/ship. Outer-fold count = a run knob (default `sweeper.resample.cv.k`, `--fast`=1).
+    Cost clarified: the 5× isn't the cheap holdout scoring — it's the outer loop re-running the sealed inner
+    sweep per fold (intrinsic to honesty). `--fast` skips the outer loop.
+  - **I-3:** the family rule is NEW code over outer rows — do NOT reuse `SweepResult.Ship` (cross-family
+    inner-argmax = the overfitter #32 replaces); only `PerFamily` is reused.
+  - **Breaking change stated:** `metis run` no longer auto-ships (shipping → `select --promote`); migration
+    surface (CUE schema, 2 shapes, RUNBOOK, ~4 tests) enumerated in Scope. Empty-`ship` guard under `--promote`.
