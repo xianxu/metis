@@ -1,10 +1,10 @@
 ---
 id: 000032
-status: codecomplete
+status: done
 deps: [metis#23]
 github_issue:
 created: 2026-07-13
-updated: 2026-07-13
+updated: 2026-07-14
 estimate_hours: 4.5
 started: 2026-07-13T15:52:26-07:00
 actual_hours: N/A
