@@ -48,6 +48,14 @@
 
 ---
 
+> **Boundary revision (2026-07-13, from M1 impl):** deleting `driver:` (Task 1.3) mechanically forces the
+> **no-auto-ship** change AND the **in-repo test-fixture migration** into M1 — a multi-config shape flips
+> flat-ship→nested-no-ship the instant the mode becomes config-count-derived, and ~9 inline-`driver:` test
+> fixtures break at once. So Task 2.4's "`metis run` no-auto-ship + in-repo tests" moves into M1 (Tasks
+> 1.3/1.4); **M2's Task 2.4 keeps only the genuinely-decoupled surface** — the peer-repo RUNBOOK, retiring
+> `ledger select`/`promote`, and the atlas. (See `workshop/lessons.md`: a content-address-feeding field can't
+> be milestone-split from its derived-dispatch consumers.)
+
 ## Chunk 1 — M1: the measure/record side
 
 ### Task 1.1: extend `ledger.Row` with a `Level` + outer-fold coordinate in the key
