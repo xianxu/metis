@@ -100,15 +100,15 @@ boundary review.
 
 Durable plan: `workshop/plans/000035-stage-a-one-road-fix-plan.md` (review-hardened).
 
-- [ ] Task 0 — issue revision + estimate + `sdlc change-code`
-- [ ] Task 1 — metis: `source` schema role (TDD)
-- [ ] Task 2 — metis: outer-split carries `test` (TDD)
-- [ ] Task 3 — kbench: adapt carries source columns (TDD)
-- [ ] Task 4 — kbench: features reads base only (TDD)
-- [ ] Task 5 — kbench: shapes + relic deletion + RUNBOOK + atlas shadow-sweep
-- [ ] Task 6 — un-xfail nested smoke e2e; full e2e green
-- [ ] Task 7 — real honest-beat run (operator: kaggle submit)
-- [ ] Task 8 — close out (atlas, PR + sdlc merge, close, lessons)
+- [x] Task 0 — issue revision + estimate + `sdlc change-code`
+- [x] Task 1 — metis: `source` schema role (TDD)
+- [x] Task 2 — metis: outer-split carries `test` (TDD)
+- [x] Task 3 — kbench: adapt carries source columns (TDD)
+- [x] Task 4 — kbench: features reads base only (TDD)
+- [x] Task 5 — kbench: shapes + relic deletion + RUNBOOK + atlas shadow-sweep
+- [x] Task 6 — un-xfail nested smoke e2e; full e2e green
+- [x] Task 7 — real honest-beat run (operator: kaggle submit)
+- [x] Task 8 — close out (atlas, PR + sdlc merge, close, lessons)
 
 ## Revisions
 
