@@ -5,7 +5,7 @@ deps: []
 github_issue:
 created: 2026-07-14
 updated: 2026-07-14
-estimate_hours: 5
+estimate_hours: 1.74
 started: 2026-07-14T07:43:17-07:00
 ---
 
@@ -63,6 +63,28 @@ Two entangled concerns to resolve (brainstorm-first):
   cross-fit — the original "fit_mask at both levels" framing was wrong.)
 - The real honest-beat ran: `metis run titanic-sweep.md` → `select --best --promote` → operator
   submit; numbers recorded in the issue Log + project file (closes the metis-v2 `done_when`).
+
+## Estimate
+
+Derived per estimate-logic-v3.1 (design from v2 table with the thorough-plan 15% buffer;
+impl at 40% of v2 ranges). Design is low across the board — the plan doc pre-resolves the
+decisions; the two metis changes and adapt are well-specced module extensions; features is the
+multi-file signature refactor (12 call sites, 2 non-mechanical); docs sweep spans two repos'
+atlases; the e2e/honest-beat runs are the real-API operational budget; one boundary review.
+
+```estimate
+model: estimate-logic-v3.1
+familiarity: 1.0
+item: smaller-go-module        design=0.1 impl=0.2
+item: smaller-go-module        design=0.1 impl=0.2
+item: cross-cutting-refactor   design=0.2 impl=0.2
+item: atlas-docs               design=0.1 impl=0.05
+item: atlas-docs               design=0.1 impl=0.05
+item: real-api-discovery       design=0.0 impl=0.2
+item: milestone-review         design=0.0 impl=0.15
+design-buffer: 0.15
+total: 1.74
+```
 
 ## Plan
 
