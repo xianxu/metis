@@ -5,7 +5,7 @@ deps: []
 github_issue:
 created: 2026-07-14
 updated: 2026-07-14
-estimate_hours: 1.74
+estimate_hours: 2.05
 started: 2026-07-14T07:43:17-07:00
 ---
 
@@ -77,14 +77,24 @@ model: estimate-logic-v3.1
 familiarity: 1.0
 item: smaller-go-module        design=0.1 impl=0.2
 item: smaller-go-module        design=0.1 impl=0.2
+item: smaller-go-module        design=0.1 impl=0.2
 item: cross-cutting-refactor   design=0.2 impl=0.2
 item: atlas-docs               design=0.1 impl=0.05
 item: atlas-docs               design=0.1 impl=0.05
 item: real-api-discovery       design=0.0 impl=0.2
 item: milestone-review         design=0.0 impl=0.15
 design-buffer: 0.15
-total: 1.74
+total: 2.05
 ```
+
+Item→task mapping: smaller-go-module ×3 = Tasks 1 (schema role), 2 (outer-split), 3 (adapt);
+cross-cutting-refactor = Task 4 (features signature, 12 call sites); atlas-docs ×2 = Task 5
+(kbench shapes/RUNBOOK/atlas) + Task 8's metis atlas; real-api-discovery = Tasks 6–7 (e2e +
+honest-beat operational, incl. the STOP-and-diagnose slack); milestone-review = the close
+boundary review.
+
+> Produced via `brain/data/life/42shots/velocity/estimate-logic-v3.1.md` against
+> `baseline-v3.1.md`. Method A only.
 
 ## Plan
 
