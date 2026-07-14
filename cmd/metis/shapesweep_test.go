@@ -304,6 +304,36 @@ func TestShapeSweep_DoesNotShip(t *testing.T) {
 	}
 }
 
+// metis#32 DEGENERATE PATH (Done-when: "a no-free-var shape degenerates to a single-level CV
+// automatically"): a shape expanding to ONE config takes the FLAT single-level CV path (not nested),
+// records its fold rows, and does NOT ship — the outer selection loop has one candidate, so there is
+// nothing to select across and nested-CV reduces to a plain k-fold measure of the one config.
+func TestShapeSweep_OneConfigDegeneratesToSingleLevelCV(t *testing.T) {
+	ws := t.TempDir()
+	expPath := writeShapeFile(t, ws, foldShapeShipMD("[a]")) // 1 model → 1 config; ship phase present but must NOT run
+	var out strings.Builder
+	if err := runFoldSweep(t, expPath, false, nil, &out, nil); err != nil {
+		t.Fatalf("1-config single-level CV should run: %v", err)
+	}
+	// Flat path, not nested: the log says "single-level CV", never "nested-CV".
+	if s := out.String(); !strings.Contains(s, "single-level CV") {
+		t.Errorf("a 1-config shape must run the flat single-level CV path; got:\n%s", s)
+	}
+	if strings.Contains(out.String(), "nested-CV") {
+		t.Errorf("a 1-config shape must NOT run nested-CV; got:\n%s", out.String())
+	}
+	// It RECORDS its fold rows (measure) ...
+	led := loadLedgerOrFatal(t, expPath)
+	if len(led.Rows) == 0 {
+		t.Error("the flat single-level CV path must record its fold rows to the ledger")
+	}
+	// ... and does NOT ship (shipping is `metis select --promote`), even though `ship:` is present.
+	shipSteps, _ := filepath.Glob(filepath.Join(ws, "runs", "*", "submission"))
+	if len(shipSteps) != 0 {
+		t.Errorf("the flat path must NOT ship; got %d submission runs", len(shipSteps))
+	}
+}
+
 // Fold-distinctness + cache under NESTED (metis#32): each (outer-fold, config, inner-fold) of
 // `train` gets a DISTINCT cache entry (the _fold overlay makes Kpre fold-distinct), the
 // config/fold-invariant data steps HIT, and a warm re-run HITs everything (0 inner execs).

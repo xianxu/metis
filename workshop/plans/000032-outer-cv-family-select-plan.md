@@ -12,6 +12,10 @@
 
 ---
 
+## Revisions
+
+- **2026-07-13 (M1 boundary review, FIX-THEN-SHIP → fixed):** Core-concepts drift recorded — `runModeFor(shape)` was **inlined** as `nested := len(configPts) > 1` (`sweep.go:204`), not extracted (a one-liner didn't warrant a function); `FamilyEstimate` landed in **`cmd/metis/family.go`** (per Task 1.2's allowance to keep `pkg/ledger` free of a `sampler` import), not `pkg/ledger`. Fixed the two Important findings: the **1-config degenerate test** (`TestShapeSweep_OneConfigDegeneratesToSingleLevelCV`) now satisfies the Done-when; the **stale `driver:` docs** corrected now (datatype `experiment-shape.md` run-mode section rewritten; the atlas `driver:cv` "writes NO ledger" claim — inverted by M1 — fixed in `atlas/experiment.md` + `atlas/index.md`; the full run/select atlas rewrite stays in M2 with `metis select`). Deferred **Minors** (non-blocking, for M2 or a cleanup): extract a shared `errLatch` (`runNestedCV` inlines what `sweepPass.setErr` provides); `reportWinner` reuse `sortedFamilies`; the `outer-split` preamble run isn't in `man.Points` so its code-closure isn't captured (pre-existing #23 property, now that the nested path writes a ledger). **M2 must re-add** `TestSelectPromote_ShipRunIsCodeCaptured` (the ship-capture invariant moved off `metis run`).
+
 ## Core concepts
 
 ### Pure entities

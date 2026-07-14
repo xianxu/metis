@@ -147,17 +147,20 @@ wrapped by **thin step-executables** honoring the contract above. Hermetic via *
   into `StepContext.read_root`. **Deferred (documented):** syscall-level airtightness (rogue
   non-`metis.io` opens, parquet-via-C bypass of the audit hook) — the airtight version is a
   syscall sensor swap. Pairs with the **L1 structural** seal (`outer-split` subset dirs).
-- **`driver:cv` nested-CV outer driver (metis#23) — `cmd/metis/sweep.go`:** `runNestedCV` wraps
+- **Nested-CV (metis#23; derived, records — metis#32) — `cmd/metis/sweep.go`:** `metis run` on a
+  `>1`-config sweep runs nested CV (the mode is now DERIVED by config-count — the shape `driver:` field
+  was removed in #32; outer folds = `sweeper.resample.cv.k`, or 1 under `--fast`). `runNestedCV` wraps
   the black-box sweeper in an OUTER resample (the pure `sampler.CVDriver` over the unchanged `Run`
   loop). Preamble (`materializeOuterAnalysis`) runs `{data + outer-split(k=outerK)}` once →
   `analysis_i/` dirs. Per outer fold (`runOuterFold`): (a) a **sealed** sweep (`runSweeper` repointed
-  at `analysis_i`, `readRoot`=analysis_i abs → L1+L2) selects a winner — `GuardComplexity` runs here
-  too, so a parsimony rule + non-reporting model is rejected exactly as on the flat path (not silently
-  mis-selected); (b) refit-and-score that winner as a full-data fold at the OUTER k, held=i
-  (post-selection → unconfined; `cv_folds` determinism reproduces `analysis_i`'s partition).
-  `Aggregate` → **mean±SE**, the honest procedure estimate (`reportEstimate`). Ships **NO** winner
-  (estimation ≠ selection; ship via `driver:single`). Estimation-only ⇒ writes no grouped
-  manifest/ledger/code-side-ref (deliberate — no winner to reproduce). Honesty of the score-over-full-data
+  at `analysis_i`, `readRoot`=analysis_i abs → L1+L2) selects per-family winners — `GuardComplexity` runs
+  here too, so a parsimony rule + non-reporting model is rejected exactly as on the flat path (not silently
+  mis-selected); (b) refit-and-score **each family's inner-winner** as a full-data fold at the OUTER k,
+  held=i (post-selection → unconfined; `cv_folds` determinism reproduces `analysis_i`'s partition).
+  `Aggregate` → **mean±SE**, the honest procedure estimate (`reportEstimate`). **metis#32:** the run now
+  **records** per-`(outer-fold, config)` inner rows + per-`(outer-fold, family)` outer rows to the ledger
+  (`Level`-keyed) — the signal `metis select` reduces to pick the family. `metis run` **measures only,
+  never ships** (shipping moved to `metis select --promote`). Honesty of the score-over-full-data
   refit holds while features are stateless; stateful features (metis#20) inherit fold-safety via the
   fold-expressed score run.
 - **Parallel batch executor (metis#31) — `pkg/sampler/exec.go` + `cmd/metis/{exec,run,sweep}.go`:**

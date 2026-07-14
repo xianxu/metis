@@ -75,15 +75,19 @@ objective+select that turns per-config `(mean, SE)` into the winner.
     the single ship pick is `argmax-mean` *across* the per-family winners. A **bare scalar**
     (`select: argmax-mean`) is now rejected — always use the `{rule: {params}}` form.
 
-### The `driver` block (outer Sampler — the honest evaluator, optional in spirit)
+### The run mode (derived — no `driver:` block; **metis#32**)
 
-Exactly one mode:
+The `driver:` block was **removed** in metis#32. The outer evaluator is no longer a declared shape field;
+`metis run` **derives** the mode from the shape (a branch on config-count), and always **measures** (never
+ships — shipping moved to `metis select --promote`):
 
-- `single: {}` — the degenerate outer Sampler (M1a): fit the sweeper on all data, ship the winner. No
-  honest procedure estimate.
-- `cv: {k, stratify?}` — nested-CV: run the sweeper on each outer-train, score the sealed outer-test,
-  aggregate → the honest procedure estimate (ships **no** winner). **metis#23** — accepted at validate
-  with `k>=2`.
+- **`>1` config (a sweep)** → **nested CV** (outer × inner; outer folds = `sweeper.resample.cv.k`) →
+  records per-`(outer-fold, config)` inner rows + per-`(outer-fold, family)` outer rows to the ledger.
+- **`1` config** → a flat single-level CV on all data → inner rows.
+- **`metis run --fast`** → one outer fold (a 1/k holdout — cheap honest single-point for iteration).
+
+(The *sampler-level* `CVDriver`/`SingleDriver` fold nodes in `pkg/sampler` still exist — they're the
+runtime outer node the `Run` loop instantiates; only the *shape* `driver:` field is gone.)
 
 ### The `$`-descriptor algebra (in `pipeline` `with` leaves)
 
