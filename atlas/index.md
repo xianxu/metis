@@ -35,15 +35,13 @@ identical on a non-Kaggle platform?* — if yes, it lives here.
   reduces them read-time → per-config `(mean, SE)` (`<metric>{,.se,.n}`) — the leaderboard `ledger show
   --sort` and `promote` sort over (metis#19's 1-SE select re-reduces the same rows, no re-run). A v1
   non-fold row passes through untouched (idempotent). **`metis ledger show <shape> [--fingerprint|--sort|--top]`**
-  renders sorted/filtered views. **`metis promote <shape> (--best|--point 'k=v') --name X`** aggregates the
-  raw fold rows to per-config `(mean,SE)` FIRST (so both `--best` and `--point` promote a *config* by its
-  honest estimate, not one fold's row), then reconstructs the winner as a runnable experiment (pure
-  `promotedExperiment` — re-expands the shape + matches by free-params, reusing `shapeConfigToExperiment`:
-  `data ++ pipeline(config, all-rows) ++ ship`, **no cv-split** — the ship needs no CV) with a
-  `promoted_from` back-link + the honest `sweep_estimate: <metric> mean=… se=… n=…` (the inner-CV estimate
-  the winner was selected on, NOT a resubstitution number), committed at its code SHA (warns if dirty).
-  Round-trip: the promoted experiment parses + validates + re-runs. Immutability is by per-row snapshot
-  (each row is self-contained, so a shape-space edit can't invalidate old rows).
+  renders sorted/filtered views. **metis#32 retired `metis ledger select` + `metis promote`** — selection
+  moved to **`metis select <shape> [--best | --best-per-model-class] [--promote]`** (see the run/select
+  command model below): it reads the nested-CV ledger, picks the FAMILY on the honest OUTER estimate + the
+  CONFIG on the inner CV, and `--promote` reconstructs the winner (the pure `promotedExperiment` —
+  re-expands the shape + matches by free-params, reusing `shapeConfigToExperiment`: `data ++
+  pipeline(config, all-rows) ++ ship`, **no cv-split**) and runs it on ALL data into
+  `runs/best-{family}-{hash}/submission.csv`, printing the id for `kaggle submit --run`.
   **The side-ref dirty-code capture** (`cmd/metis/capture.go`): the shared `captureRunCode` collects a
   run's code closure (`git hash-object -w`s each file) and, if any is dirty/untracked, commits it to a
   side ref (parented on HEAD, GC-protected) — a real code SHA even for a dirty run — then backfills the
@@ -94,10 +92,12 @@ identical on a non-Kaggle platform?* — if yes, it lives here.
   fold by `train` (`fold_fit` fits once for both score + complexity),
   reduced by `Aggregate`. **`GuardComplexity`** rejects a parsimony rule when any swept family lacks measured
   complexity (post-fold, pre-selection — a silently-dropped axis → a quietly-wrong winner). `SelectConfigs`
-  has **two consumers** (ARCH-DRY): the in-memory `GridConfigs.Done` (the shipped `Winner`) and the offline
-  **`metis ledger select --rule R`** (`select_cmd.go` — re-selects over the cached ledger with no re-run,
-  matching each aggregate row to its Expanded `Point` so `FamilyOf` keys families identically). The real
-  acceptance: `pct-loss` recovers rf md=4 (cx ~15) over argmax-mean's md=8 (cx ~66) on the 891-row Titanic. `Winner` carries the **resolved
+  has **two consumers** (ARCH-DRY): the in-memory `GridConfigs.Done` (the per-family `Winner`s) and the
+  offline **`metis select`** (`select_cmd.go`, metis#32 — the config-within-family reduce over the cached
+  ledger's inner rows, matching each aggregate row to its Expanded `Point` so `FamilyOf` keys families
+  identically). metis#32 adds the CROSS-family choice on top: `FamilyEstimate` (a FamilyOf-keyed reduce over
+  the OUTER rows) + `sampler.FamilySelect` (lowest-SE-within-1-SE) — NOT `SweepResult.Ship`'s cross-family
+  inner-argmax (the overfitter #32 replaces). `Winner` carries the **resolved
   config `Point`** (its per-step `With` + free-params) + its `Family` as reconstructable run-keys → ship/promote
   rebuild the exact run DIRECTLY, not by re-expanding the grid. The **driver** is `cmd/metis`: `metis run` on an experiment-shape
   drives the real three-level loop (`runShapeSweep`: `Run(SingleDriver) ⊃ Run(GridConfigs) ⊃
