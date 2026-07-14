@@ -3,8 +3,8 @@
 An experiment is a git-tracked, declarative **pipeline of steps** — *issue-shaped*: schematized
 frontmatter (the machine-executable pipeline + config) over a freeform body (hypothesis + prose).
 It is **immutable input** (#13): a run never writes back into the `.md` — run history lives in
-`runs/<id>/record.json` + the `.ledger.csv` sidecar (browse via `metis ledger show`; apply the
-sweeper's two-level select rule offline via `metis ledger select --rule R`, #19), so a
+`runs/<id>/record.json` + the `.ledger.csv` sidecar (browse via `metis ledger show`; choose + ship via
+`metis select [--best|--best-per-model-class] [--promote]`, metis#32 — retired `metis ledger select`), so a
 committed config is a stable content-hash. The Go step-runner
 (`metis run <id>`, M2) executes it with **no agent in the loop**, unifying data
 reconstruction, training, and experiment tracking under one entrypoint.
@@ -147,19 +147,34 @@ wrapped by **thin step-executables** honoring the contract above. Hermetic via *
   into `StepContext.read_root`. **Deferred (documented):** syscall-level airtightness (rogue
   non-`metis.io` opens, parquet-via-C bypass of the audit hook) — the airtight version is a
   syscall sensor swap. Pairs with the **L1 structural** seal (`outer-split` subset dirs).
-- **`driver:cv` nested-CV outer driver (metis#23) — `cmd/metis/sweep.go`:** `runNestedCV` wraps
+- **Nested-CV (metis#23; derived, records — metis#32) — `cmd/metis/sweep.go`:** `metis run` on a
+  `>1`-config sweep runs nested CV (the mode is now DERIVED by config-count — the shape `driver:` field
+  was removed in #32; outer folds = `sweeper.resample.cv.k`, or 1 under `--fast`). `runNestedCV` wraps
   the black-box sweeper in an OUTER resample (the pure `sampler.CVDriver` over the unchanged `Run`
   loop). Preamble (`materializeOuterAnalysis`) runs `{data + outer-split(k=outerK)}` once →
   `analysis_i/` dirs. Per outer fold (`runOuterFold`): (a) a **sealed** sweep (`runSweeper` repointed
-  at `analysis_i`, `readRoot`=analysis_i abs → L1+L2) selects a winner — `GuardComplexity` runs here
-  too, so a parsimony rule + non-reporting model is rejected exactly as on the flat path (not silently
-  mis-selected); (b) refit-and-score that winner as a full-data fold at the OUTER k, held=i
-  (post-selection → unconfined; `cv_folds` determinism reproduces `analysis_i`'s partition).
-  `Aggregate` → **mean±SE**, the honest procedure estimate (`reportEstimate`). Ships **NO** winner
-  (estimation ≠ selection; ship via `driver:single`). Estimation-only ⇒ writes no grouped
-  manifest/ledger/code-side-ref (deliberate — no winner to reproduce). Honesty of the score-over-full-data
+  at `analysis_i`, `readRoot`=analysis_i abs → L1+L2) selects per-family winners — `GuardComplexity` runs
+  here too, so a parsimony rule + non-reporting model is rejected exactly as on the flat path (not silently
+  mis-selected); (b) refit-and-score **each family's inner-winner** as a full-data fold at the OUTER k,
+  held=i (post-selection → unconfined; `cv_folds` determinism reproduces `analysis_i`'s partition).
+  `Aggregate` → **mean±SE**, the honest procedure estimate (`reportEstimate`). **metis#32:** the run now
+  **records** per-`(outer-fold, config)` inner rows + per-`(outer-fold, family)` outer rows to the ledger
+  (`Level`-keyed) — the signal `metis select` reduces to pick the family. `metis run` **measures only,
+  never ships** (shipping moved to `metis select --promote`). Honesty of the score-over-full-data
   refit holds while features are stateless; stateful features (metis#20) inherit fold-safety via the
   fold-expressed score run.
+- **Honest family selection (metis#32) — three commands, `run` measures / `select` chooses / `kaggle
+  submit` uploads:** `metis run` on a `>1`-config sweep records the whole nested CV to the ledger — a
+  **`Level`-keyed** `ledger.Row` (`inner` per `(outer-fold, config, inner-fold)` + `outer` per
+  `(outer-fold, family)`; `Level` enters the `AggregateView` group key so inner/outer rows for one config
+  don't merge). **`metis select`** (`cmd/metis/select_cmd.go`) reads it and chooses two-signal: the FAMILY
+  by the honest OUTER estimate — `FamilyEstimate` (`cmd/metis/family.go`, a `FamilyOf`-keyed reduce, distinct
+  from `AggregateView` because a family's winner differs across outer folds) → `sampler.FamilySelect`
+  (lowest-SE-within-1-SE; NOT `SweepResult.Ship`'s cross-family inner-argmax) — and the CONFIG-within-family
+  by the inner CV (`SelectConfigs.PerFamily`, the metis#19 rule). `--promote` reconstructs the winner
+  (`promotedExperiment`) and runs it on ALL data → `runs/best-{family}-{hash}/submission.csv`. A multi-family
+  ledger with no `outer` rows is a sharp error (never a silent inner-argmax). `metis run --fast` = one outer
+  fold (a ~1/k honest single-point for iteration). Retired `metis ledger select` + `metis promote`.
 - **Parallel batch executor (metis#31) — `pkg/sampler/exec.go` + `cmd/metis/{exec,run,sweep}.go`:**
   `Run` takes an injected `exec(batch, runPoint) []O` that runs one `Ask` batch and returns outputs
   **in batch order** (`SeqExec` serial default · `ParExec` goroutine fan-out · `ExecFor(parallel)`

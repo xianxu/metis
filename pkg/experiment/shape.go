@@ -13,18 +13,19 @@ import (
 // Shape mirrors CUE #ExperimentShape (metis#18 v2): an experiment lifted into a
 // config-space, structured into three PHASES — `data` (produced once, above the
 // resample), `pipeline` (the swept algorithm×hyperparameter atom, run per-fold),
-// and `ship` (winner-only) — plus a `sweeper` (the config-level Sampler: sampler +
-// inner resample + objective+select) and a `driver` (the outer Sampler: single | cv).
-// Each phase is a []Step DAG, reusing the experiment Step/Validate machinery rather
-// than restating the DAG (ARCH-DRY). The `$`-key value-algebra lives in the untyped
-// `with` bags (pkg/shape expands it). Supersedes the v1 flat `steps` + `sweep` shape.
+// and `ship` (winner-only, activated by `metis select --promote`) — plus a `sweeper`
+// (the config-level Sampler: sampler + inner resample + objective+select). metis#32
+// DELETED the `driver:` field: the run mode is now DERIVED from the config count
+// (`metis run` on >1 config → nested CV; ==1 → a flat single-level CV), so the outer
+// evaluator is no longer a declared knob. Each phase is a []Step DAG, reusing the
+// experiment Step/Validate machinery rather than restating the DAG (ARCH-DRY). The
+// `$`-key value-algebra lives in the untyped `with` bags (pkg/shape expands it).
 type Shape struct {
 	Header   `yaml:",inline"` // shared type/id/competition/seed/status (ARCH-DRY, mirrors CUE _meta)
 	Data     []Step           `yaml:"data"`
 	Pipeline []Step           `yaml:"pipeline"`
 	Ship     []Step           `yaml:"ship"`
 	Sweeper  Sweeper          `yaml:"sweeper"`
-	Driver   Driver           `yaml:"driver"`
 }
 
 // Sweeper is the config-level Sampler (mlr3 AutoTuner): the sampler that proposes
@@ -55,11 +56,11 @@ type Objective struct {
 	Select    Select `yaml:"select"`
 }
 
-// Select is the tagged-union select rule (metis#19) — exactly one branch is non-nil,
-// mirroring Driver's single|cv (optional pointer fields + a Go "exactly one" count check
-// in ValidateShape; each rule's param is bound to it as a sub-struct field). The parsimony
-// rules (one-std-err/pct-loss) minimize the per-config MEASURED complexity within a band,
-// tie-break by mean; argmax-mean/mean-std ignore complexity.
+// Select is the tagged-union select rule (metis#19) — exactly one branch is non-nil
+// (optional pointer fields + a Go "exactly one" count check in ValidateShape; each rule's
+// param is bound to it as a sub-struct field). The parsimony rules (one-std-err/pct-loss)
+// minimize the per-config MEASURED complexity within a band, tie-break by mean;
+// argmax-mean/mean-std ignore complexity.
 type Select struct {
 	ArgmaxMean *ArgmaxMean `yaml:"argmax-mean,omitempty"` // raw cv-max (M1a); mean only
 	OneStdErr  *OneStdErr  `yaml:"one-std-err,omitempty"` // band = 1×SE, then min-complexity
@@ -97,25 +98,6 @@ func (s Select) Kind() (string, bool) {
 	return name, true
 }
 
-// Driver is the OUTER Sampler — the honest evaluator, and it is optional. `single`
-// (the degenerate outer Sampler: fit the sweeper on all data, ship the winner) is
-// M1a; `cv` (nested-CV, the honest procedure estimate) is metis#23. Exactly one is set.
-type Driver struct {
-	Single *SingleDriver `yaml:"single,omitempty"`
-	CV     *CVDriver     `yaml:"cv,omitempty"`
-}
-
-// SingleDriver carries no config — it's the "no outer resample, ship the winner" case.
-type SingleDriver struct{}
-
-// CVDriver is the outer k-fold resample (metis#23 nested-CV): the honest procedure estimate
-// wrapping the black-box sweeper. ValidateShape accepts it with k>=2 (the M1a stub-reject was
-// removed when #23 landed the driver).
-type CVDriver struct {
-	K        int  `yaml:"k"`
-	Stratify bool `yaml:"stratify,omitempty"`
-}
-
 // ParseShape splits an experiment-shape markdown document into frontmatter + body
 // (reusing ariadne's frontmatter.Split — ARCH-DRY) and unmarshals the frontmatter into
 // a Shape. Pure: string → (Shape, error), no IO. Decodes with KnownFields(true) so an
@@ -143,8 +125,8 @@ func ParseShape(content string) (Shape, error) {
 // through Validate (unique ids across all phases, cross-phase needs-resolution, uses
 // format, acyclicity — reusing Validate, ARCH-DRY). Validating each phase in isolation
 // would wrongly reject cross-phase needs. Shape-only checks: a non-empty pipeline, a
-// sampler, a valid inner resample, a valid objective direction, exactly one select-rule
-// branch (metis#19), and exactly one driver mode (single | cv).
+// sampler, a valid inner resample, a valid objective direction, and exactly one select-rule
+// branch (metis#19). metis#32: no driver-mode check (the field is gone; mode is run-derived).
 func ValidateShape(sh Shape) error {
 	combined := Experiment{Header: sh.Header, Steps: combinedSteps(sh)}
 	combined.Type = "experiment"
@@ -178,7 +160,7 @@ func ValidateShape(sh Shape) error {
 	if d := sh.Sweeper.Objective.Direction; d != "maximize" && d != "minimize" {
 		return fmt.Errorf("shape %q: sweeper.objective.direction %q must be maximize|minimize", sh.ID, d)
 	}
-	// Exactly one select branch (mirrors the driver count check below). Params bound to
+	// Exactly one select branch. Params bound to
 	// their branch: pct-loss.tolerance > 0, mean-std.lambda >= 0.
 	if _, ok := sh.Sweeper.Objective.Select.Kind(); !ok {
 		return fmt.Errorf("shape %q: sweeper.objective.select must set exactly one of argmax-mean|one-std-err|pct-loss|mean-std", sh.ID)
@@ -189,19 +171,9 @@ func ValidateShape(sh Shape) error {
 	if m := sh.Sweeper.Objective.Select.MeanStd; m != nil && m.Lambda < 0 {
 		return fmt.Errorf("shape %q: sweeper.objective.select.mean-std.lambda must be >= 0, got %v", sh.ID, m.Lambda)
 	}
-	n := 0
-	if sh.Driver.Single != nil {
-		n++
-	}
-	if sh.Driver.CV != nil {
-		n++
-	}
-	if n != 1 {
-		return fmt.Errorf("shape %q: driver must set exactly one of single|cv, got %d", sh.ID, n)
-	}
-	if c := sh.Driver.CV; c != nil && c.K < 2 {
-		return fmt.Errorf("shape %q: driver:cv.k must be >= 2 (nested-CV needs ≥2 outer folds), got %d", sh.ID, c.K)
-	}
+	// metis#32: no `driver:` validation — the field is gone; the run mode is derived from the
+	// config count at run time (nested for >1 config, single-level CV for 1). The outer-CV fold
+	// count reuses sweeper.resample.cv.k (validated ≥2 above).
 	return nil
 }
 

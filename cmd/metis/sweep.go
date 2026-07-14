@@ -56,6 +56,11 @@ type pointRun struct {
 	Fold       int                `json:"fold"` // metis#18: the resample-fold index
 	Status     string             `json:"status"`
 	Metrics    map[string]float64 `json:"metrics,omitempty"`
+	// metis#32 nested-CV recording: Level = "" (flat single-level CV row) | "inner" (a sealed
+	// inner-CV fold row) | "outer" (a per-(outer-fold, family) held-out score). OuterFold is the
+	// outer-fold coordinate (nil on the flat path). Both propagate into the ledger.Row.
+	Level     string `json:"level,omitempty"`
+	OuterFold *int   `json:"outer_fold,omitempty"`
 }
 
 // configScore pairs an expanded config-point with its honest inner-resample estimate —
@@ -80,7 +85,16 @@ type shapeSweep struct {
 	partRef       sampler.PartitionRef
 	man           sweepManifest
 	configs       []configScore
-	parallel      bool // metis#31: >1 max-parallel ⇒ the sweeper/resample/driver batches run via ParExec
+	parallel      bool       // metis#31: >1 max-parallel ⇒ the sweeper/resample/driver batches run via ParExec
+	manMu         sync.Mutex // metis#32: guards man.Points — concurrent outer folds (ParExec) each record rows
+}
+
+// addManPoints appends a batch of manifest rows under the manifest lock (metis#32: the
+// nested run's outer folds run concurrently under ParExec, each recording its inner+outer rows).
+func (ss *shapeSweep) addManPoints(pts []pointRun) {
+	ss.manMu.Lock()
+	defer ss.manMu.Unlock()
+	ss.man.Points = append(ss.man.Points, pts...)
 }
 
 // sweepPass accumulates ONE black-box sweeper run (the sweeper ⊃ resample loop): its per-config
@@ -179,20 +193,26 @@ func runShapeSweep(o runOpts, sh experiment.Shape, now func() time.Time, out io.
 	if len(configPts) == 0 {
 		return fmt.Errorf("%s: shape %q expands to 0 configs — an empty sweep has no winner (check the pipeline's $any choices)", o.expPath, sh.ID)
 	}
+	// metis#32: the run mode is DERIVED from the config count, not a declared `driver:` field.
+	// >1 config → nested CV (the honest per-family measure); ==1 config → a flat single-level CV
+	// (the nested outer loop has one candidate, but the flat path is the cheaper distinct code —
+	// a plain k-fold of the one config on ALL data, not the nested subset-sweep). The outer folds
+	// reuse the sweeper's inner cv.k; `--fast` runs one outer fold (a 1/k holdout, ~1/k the cost)
+	// for iteration. Neither path SHIPS — `metis run` only measures; shipping is `metis select --promote`.
 	k := sh.Sweeper.Resample.CV.K
-	outerK := 0
-	if sh.Driver.CV != nil {
-		outerK = sh.Driver.CV.K
+	stratify := sh.Sweeper.Resample.CV.Stratify
+	nested := len(configPts) > 1
+	runFolds := k
+	if o.fast {
+		runFolds = 1
 	}
 	if o.dryRun {
-		if outerK > 0 {
-			// metis#23 nested-CV: ~outerK× the flat cost (outerK independent sealed sweeps +
-			// outerK refit-and-score runs); the estimate is honest, but it ships NO winner.
-			fmt.Fprintf(out, "metis: nested-CV %s — %d outer folds × (%d configs × %d inner folds) + %d refits ≈ %d×%d runs (dry run):\n",
-				sh.ID, outerK, len(configPts), k, outerK, outerK, len(configPts)*k)
-			fmt.Fprintf(out, "  (driver:cv estimates the tune-then-fit procedure — NO shippable winner; ship via driver:single)\n")
+		if nested {
+			fmt.Fprintf(out, "metis: nested-CV %s — %d outer fold(s) × (%d configs × %d inner folds) (dry run):\n",
+				sh.ID, runFolds, len(configPts), k)
+			fmt.Fprintf(out, "  (measures the honest per-family estimate + records inner/outer rows; ship via `metis select --promote`)\n")
 		} else {
-			fmt.Fprintf(out, "metis: sweep %s — %d configs × %d folds (dry run):\n", sh.ID, len(configPts), k)
+			fmt.Fprintf(out, "metis: single-level CV %s — %d config × %d folds (dry run):\n", sh.ID, len(configPts), k)
 		}
 		for i, p := range configPts {
 			fmt.Fprintf(out, "  [%d] %s\n", i, freeParamStr(p))
@@ -212,20 +232,18 @@ func runShapeSweep(o runOpts, sh experiment.Shape, now func() time.Time, out io.
 	}
 	ctx := sampler.Ctx{Seed: sh.Seed, Partition: ss.partRef}
 
-	// metis#23: driver:cv wraps the sweeper in an OUTER resample → the honest procedure estimate
-	// (produces no winner). driver:single runs the sweeper once on all data and ships its winner.
-	if outerK > 0 {
-		return ss.runNestedCV(ctx, configPts, k, outerK, shapeRunID)
+	// metis#32: >1 config → nested CV (records inner + per-family outer rows; the honest measure).
+	if nested {
+		return ss.runNestedCV(ctx, configPts, k, runFolds, stratify, shapeRunID)
 	}
 
-	fmt.Fprintf(out, "metis: sweep %s (%s) — %d configs × %d folds\n", sh.ID, shapeRunID[:12], len(configPts), k)
+	fmt.Fprintf(out, "metis: single-level CV %s (%s) — %d config × %d folds\n", sh.ID, shapeRunID[:12], len(configPts), k)
 
-	// The three-level nested fold — driver ⊃ sweeper ⊃ resample, each the SAME Sampler node
-	// (metis#18). driver:single (SingleDriver) runs the sweeper once on all data and passes
-	// its SweepResult through. The sweeper (GridConfigs) grids over configs, Done-selecting via
-	// the metis#19 rule → a per-family winner map + the cross-family ship pick; the inner
-	// FixedKFolds scores each config over k folds → (mean, SE, complexity).
-	pass := &sweepPass{ss: ss, splitK: k, stratify: sh.Sweeper.Resample.CV.Stratify, partRef: ss.partRef}
+	// The flat single-level CV path (1 config): the SingleDriver (a runtime sampler node, NOT the
+	// deleted shape `driver:`) runs the sweeper once on all data → the sweeper's inner k-fold CV
+	// scores the one config → (mean, SE, complexity) recorded to the ledger. metis#32: it MEASURES
+	// ONLY — no `shipWinner` (shipping is `metis select --promote`).
+	pass := &sweepPass{ss: ss, splitK: k, stratify: stratify, partRef: ss.partRef}
 	res := sampler.Run(ctx, sampler.SingleDriver{}, func(sampler.SinglePoint) sampler.SweepResult {
 		return ss.runSweeper(ctx, configPts, pass)
 	}, sampler.ExecFor[sampler.SinglePoint, sampler.SweepResult](ss.parallel))
@@ -263,7 +281,7 @@ func runShapeSweep(o runOpts, sh experiment.Shape, now func() time.Time, out io.
 		return err
 	}
 	ss.reportWinner(res)
-	return ss.shipWinner(res.Ship)
+	return nil
 }
 
 // configStatsOf builds the per-config stats (with each config's family) from a completed
@@ -278,37 +296,9 @@ func configStatsOf(configs []configScore) []sampler.ConfigStat {
 	return stats
 }
 
-// shipWinner runs the driver:single ship: reconstruct the winning config's runnable
-// experiment (data ++ pipeline all-rows ++ ship — NO cv-split, the refit needs no CV) DIRECTLY
-// from the Winner's resolved Point (metis#18 M1a-5 T19 — not by re-expanding the grid), refit
-// it on ALL training rows, predict, and write the submission. A no-ship shape (leaderboard-only)
-// is a clean no-op. Its run dir is content-addressed on the no-_fold config, so it's distinct
-// from the per-fold runs and re-runs cache-HIT.
-//
-// The ship captures its OWN code closure (inSweep stays false → runResolvedExperiment calls
-// captureSingleRun → refs/metis/runs/<shipRunID> + backfills its record). It must NOT ride the
-// sweep's single capture: captureSweepCode ran BEFORE the ship existed and its closure is the
-// UNION of the fold runs only (features/train/cv-split) — the ship-only steps (predict,
-// submission) aren't in it, so a dirty ship would silently lose its durable SHA (metis#14). The
-// ship is ONE run, so capturing it directly is correct + non-redundant (the inSweep optimization
-// only exists to avoid N×k redundant per-FOLD captures).
-func (ss *shapeSweep) shipWinner(w sampler.Winner) error {
-	if len(ss.sh.Ship) == 0 {
-		return nil
-	}
-	shipExp := shapeConfigToExperiment(ss.sh, w.Point)
-	shipRunID, err := pointAddressOf(shipExp, ss.shapeBlobHash)
-	if err != nil {
-		return fmt.Errorf("ship winner %s: %w", freeParamStrFromParams(w.Point.FreeParams), err)
-	}
-	run, err := runResolvedExperiment(shipExp, ss.o, shipRunID, ss.now, ss.out)
-	if err != nil {
-		return fmt.Errorf("ship winner %s (%s): %w", freeParamStrFromParams(w.Point.FreeParams), shipRunID, err)
-	}
-	fmt.Fprintf(ss.out, "metis: shipped winner %s → runs/%s/ (%s)\n",
-		freeParamStrFromParams(w.Point.FreeParams), shipRunID, run.Status)
-	return nil
-}
+// (metis#32: `shipWinner` was deleted — `metis run` no longer ships; the ship path moved to
+// `metis select --promote`, which reconstructs the honest winner via `promotedExperiment` and runs
+// it on all data. `shapeConfigToExperiment` (the all-data assembly) is now called from there.)
 
 // runNestedCV drives driver:cv (metis#23): the OUTER resample around the black-box sweeper → the
 // honest procedure estimate. A preamble materializes the k outer-analysis subset dirs ONCE; then
@@ -324,23 +314,24 @@ func (ss *shapeSweep) shipWinner(w sampler.Winner) error {
 // flat path's manifest+ledger+code-side-ref provenance (which exists to re-select/ship a winner
 // without a re-run) has no consumer here. If a durable procedure-estimate provenance is later
 // wanted (e.g. to compare estimates across code revisions), wire a thin nested manifest then.
-func (ss *shapeSweep) runNestedCV(ctx sampler.Ctx, configPts []shape.Point, innerK, outerK int, shapeRunID string) error {
-	fmt.Fprintf(ss.out, "metis: nested-CV %s (%s) — %d outer folds × (%d configs × %d inner folds)\n",
-		ss.sh.ID, shapeRunID[:12], outerK, len(configPts), innerK)
+func (ss *shapeSweep) runNestedCV(ctx sampler.Ctx, configPts []shape.Point, k, runFolds int, stratify bool, shapeRunID string) error {
+	fmt.Fprintf(ss.out, "metis: nested-CV %s (%s) — %d outer fold(s) × (%d configs × %d inner folds)\n",
+		ss.sh.ID, shapeRunID[:12], runFolds, len(configPts), k)
 
-	// Preamble: materialize the outer-analysis subset dirs ONCE (unconfined — outer-split reads
-	// the full dataset to split it). Deterministic run id → the analysis_i refs are locatable.
-	analysisRefs, err := ss.materializeOuterAnalysis(outerK)
+	// Preamble: materialize the k outer-analysis subset dirs ONCE (unconfined — outer-split reads
+	// the full dataset to split it). Always split into k dirs (a stable partition); --fast just runs
+	// fewer of them (runFolds ≤ k). Deterministic run id → the analysis_i refs are locatable.
+	analysisRefs, err := ss.materializeOuterAnalysis(k, stratify)
 	if err != nil {
 		return err
 	}
-	outerPart := sampler.PartitionRef(fmt.Sprintf("outer-cv-k%d-strat%t-seed%d", outerK, ss.sh.Driver.CV.Stratify, ss.sh.Seed))
+	outerPart := sampler.PartitionRef(fmt.Sprintf("outer-cv-k%d-strat%t-seed%d", k, stratify, ss.sh.Seed))
 
 	// metis#31: CVDriver.Ask emits all outer folds as one batch, so ParExec runs these
 	// closures concurrently — firstErr's read+write must be mutex-guarded (a set-once
 	// write racing a read is still a data race). Each outer fold has its OWN sweepPass
 	// (created in runOuterFold), so the inner fan-out is guarded there; this guards only
-	// the outer-fold error latch.
+	// the outer-fold error latch. The per-fold ledger-row recording is guarded by ss.manMu.
 	var errMu sync.Mutex
 	var firstErr error
 	setFirst := func(err error) {
@@ -355,12 +346,12 @@ func (ss *shapeSweep) runNestedCV(ctx sampler.Ctx, configPts []shape.Point, inne
 		defer errMu.Unlock()
 		return firstErr
 	}
-	est := sampler.Run(ctx, sampler.CVDriver{K: outerK, Stratify: ss.sh.Driver.CV.Stratify},
+	est := sampler.Run(ctx, sampler.CVDriver{K: runFolds, Stratify: stratify},
 		func(p sampler.OuterFoldPoint) float64 {
 			if getFirst() != nil {
 				return 0
 			}
-			score, ferr := ss.runOuterFold(ctx, configPts, innerK, outerK, analysisRefs[p.Idx], outerPart, p.Idx)
+			score, ferr := ss.runOuterFold(ctx, configPts, k, stratify, analysisRefs[p.Idx], outerPart, p.Idx)
 			if ferr != nil {
 				setFirst(ferr)
 				return 0
@@ -371,21 +362,36 @@ func (ss *shapeSweep) runNestedCV(ctx sampler.Ctx, configPts []shape.Point, inne
 	if err := getFirst(); err != nil {
 		return err
 	}
-	ss.reportEstimate(est, outerK)
+
+	// metis#32: the nested run now RECORDS (unlike metis#23's estimation-only path) — persist the
+	// inner + per-family outer rows accumulated in ss.man.Points so `metis select` can reduce them
+	// (family from the outer rows, config from the inner rows). Sort to a stable content key first
+	// (the outer folds appended concurrently under ParExec) for byte-deterministic artifacts.
+	sortPointRuns(ss.man.Points)
+	if err := writeManifest(ss.o.expPath, ss.man); err != nil {
+		return err
+	}
+	if err := captureSweepCode(ss.o, ss.man); err != nil {
+		fmt.Fprintf(ss.out, "metis: warning: code capture failed (%v) — the nested run's records are valid but not committed to a side ref\n", err)
+	}
+	if err := writeSweepLedger(ss.o.expPath, ss.man); err != nil {
+		return err
+	}
+	ss.reportEstimate(est, runFolds)
 	return nil
 }
 
 // materializeOuterAnalysis runs the nested-CV preamble ({data phase + outer-split(k=outerK)}) ONCE
 // and returns the k analysis_i refs (experiment-relative, so a sealed sweep reading one routes
 // through exp_path → confined). Unconfined (outer-split reads the full dataset to split it).
-func (ss *shapeSweep) materializeOuterAnalysis(outerK int) ([]string, error) {
+func (ss *shapeSweep) materializeOuterAnalysis(outerK int, stratify bool) ([]string, error) {
 	baseOut, baseID := baseDatasetRef(ss.sh)
 	var needs []string
 	if baseID != "" {
 		needs = []string{baseID}
 	}
 	osStep := experiment.Step{ID: outerSplitStepID, Uses: "metis/outer-split", Needs: needs,
-		With: map[string]any{"dataset": baseOut, "k": outerK, "stratify": ss.sh.Driver.CV.Stratify}}
+		With: map[string]any{"dataset": baseOut, "k": outerK, "stratify": stratify}}
 	steps := append(append([]experiment.Step{}, ss.sh.Data...), osStep)
 	exp := experiment.Experiment{Header: ss.sh.Header, Steps: steps}
 	exp.Type = "experiment"
@@ -410,54 +416,104 @@ func (ss *shapeSweep) materializeOuterAnalysis(outerK int) ([]string, error) {
 // the exp_path chokepoint — readRoot = analysis_i abs), then (b) the refit-and-score of that winner
 // on the held outer-assessment (a full-data fold run at outer-k, held=i; unconfined). Returns the
 // honest outer-fold score.
-func (ss *shapeSweep) runOuterFold(ctx sampler.Ctx, configPts []shape.Point, innerK, outerK int, analysisRef string, outerPart sampler.PartitionRef, i int) (float64, error) {
+func (ss *shapeSweep) runOuterFold(ctx sampler.Ctx, configPts []shape.Point, k int, stratify bool, analysisRef string, outerPart sampler.PartitionRef, i int) (float64, error) {
 	analysisAbs, err := filepath.Abs(filepath.Join(filepath.Dir(ss.o.expPath), analysisRef))
 	if err != nil {
 		return 0, err
 	}
 	// (a) sealed selection: the sweeper's inner-CV runs entirely within analysis_i (inner k/stratify).
-	pass := &sweepPass{ss: ss, baseRef: analysisRef, readRoot: analysisAbs, splitK: innerK,
-		stratify: ss.sh.Sweeper.Resample.CV.Stratify, partRef: ss.partRef}
+	pass := &sweepPass{ss: ss, baseRef: analysisRef, readRoot: analysisAbs, splitK: k,
+		stratify: stratify, partRef: ss.partRef}
 	sres := ss.runSweeper(ctx, configPts, pass)
 	if err := pass.firstError(); err != nil {
 		return 0, fmt.Errorf("outer fold %d sealed sweep: %w", i, err)
 	}
 	// Guard (metis#19/#23 I1): the parsimony select rule needs a measured complexity for every
 	// swept family — same guard the flat path runs before trusting its winner. Without it, a
-	// driver:cv + parsimony-select + non-reporting-model shape would SILENTLY mis-select in each
-	// outer fold (the flat path loudly rejects it), and the "honest" estimate would be computed
-	// over quietly-wrong winners. Guard per fold (complexity is only known post-fold).
+	// parsimony-select + non-reporting-model shape would SILENTLY mis-select in each outer fold.
 	if err := sampler.GuardComplexity(ss.sh.Sweeper.Objective.Select, configStatsOf(pass.configs)); err != nil {
 		return 0, fmt.Errorf("outer fold %d: %w", i, err)
 	}
-	winner := sres.Ship
 
-	// (b) refit-and-score on the held outer-assessment — post-selection, so unconfined and honest.
-	// The cv-split MUST use the OUTER k + OUTER stratify so cv_folds's determinism reproduces the
-	// exact partition outer-split materialized (else the held fold ≠ analysis_i's assessment rows).
-	scoreExp := ss.buildFoldExperiment(winner.Point, sampler.FoldPoint{Idx: i}, nil, outerK, ss.sh.Driver.CV.Stratify, outerPart)
+	// metis#32: record the sealed sweep's INNER rows (Level=inner, tagged with this outer fold).
+	of := i
+	rows := make([]pointRun, 0, len(pass.points)+len(sres.PerFamily))
+	for _, pr := range pass.points {
+		pr.Level = "inner"
+		pr.OuterFold = &of
+		rows = append(rows, pr)
+	}
+
+	// (b) score EACH family's inner-winner on the held outer-assessment — post-selection, so
+	// unconfined and leakage-free (each winner was selected SEALED within analysis_i; scoring on
+	// the held-out fold never influenced that selection). One OUTER row per family → the honest
+	// per-family measure `metis select` reduces (metis#32). The metis#23 estimate the CVDriver
+	// aggregates stays the SHIP-family's outer score (the argmax-mean procedure's honest number).
+	// The cv-split uses the OUTER k + stratify so cv_folds's determinism reproduces the exact
+	// partition outer-split materialized (else the held fold ≠ analysis_i's assessment rows).
+	shipFamily := sres.Ship.Family
+	var shipScore float64
+	for _, fam := range sortedFamilies(sres.PerFamily) {
+		w := sres.PerFamily[fam]
+		score, scoreID, status, ferr := ss.scoreOnOuterFold(w.Point, i, k, stratify, outerPart)
+		if ferr != nil {
+			return 0, fmt.Errorf("outer fold %d family %s score: %w", i, fam, ferr)
+		}
+		rows = append(rows, pointRun{
+			RunID:      scoreID,
+			FreeParams: freeParamMap(w.Point),
+			Fold:       of, // the outer fold this held-out score is on
+			Level:      "outer",
+			OuterFold:  &of,
+			Status:     status,
+			// Metrics filled read-time from the run's record.json (namespaced), like inner rows.
+		})
+		if fam == shipFamily {
+			shipScore = score
+		}
+		fmt.Fprintf(ss.out, "  outer fold %d: %s winner %s → held-out %.4f\n",
+			i, fam, freeParamStrFromParams(w.Point.FreeParams), score)
+	}
+	ss.addManPoints(rows)
+	return shipScore, nil
+}
+
+// scoreOnOuterFold refit-and-scores one config's winner on the held outer-assessment fold i (a
+// full-data fold run at outer-k; post-selection, so unconfined). Returns the held-out fold_score,
+// the run id (→ its record.json carries the namespaced metric the ledger reads), and its status.
+func (ss *shapeSweep) scoreOnOuterFold(point shape.Point, i, k int, stratify bool, outerPart sampler.PartitionRef) (float64, string, string, error) {
+	scoreExp := ss.buildFoldExperiment(point, sampler.FoldPoint{Idx: i}, nil, k, stratify, outerPart)
 	scoreID, err := pointAddressOf(scoreExp, ss.shapeBlobHash)
 	if err != nil {
-		return 0, fmt.Errorf("outer fold %d score: %w", i, err)
+		return 0, "", "", err
 	}
 	scoreOpts := ss.o
 	scoreOpts.inSweep = true
 	scoreOpts.readRoot = "" // the outer-assessment eval reads full data legitimately
 	run, err := runResolvedExperiment(scoreExp, scoreOpts, scoreID, ss.now, ss.out)
 	if err != nil {
-		return 0, fmt.Errorf("outer fold %d score (%s): %w", i, scoreID, err)
+		return 0, "", "", fmt.Errorf("%s: %w", scoreID, err)
 	}
-	fmt.Fprintf(ss.out, "  outer fold %d: winner %s → held-out score %.4f\n",
-		i, freeParamStrFromParams(winner.Point.FreeParams), run.Metrics[foldMetric])
-	return run.Metrics[foldMetric], nil
+	return run.Metrics[foldMetric], scoreID, run.Status, nil
+}
+
+// sortedFamilies returns the family keys of a per-family winner map in deterministic order
+// (the recording + the returned ship-score must not depend on Go's random map iteration).
+func sortedFamilies(perFamily map[string]sampler.Winner) []string {
+	fams := make([]string, 0, len(perFamily))
+	for fam := range perFamily {
+		fams = append(fams, fam)
+	}
+	sort.Strings(fams)
+	return fams
 }
 
 // reportEstimate prints the honest procedure estimate — mean±SE over the outer folds — and the
 // standing reminder that driver:cv produces NO shippable winner (estimation ≠ selection).
 func (ss *shapeSweep) reportEstimate(est sampler.MeanSE, outerK int) {
-	fmt.Fprintf(ss.out, "metis: nested-CV estimate — mean %.4f (SE %.4f) over %d outer folds — the HONEST procedure estimate\n",
+	fmt.Fprintf(ss.out, "metis: nested-CV estimate — mean %.4f (SE %.4f) over %d outer fold(s) — the HONEST procedure estimate (argmax-mean family)\n",
 		est.Mean, est.SE, outerK)
-	fmt.Fprintf(ss.out, "  (driver:cv estimates the tune-then-fit procedure and ships NO winner; ship the config via driver:single)\n")
+	fmt.Fprintf(ss.out, "  (per-family honest estimates recorded to the ledger; choose + ship via `metis select --best --promote`)\n")
 }
 
 // runPipelineFold runs ONE (config, fold) point: build its per-fold experiment (data +

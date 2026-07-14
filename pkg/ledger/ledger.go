@@ -37,8 +37,20 @@ type Row struct {
 	CodeFingerprint string // metis#27: the run's realized code identity (over its D closure)
 	PointAddr       string // the metis#3 point INTENT-address — half the dedup identity
 	Fold            *int   // metis#18: the resample-fold index (nil = not a per-fold row)
-	Metrics         map[string]float64
-	Status          string // "ok" | "failed"
+	// metis#32 nested-CV recording: Level discriminates the two ledger levels a nested run
+	// writes — "" (a v1 flat / single-level row), "inner" (a sealed inner-CV fold row), or
+	// "outer" (a per-(outer-fold, family) held-out score). Level MUST enter the AggregateView
+	// group key: an inner row and the outer row for the same winning config+fold otherwise
+	// share (fingerprint, free-params, fold) and get averaged together (a subset inner score
+	// blended with an outer held-out score) — the collision metis#32's recording must prevent.
+	Level string
+	// OuterFold is the nested outer-fold coordinate (metis#32): recorded for provenance +
+	// the FamilyEstimate reducer's fold count. A COLUMN, not part of the group/dedup key —
+	// inner/outer rows already differ by PointAddr (distinct content-addresses), and inner
+	// rows POOL across outer folds by design (the pooled inner-CV config-selection signal).
+	OuterFold *int
+	Metrics   map[string]float64
+	Status    string // "ok" | "failed"
 }
 
 // Ledger is an ordered, append-only set of rows (CSV-backed by the caller).
@@ -85,18 +97,29 @@ const (
 // view (Decode → Filter/TopN), never a storage concern — the file stays append-order.
 func Encode(l Ledger) ([]byte, error) {
 	fpCols, metricCols := unionColumns(l.Rows)
-	// The `fold` column is present only when ≥1 row carries a fold coordinate (a per-fold
-	// sweep) — so a v1-shaped ledger (no folds) stays byte-identical (ragged, ARCH-DRY).
-	hasFold := false
+	// The `fold`/`level`/`outer_fold` columns are present only when ≥1 row carries them (a
+	// per-fold or nested sweep) — so a v1-shaped ledger stays byte-identical (ragged, ARCH-DRY).
+	hasFold, hasLevel, hasOuterFold := false, false, false
 	for _, r := range l.Rows {
 		if r.Fold != nil {
 			hasFold = true
-			break
+		}
+		if r.Level != "" {
+			hasLevel = true
+		}
+		if r.OuterFold != nil {
+			hasOuterFold = true
 		}
 	}
 	header := append([]string{"code_fingerprint", "point_addr", "status"}, fpCols...)
+	if hasLevel {
+		header = append(header, "level")
+	}
 	if hasFold {
 		header = append(header, "fold")
+	}
+	if hasOuterFold {
+		header = append(header, "outer_fold")
 	}
 	header = append(header, metricCols...)
 
@@ -111,11 +134,21 @@ func Encode(l Ledger) ([]byte, error) {
 		for _, c := range fpCols {
 			rec = append(rec, cell(r.FreeParams[strings.TrimPrefix(c, fpPrefix)]))
 		}
+		if hasLevel {
+			rec = append(rec, r.Level) // "" for a v1/flat row
+		}
 		if hasFold {
 			if r.Fold != nil {
 				rec = append(rec, strconv.Itoa(*r.Fold))
 			} else {
 				rec = append(rec, "") // an aggregate/non-fold row blanks the fold column
+			}
+		}
+		if hasOuterFold {
+			if r.OuterFold != nil {
+				rec = append(rec, strconv.Itoa(*r.OuterFold))
+			} else {
+				rec = append(rec, "")
 			}
 		}
 		for _, c := range metricCols {
@@ -158,9 +191,15 @@ func Decode(b []byte) (Ledger, error) {
 				row.PointAddr = rec[i]
 			case col == "status":
 				row.Status = rec[i]
+			case col == "level":
+				row.Level = rec[i]
 			case col == "fold":
 				if f, err := strconv.Atoi(rec[i]); err == nil {
 					row.Fold = &f
+				}
+			case col == "outer_fold":
+				if f, err := strconv.Atoi(rec[i]); err == nil {
+					row.OuterFold = &f
 				}
 			case strings.HasPrefix(col, fpPrefix):
 				row.FreeParams[strings.TrimPrefix(col, fpPrefix)] = parseCell(rec[i])
@@ -213,12 +252,15 @@ func AggregateView(l Ledger, metric string) Ledger {
 			continue
 		}
 		fpb, _ := json.Marshal(r.FreeParams)  // Go sorts map keys → canonical group key
-		key := r.CodeFingerprint + "|" + string(fpb) // NUL-free: an aggregate row is not a content-
-		//   address (no single point ran it) — the key is a config-grouping id, kept printable
-		//   (a \x00 separator would corrupt any consumer that renders PointAddr, e.g. promote).
+		// metis#32: Level is part of the key — an inner and an outer row sharing (fingerprint,
+		// free-params) must NOT merge (a v1 row's Level is "", so a fold-only ledger keys
+		// identically to before — back-compatible).
+		key := r.CodeFingerprint + "|" + r.Level + "|" + string(fpb) // NUL-free: an aggregate row is not a
+		//   content-address (no single point ran it) — the key is a (level, config)-grouping id, kept
+		//   printable (a \x00 separator would corrupt any consumer that renders PointAddr, e.g. promote).
 		g := groups[key]
 		if g == nil {
-			g = &agg{row: Row{FreeParams: r.FreeParams, CodeFingerprint: r.CodeFingerprint, PointAddr: key, Status: "ok"}, byMetric: map[string][]float64{}}
+			g = &agg{row: Row{FreeParams: r.FreeParams, CodeFingerprint: r.CodeFingerprint, PointAddr: key, Level: r.Level, Status: "ok"}, byMetric: map[string][]float64{}}
 			groups[key] = g
 			order = append(order, key)
 		}

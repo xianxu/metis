@@ -61,8 +61,9 @@ _pipeline: {
 // #ExperimentShape (metis#18 v2) is the experiment lifted into a config-space AND
 // structured into three phases — `data` (once, above the resample) │ `pipeline` (the
 // swept algorithm×hyperparameter atom, per-fold) │ `ship` (winner-only) — plus a
-// `sweeper` (config sampler + inner resample + objective/select) and a `driver`
-// (single | cv). The `$`-key value-algebra lives in the untyped `with` bag (value-
+// `sweeper` (config sampler + inner resample + objective/select). metis#32 dropped the
+// `driver:` field — the run mode is derived from the config count. The `$`-key
+// value-algebra lives in the untyped `with` bag (value-
 // level, NOT CUE-typed — pkg/shape expands it). Closed (no `...`) for sharp diagnostics.
 #ExperimentShape: {
 	_meta
@@ -76,7 +77,7 @@ _pipeline: {
 		objective: {
 			metric:    string
 			direction: "maximize" | "minimize"
-			select: {                        // metis#19 tagged union; exactly-one enforced in Go (like driver)
+			select: {                        // metis#19 tagged union; exactly-one enforced in Go
 				"argmax-mean"?: {}
 				"one-std-err"?: {}
 				"pct-loss"?: {tolerance: float & >0}
@@ -84,10 +85,9 @@ _pipeline: {
 			}
 		}
 	}
-	driver: {              // exactly one mode; M1a runs `single`, `cv` is metis#23
-		single?: {}
-		cv?: {k: int, stratify?: bool}
-	}
+	// metis#32: no `driver:` field — the run mode is DERIVED from the config count
+	// (`metis run` on >1 config → nested CV; ==1 → a flat single-level CV), so the outer
+	// evaluator is no longer a declared knob. The outer-CV fold count reuses sweeper.resample.cv.k.
 }
 
 // The provenance record (metis#3) — the L0 reproducibility atom, emitted as

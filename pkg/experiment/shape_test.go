@@ -12,7 +12,7 @@ import (
 
 // validShapeV2 is the canonical M1a shape: three phases with CROSS-PHASE needs
 // (features(pipeline) needs adapt(data); predict(ship) needs train(pipeline)), a
-// sweeper with an inner CV + argmax-mean select, and driver:single.
+// sweeper with an inner CV + argmax-mean select (no driver: field, metis#32).
 const validShapeV2 = `type: experiment-shape
 id: titanic-sweep
 competition: titanic
@@ -41,14 +41,12 @@ sweeper:
   sampler: grid
   resample: {cv: {k: 5, stratify: true}}
   objective: {metric: accuracy, direction: maximize, select: {argmax-mean: {}}}
-driver:
-  single: {}
 `
 
 func mdOf(fm string) string { return "---\n" + fm + "---\n\n# shape\n" }
 
-// T1: the phase-structured shape parses into Data/Pipeline/Ship + Sweeper + Driver,
-// the inner resample + select survive, driver:single is a non-nil pointer, and the
+// T1: the phase-structured shape parses into Data/Pipeline/Ship + Sweeper,
+// the inner resample + select survive, and the
 // $any descriptor survives untyped into the `with` bag for the expander.
 func TestParseShape_v2(t *testing.T) {
 	sh, err := ParseShape(mdOf(validShapeV2))
@@ -66,9 +64,6 @@ func TestParseShape_v2(t *testing.T) {
 	}
 	if sh.Sweeper.Objective.Select.ArgmaxMean == nil {
 		t.Errorf("select wrong: %+v", sh.Sweeper.Objective.Select)
-	}
-	if sh.Driver.Single == nil || sh.Driver.CV != nil {
-		t.Errorf("driver:single expected: %+v", sh.Driver)
 	}
 	feat, ok := sh.Pipeline[0].With["features"].(map[string]any)
 	if !ok || feat["$any"] == nil {
@@ -146,9 +141,6 @@ func TestValidateShape_v2(t *testing.T) {
 		"select two branches":        func(s *Shape) { s.Sweeper.Objective.Select = Select{ArgmaxMean: &ArgmaxMean{}, PctLoss: &PctLoss{Tolerance: 0.02}} },
 		"pct-loss tolerance <= 0":    func(s *Shape) { s.Sweeper.Objective.Select = Select{PctLoss: &PctLoss{Tolerance: 0}} },
 		"mean-std lambda < 0":        func(s *Shape) { s.Sweeper.Objective.Select = Select{MeanStd: &MeanStd{Lambda: -1}} },
-		"driver none":                func(s *Shape) { s.Driver = Driver{} },
-		"driver both":                func(s *Shape) { s.Driver.CV = &CVDriver{K: 5} },
-		"driver cv k<2":              func(s *Shape) { s.Driver = Driver{CV: &CVDriver{K: 1}} },
 	}
 	for name, mut := range bad {
 		s, err := ParseShape(mdOf(validShapeV2))
@@ -159,19 +151,6 @@ func TestValidateShape_v2(t *testing.T) {
 		if err := ValidateShape(s); err == nil {
 			t.Errorf("%s: expected ValidateShape to fail, got nil", name)
 		}
-	}
-}
-
-// metis#23: driver:cv (nested-CV) is now a valid driver (the M1a stub-rejection is gone) — a
-// shape with driver:cv.k >= 2 must validate.
-func TestValidateShape_AcceptsDriverCV(t *testing.T) {
-	s, err := ParseShape(mdOf(validShapeV2))
-	if err != nil {
-		t.Fatal(err)
-	}
-	s.Driver = Driver{CV: &CVDriver{K: 5}}
-	if err := ValidateShape(s); err != nil {
-		t.Errorf("driver:cv (k=5) must validate now that metis#23 landed, got: %v", err)
 	}
 }
 

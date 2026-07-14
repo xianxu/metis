@@ -205,6 +205,51 @@ func toWinner(s ConfigStat, seed int) Winner {
 	}
 }
 
+// FamilySelect picks the model FAMILY from per-family honest OUTER estimates (metis#32): among
+// families whose mean is within 1 SE of the best family's mean, the LOWEST-SE (most stable) one.
+// It deliberately does NOT reuse SweepResult.Ship (the cross-family inner-argmax that ships the
+// overfitter #32 exists to replace) — the family choice rides on the honest OUTER estimate.
+//
+// Degrades to argmax-mean when SE is unavailable (a single outer fold — `metis run --fast`). The
+// caveat states the honesty gloss: a 1-SE pick over N families is ~mildly optimistic — and it's
+// the *family's* estimate, not a per-config claim. ok=false iff est is empty.
+func FamilySelect(direction string, est map[string]MeanSE) (family, caveat string, ok bool) {
+	if len(est) == 0 {
+		return "", "", false
+	}
+	var bestFam string
+	var best MeanSE
+	for fam, ms := range est {
+		if bestFam == "" || betterMean(ms.Mean, best.Mean, direction) {
+			bestFam, best = fam, ms
+		}
+	}
+	anySE := false
+	for _, ms := range est {
+		if ms.SE > 0 {
+			anySE = true
+			break
+		}
+	}
+	if !anySE {
+		return bestFam, fmt.Sprintf("single outer fold — no SE, so argmax-mean over %d families (honest but high-variance); run the full nested `metis run` (drop --fast) for the SE-based rule", len(est)), true
+	}
+	// Band = families within 1 SE of the best family's mean; pick the lowest-SE (most stable —
+	// also penalizes inner-selection instability for free). Reuses the withinBand idiom over families.
+	width := best.SE
+	pick, pickSE := bestFam, best.SE
+	for fam, ms := range est {
+		inBand := ms.Mean >= best.Mean-width
+		if direction == "minimize" {
+			inBand = ms.Mean <= best.Mean+width
+		}
+		if inBand && ms.SE < pickSE {
+			pick, pickSE = fam, ms.SE
+		}
+	}
+	return pick, fmt.Sprintf("the selected family's honest estimate is a 1-SE pick over %d families (~mildly optimistic — the family's estimate, not the shipped config's)", len(est)), true
+}
+
 // FamilyOf reads a Point's model family — the set of tagged-sum ($any-map) branch
 // labels — off its resolved `With` bundling. A tagged sum resolves to a single-key map
 // `{label: sub}` at its step.key path (shape.Expand), so a FreeParam whose Value is the

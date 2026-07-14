@@ -128,8 +128,6 @@ pipeline:
   sampler: grid
   resample: {cv: {k: 2, stratify: false}}
   objective: {metric: train.fold_score, direction: maximize, select: {argmax-mean: {}}}
-driver:
-  single: {}
 ---
 `
 }
@@ -171,101 +169,78 @@ func runFoldSweep(t *testing.T, expPath string, cache bool, calls *[]string, out
 	return err
 }
 
-// The nested Sampler loop: the sweeper grids over 2 configs, each scored over 2 folds →
-// per-config (mean, SE), argmax-mean winner, N×k raw ledger rows. The load-bearing metis#18
-// deliverable.
+// metis#32: a multi-config shape runs NESTED (config-count dispatch). `metis run` RECORDS the whole
+// nested CV to the ledger — inner rows (Level=inner) per (outer-fold, config, inner-fold) tagged
+// with their outer fold, + one outer row (Level=outer) per (outer-fold, family) — and reports the
+// honest mean±SE estimate. It does NOT ship (that's `metis select --promote`). 2 configs (one
+// family) × 2 inner × 2 outer folds → 8 inner + 2 outer rows.
 func TestShapeSweep_NestedLoopWinnerAndLedger(t *testing.T) {
 	ws := t.TempDir()
 	expPath := writeShapeFile(t, ws, foldShapeMD("[a, b]"))
 	var out strings.Builder
 	if err := runFoldSweep(t, expPath, false, nil, &out, nil); err != nil {
-		t.Fatalf("shape sweep should run: %v", err)
+		t.Fatalf("nested sweep should run: %v", err)
 	}
 
-	// 2 configs × 2 folds = 4 per-fold runs, each in its own content-addressed run dir.
-	runDirs, _ := filepath.Glob(filepath.Join(ws, "runs", "*"))
-	if len(runDirs) != 4 {
-		t.Errorf("2 configs × 2 folds should produce 4 distinct per-fold run dirs, got %d", len(runDirs))
-	}
-
-	// The manifest records all 4 (config, fold) points with their fold coordinate.
-	man := readSweepManifest(t, ws)
-	if len(man.Points) != 4 {
-		t.Fatalf("manifest should list 4 per-fold points, got %d", len(man.Points))
-	}
-	folds := map[int]int{}
-	for _, p := range man.Points {
-		folds[p.Fold]++
-	}
-	if folds[0] != 2 || folds[1] != 2 {
-		t.Errorf("each of the 2 folds should appear for both configs; got fold counts %v", folds)
-	}
-
-	// The ledger sidecar holds the RAW per-fold rows; AggregateView reduces to per-config
-	// (mean, SE): config b (0.90, 0.92 → 0.91) beats config a (0.80, 0.82 → 0.81).
 	led := loadLedgerOrFatal(t, expPath)
-	if len(led.Rows) != 4 {
-		t.Fatalf("ledger should hold 4 raw per-fold rows, got %d", len(led.Rows))
-	}
+	var nInner, nOuter int
 	for _, r := range led.Rows {
-		if r.Fold == nil {
-			t.Errorf("a swept ledger row must carry a fold coordinate; got %+v", r)
-		}
-		// metis#27: the code_fingerprint must reach the PERSISTED row via the real
-		// runShapeSweep orchestration — captureSweepCode → backfillCodeManifest (sets the
-		// fingerprint on the record) MUST run before writeSweepLedger reads it back. A reorder
-		// would silently yield empty-fingerprint rows (re-opening the same-config-different-code
-		// collision) yet leave every other assertion green — this guards that ordering.
+		// metis#27: the code_fingerprint must reach the PERSISTED row (capture-before-ledger
+		// ordering) — a reorder would silently yield empty-fingerprint rows.
 		if r.CodeFingerprint == "" {
-			t.Errorf("a swept ledger row must carry a non-empty code_fingerprint (capture-before-ledger ordering); got %+v", r)
+			t.Errorf("a swept ledger row must carry a non-empty code_fingerprint; got %+v", r)
+		}
+		switch r.Level {
+		case "inner":
+			nInner++
+			// metis#32: an inner row is tagged with its outer fold (so select can pool per config).
+			if r.OuterFold == nil {
+				t.Errorf("an inner row must carry its outer-fold coordinate; got %+v", r)
+			}
+		case "outer":
+			nOuter++
+		default:
+			t.Errorf("a nested-run ledger row must be Level inner|outer; got %q in %+v", r.Level, r)
 		}
 	}
-	agg := ledger.AggregateView(led, "train.fold_score")
-	if len(agg.Rows) != 2 {
-		t.Fatalf("AggregateView should reduce 4 fold rows → 2 per-config rows, got %d", len(agg.Rows))
+	if nInner != 8 {
+		t.Errorf("2 configs × 2 inner × 2 outer folds → 8 inner rows, got %d", nInner)
 	}
-	best, ok := ledger.Best(agg, "train.fold_score", "maximize")
-	if !ok || fmt.Sprint(best.FreeParams["train.model"]) != "b" {
-		t.Errorf("winner config by mean should be model=b; got %+v (ok=%v)", best.FreeParams, ok)
-	}
-	if m := best.Metrics["train.fold_score"]; m < 0.905 || m > 0.915 {
-		t.Errorf("winner mean fold_score should be ~0.91, got %v", m)
-	}
-	if se := best.Metrics["train.fold_score.se"]; se <= 0 {
-		t.Errorf("winner SE should be > 0 (folds differ 0.90 vs 0.92); got %v", se)
+	if nOuter != 2 {
+		t.Errorf("1 family × 2 outer folds → 2 outer rows, got %d", nOuter)
 	}
 
-	// The leaderboard + winner are reported to the user.
-	if s := out.String(); !strings.Contains(s, "winner") || !strings.Contains(s, "train.model=b") {
-		t.Errorf("sweep should report the winner (model=b); got:\n%s", s)
+	// The honest procedure estimate (mean±SE over outer folds) is reported — NOT a single winner
+	// line (selection + ship moved to `metis select`).
+	if s := out.String(); !strings.Contains(s, "nested-CV estimate — mean") {
+		t.Errorf("nested run should report the honest mean±SE estimate; got:\n%s", s)
 	}
 }
 
-// metis#19 M2: a per-fold `complexity` metric threads fold→config (FoldOutcome.Complexity
-// → Aggregate → MeanSE.MeanComplexity) and surfaces on the winner line. Proves runPipelineFold
-// reads the metric and the reducer carries it (M1 wired it as 0).
+// metis#19 M2 / metis#32: the per-fold `complexity` metric threads fold→config
+// (FoldOutcome.Complexity → the recorded inner rows). Proves runPipelineFold reads the metric and
+// the nested recording carries it. (Nested: no single winner line — the threading essence is that
+// the metric reaches the recorded inner rows.)
 func TestShapeSweep_ComplexityThreadsFoldToConfig(t *testing.T) {
 	ws := t.TempDir()
 	expPath := writeShapeFile(t, ws, foldShapeMD("[a, b]"))
-	var out strings.Builder
-	if err := runFoldSweep(t, expPath, false, nil, &out, nil); err != nil {
-		t.Fatalf("shape sweep should run: %v", err)
+	if err := runFoldSweep(t, expPath, false, nil, nil, nil); err != nil {
+		t.Fatalf("nested sweep should run: %v", err)
 	}
-	// The winner (model=b) line reports a non-zero mean complexity (fake emits cx per model).
-	s := out.String()
-	if !strings.Contains(s, "train.model=b") {
-		t.Fatalf("expected winner model=b; got:\n%s", s)
-	}
-	// The winner line ends with "cx <N>"; N must be > 0 (b's fake complexity = 20).
-	if !strings.Contains(s, "cx 20.0") {
-		t.Errorf("winner line should report the threaded complexity cx 20.0 (model=b); got:\n%s", s)
-	}
-	// The raw ledger rows carry the namespaced per-fold complexity.
+	// Every recorded INNER row carries the namespaced per-fold complexity (fake emits cx per model).
 	led := loadLedgerOrFatal(t, expPath)
+	var innerRows int
 	for _, r := range led.Rows {
-		if _, ok := r.Metrics["train.complexity"]; !ok {
-			t.Errorf("each per-fold ledger row must carry train.complexity; got %+v", r.Metrics)
+		if r.Level != "inner" {
+			continue
 		}
+		innerRows++
+		if _, ok := r.Metrics["train.complexity"]; !ok {
+			t.Errorf("each inner ledger row must carry train.complexity; got %+v", r.Metrics)
+		}
+	}
+	if innerRows == 0 {
+		t.Fatal("expected recorded inner rows carrying complexity")
 	}
 }
 
@@ -285,11 +260,10 @@ func TestShapeSweep_ParsimonyGuardOnMissingComplexity(t *testing.T) {
 	if !strings.Contains(err.Error(), "complexity") {
 		t.Errorf("guard error should mention complexity; got %v", err)
 	}
-	// The raw ledger rows are still persisted (re-selectable after a fix).
-	led := loadLedgerOrFatal(t, expPath)
-	if len(led.Rows) != 4 {
-		t.Errorf("raw fold rows should persist despite the guard; got %d", len(led.Rows))
-	}
+	// metis#32: the load-bearing invariant is that the guard ERRORS (rather than silently
+	// mis-selecting per outer fold). NB the nested path's ledger write is end-of-run, AFTER the
+	// outer loop, so a guard error aborts before any rows persist here — unlike the old flat path,
+	// raw rows are NOT re-selectable after a nested guard error (a re-run recomputes cheaply from cache).
 }
 
 // The same pct-loss shape WITH complexity emitted selects cleanly (the guard passes).
@@ -307,46 +281,62 @@ func TestShapeSweep_ParsimonyRuleWithComplexity(t *testing.T) {
 	}
 }
 
-// driver:single ships the winner (metis#18 M1a-5): after the sweeper selects the champion,
-// the ship phase refits it on ALL rows (no _fold) and runs predict → submission. The ship is
-// a SEPARATE content-addressed run, NOT a manifest fold-point — folds run data+cv-split+
-// pipeline only, so the ship run is the unique one carrying the ship steps.
-func TestShapeSweep_ShipsWinner(t *testing.T) {
+// metis#32: `metis run` MEASURES ONLY — it never auto-ships, even when a ship phase is present.
+// Shipping moved to `metis select --promote` (which reconstructs the chosen config, refits on ALL
+// rows, and runs predict → submission). A multi-config shape runs nested; NO submission artifact is
+// produced by the run. (The ship-assembly correctness — all-data refit, no cv-split — is verified
+// on the `metis select --promote` path in M2.)
+func TestShapeSweep_DoesNotShip(t *testing.T) {
 	ws := t.TempDir()
 	expPath := writeShapeFile(t, ws, foldShapeShipMD("[a, b]"))
 	var out strings.Builder
 	if err := runFoldSweep(t, expPath, false, nil, &out, nil); err != nil {
-		t.Fatalf("sweep+ship should run: %v", err)
+		t.Fatalf("nested run should succeed: %v", err)
 	}
 
-	// Exactly one run dir holds a `submission` step — the driver:single ship of the winner.
+	// NO run dir holds a `submission` step — `metis run` measures, it does not ship.
 	shipSteps, _ := filepath.Glob(filepath.Join(ws, "runs", "*", "submission"))
-	if len(shipSteps) != 1 {
-		t.Fatalf("driver:single must ship exactly one winner (one submission run), got %d", len(shipSteps))
+	if len(shipSteps) != 0 {
+		t.Errorf("`metis run` must NOT ship (shipping is `metis select --promote`); got %d submission runs", len(shipSteps))
 	}
-	shipRun := filepath.Dir(shipSteps[0])
-	// The ship run is the full winning pipeline refit on all rows + the ship steps — and NO
-	// cv-split (the ship needs no CV; shapeConfigToExperiment omits it).
-	for _, step := range []string{"get-data", "adapt", "features", "train", "predict", "submission"} {
-		if _, err := os.Stat(filepath.Join(shipRun, step)); err != nil {
-			t.Errorf("ship run must include the winning pipeline + ship step %q: %v", step, err)
-		}
-	}
-	if _, err := os.Stat(filepath.Join(shipRun, partitionStepID)); err == nil {
-		t.Errorf("the ship refit must NOT run cv-split — it fits on all rows, no CV")
-	}
-	// The ship is NOT a manifest fold-point (the manifest records only the per-fold sweep).
-	if man := readSweepManifest(t, ws); len(man.Points) != 4 {
-		t.Errorf("manifest should hold only the 4 per-fold points, not the ship; got %d", len(man.Points))
-	}
-	if !strings.Contains(out.String(), "shipped") {
-		t.Errorf("the sweep should report shipping the winner; got:\n%s", out.String())
+	if strings.Contains(out.String(), "shipped") {
+		t.Errorf("`metis run` must not report shipping a winner; got:\n%s", out.String())
 	}
 }
 
-// Fold-distinctness + cache: each (config, fold) of `train` gets a DISTINCT cache entry (the
-// B2 collision guard — the _fold overlay makes Kpre fold-distinct), the config+fold-invariant
-// data/cv-split steps HIT across points, and a warm re-run HITs everything (0 inner execs).
+// metis#32 DEGENERATE PATH (Done-when: "a no-free-var shape degenerates to a single-level CV
+// automatically"): a shape expanding to ONE config takes the FLAT single-level CV path (not nested),
+// records its fold rows, and does NOT ship — the outer selection loop has one candidate, so there is
+// nothing to select across and nested-CV reduces to a plain k-fold measure of the one config.
+func TestShapeSweep_OneConfigDegeneratesToSingleLevelCV(t *testing.T) {
+	ws := t.TempDir()
+	expPath := writeShapeFile(t, ws, foldShapeShipMD("[a]")) // 1 model → 1 config; ship phase present but must NOT run
+	var out strings.Builder
+	if err := runFoldSweep(t, expPath, false, nil, &out, nil); err != nil {
+		t.Fatalf("1-config single-level CV should run: %v", err)
+	}
+	// Flat path, not nested: the log says "single-level CV", never "nested-CV".
+	if s := out.String(); !strings.Contains(s, "single-level CV") {
+		t.Errorf("a 1-config shape must run the flat single-level CV path; got:\n%s", s)
+	}
+	if strings.Contains(out.String(), "nested-CV") {
+		t.Errorf("a 1-config shape must NOT run nested-CV; got:\n%s", out.String())
+	}
+	// It RECORDS its fold rows (measure) ...
+	led := loadLedgerOrFatal(t, expPath)
+	if len(led.Rows) == 0 {
+		t.Error("the flat single-level CV path must record its fold rows to the ledger")
+	}
+	// ... and does NOT ship (shipping is `metis select --promote`), even though `ship:` is present.
+	shipSteps, _ := filepath.Glob(filepath.Join(ws, "runs", "*", "submission"))
+	if len(shipSteps) != 0 {
+		t.Errorf("the flat path must NOT ship; got %d submission runs", len(shipSteps))
+	}
+}
+
+// Fold-distinctness + cache under NESTED (metis#32): each (outer-fold, config, inner-fold) of
+// `train` gets a DISTINCT cache entry (the _fold overlay makes Kpre fold-distinct), the
+// config/fold-invariant data steps HIT, and a warm re-run HITs everything (0 inner execs).
 func TestShapeSweep_CacheFoldDistinctAndReRunHits(t *testing.T) {
 	ws := t.TempDir()
 	expPath := writeShapeFile(t, ws, foldShapeMD("[a, b]"))
@@ -355,18 +345,19 @@ func TestShapeSweep_CacheFoldDistinctAndReRunHits(t *testing.T) {
 	if err := runFoldSweep(t, expPath, true, &cold, nil, nil); err != nil {
 		t.Fatalf("cold sweep: %v", err)
 	}
-	// train runs once per (config, fold) — 4 distinct entries (fold overlay ⇒ no collision).
-	if n := countCalls(cold, "train"); n != 4 {
-		t.Errorf("train should run 4× (2 configs × 2 folds, each cache-distinct), got %d", n)
+	// train runs per distinct (outer-fold, config, inner-fold): the sealed inner sweeps
+	// (2 outer × 2 configs × 2 inner = 8) + the per-family outer-fold held-out scorings (2) = 10.
+	if n := countCalls(cold, "train"); n != 10 {
+		t.Errorf("train should run 10× (8 sealed inner + 2 outer-scoring, each cache-distinct), got %d", n)
 	}
-	// get-data is config+fold-invariant → runs ONCE, then HITs on the on-disk index across
-	// the remaining 3 point-runs.
+	// get-data is fully invariant → the outer-split preamble runs it ONCE, then everything HITs.
 	if n := countCalls(cold, "get-data"); n != 1 {
-		t.Errorf("get-data (config+fold-invariant) should run once and HIT after, got %d", n)
+		t.Errorf("get-data (fully invariant) should run once and HIT after, got %d", n)
 	}
-	// features is config-invariant but fold-distinct → runs once per fold = 2×.
-	if n := countCalls(cold, "features"); n != 2 {
-		t.Errorf("features (fold-distinct, config-invariant) should run once per fold = 2×, got %d", n)
+	// features is config-invariant but fold-distinct → per (outer, inner-fold) once (4) + the 2
+	// outer-fold scorings = 6.
+	if n := countCalls(cold, "features"); n != 6 {
+		t.Errorf("features (fold-distinct, config-invariant) should run 6× (4 inner + 2 outer-scoring), got %d", n)
 	}
 
 	// A warm re-run: every step HITs — no inner exec at all.
@@ -379,9 +370,9 @@ func TestShapeSweep_CacheFoldDistinctAndReRunHits(t *testing.T) {
 	}
 }
 
-// A one-hyperparameter change recomputes ONLY the affected config's folds — the incremental
-// property. Warm the cache on {a, b}, then change b→c: config a's folds HIT unchanged; only
-// config c's 2 folds recompute (features stays fold-shared, so it HITs too).
+// A one-hyperparameter change recomputes ONLY the affected config — the incremental property,
+// under NESTED (metis#32). Warm on {a, b}, then change b→c: config a HITs unchanged; only config
+// c's runs recompute (features/data stay shared, so they HIT).
 func TestShapeSweep_HyperparamChangeRecomputesAffected(t *testing.T) {
 	ws := t.TempDir()
 	expPath := writeShapeFile(t, ws, foldShapeMD("[a, b]"))
@@ -395,9 +386,11 @@ func TestShapeSweep_HyperparamChangeRecomputesAffected(t *testing.T) {
 	if err := runFoldSweep(t, expPath, true, &calls, nil, nil); err != nil {
 		t.Fatalf("re-run after hyperparam change: %v", err)
 	}
-	// Only config c's 2 train folds are new; config a's train + all features + data HIT.
-	if n := countCalls(calls, "train"); n != 2 {
-		t.Errorf("only the changed config (c) should recompute its 2 folds, got %d train runs: %v", n, calls)
+	// Only config c's runs are new: its sealed inner runs (2 outer × 2 inner = 4) + the outer-fold
+	// scorings it wins (2) = 6; config a's train + all features + data HIT. (10 would mean BOTH
+	// configs recomputed — the count pins "only the changed config recomputed".)
+	if n := countCalls(calls, "train"); n != 6 {
+		t.Errorf("only the changed config (c) should recompute (6 nested runs); got %d train runs: %v", n, calls)
 	}
 	if n := countCalls(calls, "features"); n != 0 {
 		t.Errorf("features is config-invariant → must stay cached across the knob change, got %d", n)

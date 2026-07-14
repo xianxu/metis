@@ -35,15 +35,14 @@ sweeper:
   sampler: grid
   resample: {cv: {k: 5, stratify: true}}
   objective: {metric: train.fold_score, direction: maximize, select: {argmax-mean: {}}}
-driver:
-  single: {}
 ---
 
 # titanic-baseline-shape
 
 The metis#18 v2 worked example: a three-phase shape (`data │ pipeline │ ship`) with a
-black-box sweeper (grid over configs, inner 5-fold CV, argmax-mean select) and
-`driver: single`. The pipeline's `features × model` space expands to
+black-box sweeper (grid over configs, inner 5-fold CV, argmax-mean select). metis#32
+dropped the `driver:` field — the run mode is derived (this 33-config shape → nested CV).
+The pipeline's `features × model` space expands to
 `features(3) × [logreg:C(3) + rf:(2×2)=4 + hist_gbm:(2×2)=4] = 3 × 11 = 33` configs, each scored
 over 5 folds (hist_gbm sweeps max_iter × max_leaf_nodes at a fixed learning_rate — metis#21).
 The partition is materialized by the engine from `sweeper.resample.cv` (no `cv-split` step).
