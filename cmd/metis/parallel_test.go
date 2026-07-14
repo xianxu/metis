@@ -99,8 +99,8 @@ func (p peakExec) Execute(step experiment.Step, runDir string) (experiment.StepR
 func TestNestedCV_PeakConcurrencyWithinCap(t *testing.T) {
 	const cap = 3
 	ws := t.TempDir()
-	// 3 outer folds × 3 configs × 2 inner folds → deep nesting, ~many leaf calls.
-	expPath := writeShapeFile(t, ws, foldShapeCVMD("[a, b, c]", 3))
+	// 3 configs → nested (outer folds = sweeper.cv.k = 2) × 2 inner folds → deep nesting, ~many leaf calls.
+	expPath := writeShapeFile(t, ws, foldShapeCVMD("[a, b, c]"))
 	sem := make(chan struct{}, cap)
 	var mu sync.Mutex
 	var cur, peak int
