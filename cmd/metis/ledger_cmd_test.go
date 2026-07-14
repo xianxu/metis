@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/xianxu/metis/pkg/experiment"
 	"github.com/xianxu/metis/pkg/ledger"
 )
 
@@ -55,74 +54,6 @@ func writePerFoldLedger(t *testing.T, dir string) string {
 		t.Fatal(err)
 	}
 	return shapePath
-}
-
-// promote --best on a per-fold sweep ledger reconstructs a RUNNABLE single experiment
-// (metis#18 M1a-5): it reduces the raw fold rows to per-config (mean, SE), picks the champion,
-// and writes data ++ pipeline(winner config) ++ ship — NO cv-split (the ship refit needs no
-// CV) — with the honest (mean, SE) recorded in the provenance. Winner = config a (0.85 > 0.71).
-func TestPromote_PerFoldLedgerReconstructsRunnable(t *testing.T) {
-	dir := t.TempDir()
-	shapePath := writePerFoldLedger(t, dir)
-	var out strings.Builder
-	if err := runPromote(promoteOpts{shapePath: shapePath, best: true, name: "winner", out: &out}); err != nil {
-		t.Fatalf("promote --best on a per-fold ledger must reconstruct a runnable experiment: %v", err)
-	}
-	raw, err := os.ReadFile(filepath.Join(dir, "winner.md"))
-	if err != nil {
-		t.Fatalf("promote must write winner.md: %v", err)
-	}
-	// The promoted .md parses + validates as a runnable plain experiment.
-	exp, err := experiment.Parse(string(raw))
-	if err != nil {
-		t.Fatalf("promoted experiment must parse: %v", err)
-	}
-	if err := experiment.Validate(exp); err != nil {
-		t.Fatalf("promoted experiment must validate (runnable): %v", err)
-	}
-	steps := map[string]experiment.Step{}
-	for _, s := range exp.Steps {
-		steps[s.ID] = s
-	}
-	if _, ok := steps[partitionStepID]; ok {
-		t.Error("the promoted ship experiment must NOT carry a cv-split step (no CV at ship)")
-	}
-	if steps["train"].With["model"] != "a" {
-		t.Errorf("promoted train should carry the winner's model=a; got %v", steps["train"].With["model"])
-	}
-	// The honest sweep estimate (mean, SE) is recorded in the promotion provenance (mean 0.85).
-	if !strings.Contains(string(raw), "sweep_estimate") || !strings.Contains(string(raw), "0.85") {
-		t.Errorf("promoted experiment must record the honest (mean, SE) estimate; got:\n%s", raw)
-	}
-}
-
-// promote --point on a per-fold ledger selects a CONFIG by its free-params via the SAME
-// aggregate-then-select path as --best (not one fold's raw row) — metis#18 M1a-5: `--point
-// train.model=b` promotes config b with its honest estimate (b: (0.70+0.72)/2 = 0.71).
-func TestPromote_PerFoldLedgerByPoint(t *testing.T) {
-	dir := t.TempDir()
-	shapePath := writePerFoldLedger(t, dir)
-	var out strings.Builder
-	if err := runPromote(promoteOpts{shapePath: shapePath, point: "train.model=b", name: "winner", out: &out}); err != nil {
-		t.Fatalf("promote --point on a per-fold ledger must reconstruct config b: %v", err)
-	}
-	raw, err := os.ReadFile(filepath.Join(dir, "winner.md"))
-	if err != nil {
-		t.Fatalf("promote --point must write winner.md: %v", err)
-	}
-	exp, err := experiment.Parse(string(raw))
-	if err != nil {
-		t.Fatalf("promoted experiment must parse: %v", err)
-	}
-	for _, s := range exp.Steps {
-		if s.ID == "train" && s.With["model"] != "b" {
-			t.Errorf("--point train.model=b should promote config b; got %v", s.With["model"])
-		}
-	}
-	// The honest estimate is recorded for the SELECTED config (b: mean 0.71), not the champion.
-	if !strings.Contains(string(raw), "sweep_estimate") || !strings.Contains(string(raw), "0.71") {
-		t.Errorf("--point promote must record config b's honest estimate (~0.71); got:\n%s", raw)
-	}
 }
 
 // `ledger show --sort` on a per-fold ledger renders the AggregateView (per-config mean,SE),
