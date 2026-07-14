@@ -1,14 +1,15 @@
 ---
 type: type
 name: experiment-shape
-description: Use when creating or editing an experiment-shape — an experiment lifted into a config-space that a sweep explores. Triggers on "create a sweep", "author an experiment-shape", "sweep these hyperparameters", editing markdown with `type: experiment-shape`, "/xx-datatype experiment-shape". The metis#18 v2 datatype above `experiment`: three phases (`data│pipeline│ship`) plus a `sweeper` (config-level Sampler) and a `driver` (outer Sampler). `with` leaves in `pipeline` may declare a space ($any [list=untagged / map=tagged] or $*-range) that `expand()` collapses into many config points; the engine runs each config × resample fold.
+description: Use when creating or editing an experiment-shape — an experiment lifted into a config-space that a sweep explores. Triggers on "create a sweep", "author an experiment-shape", "sweep these hyperparameters", editing markdown with `type: experiment-shape`, "/xx-datatype experiment-shape". The metis#18 v2 datatype above `experiment`: three phases (`data│pipeline│ship`) plus a `sweeper` (config-level Sampler); the outer evaluator is derived by `metis run` (metis#32 removed the `driver:` field). `with` leaves in `pipeline` may declare a space ($any [list=untagged / map=tagged] or $*-range) that `expand()` collapses into many config points; the engine runs each config × resample fold.
 ---
 
 # experiment-shape
 
 An experiment-shape is the **config-space above an `experiment`** (metis#18 v2). Where an
 `experiment` is a single flat `steps` DAG, a shape is structured into **three phases** and adds a
-**sweeper** and a **driver**:
+**sweeper** (the outer evaluator is DERIVED by `metis run`, not a declared field — metis#32 removed
+`driver:`):
 
 - **`data`** — steps produced ONCE, above the resample, shared across all folds (get-data, adapt).
 - **`pipeline`** — the swept `(algorithm × hyperparameter)` atom, run **per-fold**; its `with` leaves
@@ -16,9 +17,10 @@ An experiment-shape is the **config-space above an `experiment`** (metis#18 v2).
   structural cut that makes everything downstream leakage-safe with no per-step markers.
 - **`ship`** — steps that run ONCE on the promoted winner (predict, submission).
 
-The **`sweeper`** and **`driver`** are the two levels of one first-class construct — the **Sampler
-fold node** (`Init/Ask/Tell/Done`): a stateful ask/tell fold that proposes points, consumes each
-point's result, and reduces to an answer. `metis run` drives them; the run-ledger (metis#8) records
+The **`sweeper`** (declared) and the **outer evaluator** (derived by `metis run` — the runtime
+`CVDriver`/`SingleDriver` node, no longer a shape field) are two levels of one first-class construct —
+the **Sampler fold node** (`Init/Ask/Tell/Done`): a stateful ask/tell fold that proposes points,
+consumes each point's result, and reduces to an answer. `metis run` drives them; the run-ledger (metis#8) records
 each per-fold point keyed by its free-param path.
 
 `experiment-shape` and its `expand` (metis `pkg/shape`) are owned by **metis** (competition-independent),
@@ -34,7 +36,7 @@ struct), and the per-phase step-list shape once in `_phase` — so neither is ha
 Validated structurally against `#ExperimentShape` (closed). Semantic checks — combined-DAG acyclicity +
 cross-phase `needs`-resolution + `uses` format, **monotonic phase ordering** (a step may only `needs`
 an earlier-or-equal phase — defends the `data│pipeline` cut), a non-empty `pipeline`, and the
-sweeper/driver invariants — are enforced by `ValidateShape` at read time.
+sweeper invariants — are enforced by `ValidateShape` at read time.
 
 | Field | Required | Notes |
 |---|---|---|
@@ -47,7 +49,10 @@ sweeper/driver invariants — are enforced by `ValidateShape` at read time.
 | `pipeline` | yes | The swept per-fold atom (non-empty); `with` leaves may carry `$`-descriptors. |
 | `ship` | optional | Winner-only steps (predict/submission). |
 | `sweeper` | yes | The config-level Sampler — see below. |
-| `driver` | yes | The outer Sampler — exactly one of `single` \| `cv`. |
+
+*(There is **no `driver` field** — removed in metis#32. The outer evaluator is DERIVED from the shape
+by `metis run` (config-count: `>1`→nested CV, `1`→single-level CV; `--fast`=1 outer fold). See "The run
+mode" below. A shape carrying a `driver:` block now fails to parse.)*
 
 ### The `sweeper` block (config-level Sampler — mlr3 `AutoTuner`)
 
@@ -63,8 +68,7 @@ objective+select that turns per-config `(mean, SE)` into the winner.
     `<step>.<metric>` namespacing — the resample Sampler owns the reduction.
   - `direction` — `maximize | minimize` (required).
   - `select` — the rule turning per-config `(mean, SE, complexity)` into the winner (metis#19). A
-    **tagged union**, exactly one branch, params bound to it (mirrors `driver`'s `single|cv` — optional
-    fields, exactly-one enforced in Go):
+    **tagged union**, exactly one branch, params bound to it (optional fields, exactly-one enforced in Go):
     - `select: {argmax-mean: {}}` — highest mean (M1a; no params).
     - `select: {one-std-err: {}}` — within 1×SE of the family best, then the simplest (min measured
       complexity), tie-break mean.

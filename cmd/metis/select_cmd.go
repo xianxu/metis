@@ -17,7 +17,7 @@ import (
 )
 
 // cmdSelect handles `metis select <shape.md> [--best | --best-per-model-class] [--promote]
-// [--fingerprint HASH] [-m MSG]` — metis#32's honest selector (retires `metis ledger select` +
+// [--fingerprint HASH]` — metis#32's honest selector (retires `metis ledger select` +
 // `metis promote`). It reads the nested-CV ledger a `metis run` produced and CHOOSES:
 //   - the model FAMILY on the honest OUTER estimate (FamilySelect: lowest-SE-within-1-SE) — the
 //     signal #23 measured and #32 now ACTUATES (not the optimistic inner-CV cross-family argmax);
@@ -30,10 +30,9 @@ func cmdSelect(args []string) error {
 	perClass := fs.Bool("best-per-model-class", false, "print/promote one winner per model family (the metis#22 ensembling seam)")
 	promote := fs.Bool("promote", false, "materialize the selected config(s): reconstruct from the ledger + run on ALL data → runs/best-{family}-{hash}/submission.csv; prints the run id(s)")
 	fingerprint := fs.String("fingerprint", "", "restrict to one code-fingerprint (metis#27)")
-	msg := fs.String("m", "", "message recorded on the promoted run(s)")
 	shapePath, flags, err := hoistShapePath(args)
 	if err != nil {
-		return fmt.Errorf("select: %w (usage: metis select <shape.md> [--best | --best-per-model-class] [--promote] [--fingerprint HASH] [-m MSG])", err)
+		return fmt.Errorf("select: %w (usage: metis select <shape.md> [--best | --best-per-model-class] [--promote] [--fingerprint HASH])", err)
 	}
 	if err := fs.Parse(flags); err != nil {
 		return err
@@ -43,7 +42,7 @@ func cmdSelect(args []string) error {
 	}
 	return runSelect(selectOpts{
 		shapePath: shapePath, best: *best, perClass: *perClass, promote: *promote,
-		fingerprint: *fingerprint, message: *msg, stepPath: stepPath(shapePath), out: os.Stdout,
+		fingerprint: *fingerprint, stepPath: stepPath(shapePath), out: os.Stdout,
 	})
 }
 
@@ -53,12 +52,33 @@ type selectOpts struct {
 	perClass    bool
 	promote     bool
 	fingerprint string
-	message     string
 	stepPath    []string
 	git         gitProbe                    // nil → gitCLI (production)
 	now         func() time.Time            // nil → time.Now
 	exec        experiment.StepExecutor     // test seam: injected into the --promote run (nil → production execStep)
 	out         io.Writer
+}
+
+// distinctFingerprints returns the sorted set of code-fingerprints (8-char) present in the ledger —
+// the multi-cohort check for select's join-soundness guard.
+func distinctFingerprints(led ledger.Ledger) []string {
+	seen := map[string]bool{}
+	for _, r := range led.Rows {
+		if r.CodeFingerprint == "" {
+			continue
+		}
+		f := r.CodeFingerprint
+		if len(f) > 8 {
+			f = f[:8]
+		}
+		seen[f] = true
+	}
+	out := make([]string, 0, len(seen))
+	for f := range seen {
+		out = append(out, f)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // runSelect is the testable core: load shape + ledger, reduce the OUTER rows to per-family honest
@@ -77,6 +97,17 @@ func runSelect(o selectOpts) error {
 		return err
 	}
 	led = ledger.Filter(led, o.fingerprint)
+	// Join soundness (metis#32 §"Join soundness" + workshop/lessons.md): the family↔config reduce pools
+	// OUTER rows by family AND INNER rows by config — both MUST be within ONE code-version. A ledger is
+	// append-only, so a re-run after a step's code changes adds a SECOND fingerprint cohort; reducing
+	// across cohorts silently blends versions into one estimate — the exact silently-wrong-winner class
+	// #32 exists to stop. With no explicit --fingerprint, refuse a multi-cohort ledger rather than guess.
+	if o.fingerprint == "" {
+		if fps := distinctFingerprints(led); len(fps) > 1 {
+			return fmt.Errorf("select: %s spans %d code-fingerprint cohorts %v — a cross-version reduce would silently blend them; pin one with `--fingerprint <hash>` (or re-run `metis run %s` to refresh)",
+				ledgerPath(o.shapePath), len(fps), fps, filepath.Base(o.shapePath))
+		}
+	}
 	metric := sh.Sweeper.Objective.Metric
 	direction := sh.Sweeper.Objective.Direction
 

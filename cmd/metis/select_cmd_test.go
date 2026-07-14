@@ -131,6 +131,47 @@ func TestSelect_MultiFamilyNoOuterRowsErrors(t *testing.T) {
 	}
 }
 
+// A ledger spanning >1 code-fingerprint cohort (a re-run after a step's code changed) is a SHARP
+// error unless `--fingerprint` pins one — reducing across cohorts would silently blend code versions
+// into one family/config estimate (the workshop/lessons.md footgun; the silently-wrong-winner class
+// #32 exists to stop). Join-soundness (metis#32 §"Join soundness").
+func TestSelect_MixedFingerprintCohortsError(t *testing.T) {
+	dir := t.TempDir()
+	shapePath := filepath.Join(dir, "s.md")
+	if err := os.WriteFile(shapePath, []byte(taggedShapeForSelect), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	orow := func(cf, addr string, fp map[string]any, ofold int, score float64) ledger.Row {
+		of := ofold
+		return ledger.Row{CodeFingerprint: cf, PointAddr: addr, FreeParams: fp, Level: "outer", OuterFold: &of,
+			Metrics: map[string]float64{"train.fold_score": score}, Status: "ok"}
+	}
+	var led ledger.Ledger // two cohorts: cf1aaaaa and cf2bbbbb
+	led.Append(
+		orow("cf1aaaaa", "o-lr-0", lr1, 0, 0.80), orow("cf1aaaaa", "o-rf-0", rf8, 0, 0.74),
+		orow("cf2bbbbb", "o-lr-1", lr1, 1, 0.82), orow("cf2bbbbb", "o-rf-1", rf8, 1, 0.82),
+	)
+	b, err := ledger.Encode(led)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ledgerPath(shapePath), b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// No --fingerprint → refuse the multi-cohort ledger.
+	err = runSelect(selectOpts{shapePath: shapePath, best: true, out: &strings.Builder{}})
+	if err == nil {
+		t.Fatal("select over a mixed-fingerprint ledger (no --fingerprint) must error, not silently blend cohorts")
+	}
+	if !strings.Contains(err.Error(), "fingerprint") && !strings.Contains(err.Error(), "cohort") {
+		t.Errorf("the error should point at the mixed code-fingerprint cohorts; got %v", err)
+	}
+	// Pinning a cohort bypasses the guard (it may then error for another reason, but NOT the cohort error).
+	if err2 := runSelect(selectOpts{shapePath: shapePath, best: true, fingerprint: "cf1aaaaa", out: &strings.Builder{}}); err2 != nil && strings.Contains(err2.Error(), "cohort") {
+		t.Errorf("--fingerprint <hash> should bypass the mixed-cohort guard; got %v", err2)
+	}
+}
+
 // --best-per-model-class reports one winner per family (the metis#22 ensembling seam).
 func TestSelect_PerModelClass_ReportsEachFamily(t *testing.T) {
 	dir := t.TempDir()
