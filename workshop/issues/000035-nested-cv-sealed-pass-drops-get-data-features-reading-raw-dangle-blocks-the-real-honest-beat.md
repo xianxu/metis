@@ -1,11 +1,12 @@
 ---
 id: 000035
-status: open
+status: working
 deps: []
 github_issue:
 created: 2026-07-14
 updated: 2026-07-14
 estimate_hours:
+started: 2026-07-14T07:43:17-07:00
 ---
 
 # nested-CV sealed pass drops get-data → features reading raw dangle (blocks the real honest-beat)
