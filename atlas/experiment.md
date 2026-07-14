@@ -114,8 +114,11 @@ wrapped by **thin step-executables** honoring the contract above. Hermetic via *
 (pinned CPython 3.12 — the system 3.14 has no scientific-stack wheels yet).
 
 - **Pure core — `metis/`** (pytested on in-memory frames, no IO — ARCH-PURE):
-  - `schema.py` `Schema` — column roles (`id`/`feature`/`target`/`weight`) + dtypes;
-    `feature_cols()`/`target_col()`/`id_col()`.
+  - `schema.py` `Schema` — column roles (`id`/`feature`/`target`/`weight`/`source`) + dtypes;
+    `feature_cols()`/`target_col()`/`id_col()`. `source` (metis#35): a raw column carried
+    through for feature-engineering steps that know it — never a model input, may hold
+    strings/NaN (the one-road invariant: the adapter's Dataset is the sole road from raw
+    data into the pipeline, so the nested-CV seal's substitution is complete).
   - `dataset.py` `Dataset` — `{schema, train, test?, provenance}` (pandas) + `X()`/`y()`
     selectors. The modality-agnostic envelope adapters produce (tabular now).
   - `split.py` `cv_folds(df, k, seed, stratify_col?)` — deterministic (Stratified)KFold
@@ -197,8 +200,10 @@ wrapped by **thin step-executables** honoring the contract above. Hermetic via *
   - `predict`: load Dataset + upstream `model.pkl` → predict test rows → `predictions.csv` + `{n_predictions}`.
   - `outer-split` (metis#23, L1 structural seal): read the FULL dataset (**unconfined** — it must
     see all rows to split them) → `cv_folds` → k `analysis_i/` **subset dataset dirs** (train where
-    `outer_fold != i`; assessment rows physically absent) + `outer_folds.json`. The sealing spine
-    **#20 (leakage-safe features) + kbench#8 (ticket-group survival) inherit.**
+    `outer_fold != i`; assessment rows physically absent; the test frame CARRIED through, metis#35 —
+    `analysis_i` is a SHAPE-IDENTICAL stand-in for the declared base, only train rows differ, so
+    both-frames features see the same test rows sealed as at ship) + `outer_folds.json`. The sealing
+    spine **#20 (leakage-safe features) + kbench#8 (ticket-group survival) inherit.**
 - **Wrappers — `steps/metis/{cv-split,train,predict,outer-split}`:** bash bridges that `exec uv run
   --project <root> python -m metis.trace metis.steps.<type>`, resolving `<root>` from `$0` (cwd is the
   step dir, not the root).
