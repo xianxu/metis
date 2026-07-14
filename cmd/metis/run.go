@@ -68,6 +68,7 @@ type runOpts struct {
 	git      gitProbe
 	cache    bool // enable the metis#2 validating-trace cache (<expDir>/.metis-cache)
 	dryRun   bool // metis#18: list the swept configs without running them
+	fast     bool // metis#32: nested run does ONE outer fold (a ~1/k-cost honest single-point) instead of k
 	inSweep  bool // metis#14: this run is a sweep point — suppress per-point single-run
 	//               capture (the sweep captures once per shape-run in captureSweepCode)
 	out  io.Writer
