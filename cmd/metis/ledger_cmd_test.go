@@ -30,8 +30,6 @@ sweeper:
   sampler: grid
   resample: {cv: {k: 2, stratify: false}}
   objective: {metric: train.fold_score, direction: maximize, select: {argmax-mean: {}}}
-driver:
-  single: {}
 ---
 `
 
