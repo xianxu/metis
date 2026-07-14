@@ -26,9 +26,9 @@ need. Demonstrated empirically on the real Titanic honest-beat run (kbench#8):
 
 ## Spec
 
-*(Refined via brainstorm 2026-07-13 — the principle below survives from the original capture; the
-mechanism changed from "a driver mode that selects+ships inline" to run/select separation. See the
-[[## Log]] delta.)*
+*(Design converged via brainstorm 2026-07-13. The **principle** below survives from the original capture;
+the **mechanism** evolved twice — from "a driver mode that selects+ships inline" → run/select separation →
+the final **derived-run-mode** model here. See the [[## Log]] deltas.)*
 
 **The principle (two-level selection, each signal used where it's valid):**
 - **Within a family** → inner CV + parsimony (metis#19). Fine choice (dozens of hyperparams); complexity
@@ -42,78 +42,107 @@ mechanism changed from "a driver mode that selects+ships inline" to run/select s
 on an OPTIMISTIC estimate; family selection is a COARSE choice (best of ~3) on an HONEST estimate → small
 selection bias on a low-dim choice. Fine choice on the cheap estimate; coarse choice on the honest one.
 
-**Mechanism — `run` records the honest measure; `select` steers (run/select separation).** NOT a driver
-mode that selects+ships inline. `run` populates ledgers; choosing is a **read-time** operation over the
-recorded ledgers (consistent with today's inner-CV `ledger show`/`select`):
+### Mechanism — three commands, a derived run mode, one shared run engine
 
-1. **`driver: cv` (the metis#23 nested CV, extended to record).** Today it outer-scores only the single
-   overall inner-winner and records nothing durable. #32 changes it to outer-score **each family's
-   inner-winner** and **append per-`(outer-fold, family)` rows to the shape ledger** — level-marked
-   (distinct from `driver: single` inner rows), each carrying: family, that fold's inner-winner
-   free-params, its inner-CV mean, its **outer-held-out score**. **The outer CV stays a *measure* of ~3
-   per-family procedures, never a config sweep** — outer-scoring all configs and selecting among them
-   would be "yet another sweep" on the held-out fold → dishonest (reintroduces the optimism #23 removed).
-   Per-family honest estimate = `mean ± SE` over the outer folds of that family's outer scores.
-2. **`driver: single` (today's).** The all-data inner-CV config ledger + the ship source.
+`run` **measures** and populates a ledger; `select` **chooses** (and, with `--promote`, ships); `kaggle
+submit` **uploads**. The outer CV is a pure *measure* of ~3 per-family procedures, **never a config sweep**
+(outer-scoring all configs + selecting on them would be "yet another sweep" on the held-out fold →
+dishonest; it reintroduces the optimism #23 removed).
 
-3. **`metis select <shape.md> [--best | --best-per-model-class] [--promote]`** — new top-level command;
-   **retires `metis ledger select` + `metis promote`**.
-   - Reduces the `cv` rows → per-family honest estimate (mean±SE).
-   - **Family rule (the cross-family select):** among families whose honest mean is within **1 SE of the
-     best family's mean**, pick the **lowest-SE** one (most stable outer estimate). NOT a static
-     family-complexity order — class complexity isn't statically orderable (a regularized gbm can use
-     fewer effective params than a deep rf), so a static order just smuggles cross-family complexity
-     comparison back in. The SE also folds in **inner-selection instability** (a family whose inner pick
-     jumps fold-to-fold has a wider outer spread → loses the tie) — a free, honest fragility penalty.
-   - **Config within the family:** from the inner CV (the `driver: single` ledger, metis#19 rule).
-   - **`--best`** → the single ship recommendation (family rule → its inner config). **`--best-per-model-class`**
-     → each family's honest estimate + its ship config (the metis#22 ensembling seam).
-   - **`--promote`** → materialize each selected config as a **run on ALL data** (the `driver: single`
-     refit — no outer holdout), producing `runs/best-{family}-{shorthash}/…/submission.csv` + `record.json`;
-     run id = `best-{shorthash}` / `best-{family}-{shorthash}` (hash = the config's content-address).
-     **Prints the generated run ids** — the handles for `kaggle submit --run <id>`. Without `--promote`:
-     reports what it would pick (dry view). (Also retires the hand-written-winner + `--point`-selector
-     friction hit on the rf-ticket ship.)
-4. **`kaggle submit --run best-{family}-{shorthash}`** → submits (submission.csv + slug from record.json).
+**1. `metis run <shape>` — MEASURE (never ships). The mode is DERIVED from the shape, not declared:**
 
-**Workflow (two runs, then select):**
+| Shape | `metis run` does | records |
+|---|---|---|
+| **sweep** (has `$any` free vars) | **nested CV** (outer × inner; outer reuses `sweeper.resample.cv`) | inner + outer rows |
+| **no free vars**, has a resample | **single-level CV** — the outer selection loop has one candidate, so nested-CV mathematically *degenerates* to a plain k-fold of that config (no special-casing) | inner rows |
+| **bare experiment** (no sweeper) | run the steps as-is | — |
+
+The nested run **records the whole thing to the ledger** (today it records NOTHING): per-`(outer-fold,
+config)` **inner-CV** rows AND per-`(outer-fold, family)` **outer-CV** rows (each = that fold's family
+inner-winner + its outer-held-out score), **level/fold-marked so the two never collide**. Family is
+DERIVED from the recorded `train.model` free-param (`FamilyOf`) — no new family column. Per-family honest
+estimate = `mean ± SE` over the outer folds of that family's outer scores.
+
+**2. `metis select <shape> [--best | --best-per-model-class] [--promote]`** — new top-level command;
+**retires `metis ledger select` + `metis promote`**.
+- Reduces the ledger: **family** from the outer rows, **config-within-family** from the inner rows.
+- **Family rule:** among families whose honest mean is within **1 SE of the best family's mean**, pick the
+  **lowest-SE** one (documented tiebreak; not over-designed — revisit only if real runs show families
+  tying). NOT a static family-complexity order — class complexity isn't statically orderable (a
+  regularized gbm can use fewer effective params than a deep rf), so a static order just smuggles
+  cross-family complexity comparison back in.
+- **Config rule (within family):** inner CV + `sweeper.objective.select` (the metis#19 rule, e.g. pct-loss).
+- **`--best`** → single ship rec. **`--best-per-model-class`** → one pick per family (the metis#22 seam).
+- **Dry (no `--promote`):** print the selected config(s) + per-family honest `mean±SE` + the honesty caveat.
+- **`--promote`:** for each selected config, **reconstruct it from the ledger** (never a pre-materialized
+  winner) and run it in **ship mode — `data + pipeline + ship`, fit on ALL data, no CV → `submission.csv`**,
+  into `runs/best-{family}-{hash}/`. **Prints the run ids** (the handles for `kaggle submit`). Config always
+  reconstructed from the ledger → no committed winner `.md`, no `--point` selector (retires that friction).
+
+**3. `kaggle submit --run best-{family}-{hash}`** → uploads that run's `submission.csv` (+ slug from
+`record.json`). Never runs the pipeline.
+
+**One shared run engine, two assemblies (ARCH-DRY).** Both `metis run`'s measure and `--promote`'s ship
+funnel through the SAME per-experiment runner (`runResolvedExperiment` — cache, step executor,
+record/run.json), differing only in how the fixed-config experiment is *assembled*: measure = `data +
+pipeline + cv-split` (fold-scored); ship = `data + pipeline + ship`, all-data fit. No second engine → the
+cache/provenance/determinism guarantees are identical on both paths.
+
+**Shape simplification.** The `driver:` block is **deleted** (the run mode is derived; the outer loop
+reuses `sweeper.resample.cv`). `data` / `pipeline` / `ship` / `sweeper` all stay. `ship` is **latent
+during measurement** and activated only by `select --promote` (which reconstructs the winner *from this
+shape* and needs its `ship` steps) — so it lives in the sweep shape but `metis run` never runs it.
+
+**Workflow:**
 ```
-metis run sweep.md                  # driver: single → inner-CV config ledger + ship source
-metis run sweep.md   (driver: cv)   # → per-family honest outer estimates in the ledger
-metis select sweep.md --best --promote    # family by lowest-SE-within-1-SE on the honest estimate,
-                                           # config by inner CV, materialized as best-{family}-{hash}
-kaggle submit --run best-{family}-{hash}
+metis run titanic-sweep.md                              # nested CV → ledger (inner + outer rows)
+metis select titanic-sweep.md --best                    # dry: print the pick + honest mean±SE + caveat
+metis select titanic-sweep.md --best-per-model-class --promote   # reconstruct + ship each on ALL data →
+                                                        #   runs/best-{family}-{hash}/submission.csv (prints ids)
+kaggle submit --run best-rf-{hash}
 ```
-metis#31's parallelism makes the `driver: cv` run affordable — the reason it was sequenced first.
+metis#31's parallelism makes the nested `run` affordable — the reason it was sequenced first.
 
-**Honesty caveat (reported, not hidden).** The *selected* family's estimate is mildly optimistic — a
-1-SE pick over ~3 families, ~0.01 upward bias. A large honesty gain over the inner-CV path's ~0.10 gap,
-not a perfectly-unbiased number (that needs another outer loop; not worth it at ~3 families). `select`
+**Honesty caveat (reported, not hidden).** The *selected family's* honest estimate is mildly optimistic — a
+1-SE pick over ~3 families, ~0.01 upward bias (NOT a per-config claim — the shipped config has no outer
+estimate of its own; only the family/procedure does). A large honesty gain over the inner-CV path's ~0.10
+gap, not a perfectly-unbiased number (that needs another outer loop; not worth it at ~3 families). `select`
 surfaces the caveat alongside the number.
 
-**Scope.** IN #32: the `driver: cv` per-family ledger recording; `metis select` (the select+promote
-merge); the family rule; the caveat in the report. OUT (separate issues): the **repo-root-relative path
-key** (cwd-ergonomics — own issue). COMPOSES with: metis#19 (intra-family, unchanged), metis#23 (the
-estimator this extends), metis#22 (consumes `--best-per-model-class`), metis#33 (GBM's own overfit — orthogonal).
+**Join soundness.** The family (outer rows) ↔ config (inner rows) reduction MUST be pinned to one
+`code_fingerprint` — an unscoped reduce over a mixed-code ledger silently blends versions (the
+`workshop/lessons.md` footgun). `select` errors sharply if the ledger lacks the rows it needs (e.g. a
+non-sweep ledger with no outer rows) rather than nil-deref.
+
+**Scope.** IN #32: the nested-run ledger recording (inner+outer, level-marked); the derived run mode +
+`driver:`-drop; `metis select` (the select+promote merge, reconstruct-and-ship); the family rule; the
+caveat. OUT (separate issues): the **repo-root-relative path key** (metis#34). COMPOSES with: metis#19
+(intra-family, unchanged), metis#23 (the estimator this extends + records), metis#22 (consumes
+`--best-per-model-class`), metis#33 (GBM's own overfit — orthogonal).
 
 ## Done when
 
-- **`driver: cv` records** per-`(outer-fold, family)` honest rows to the shape ledger (family inner-winner
-  free-params + inner-CV mean + outer-held-out score), level-marked distinct from `driver: single` rows.
-- **`metis select <shape>`** reduces those → per-family honest estimate; **`--best`** applies the
-  lowest-SE-within-1-SE family rule + inner-CV config choice → the ship rec; **`--best-per-model-class`**
-  reports per family; **`--promote`** materializes all-data runs (`best-{family}-{hash}`) and prints the run
-  ids; **retires `metis ledger select` + `metis promote`**.
-- On the Titanic honest-beat run, `select --best` ships the **rf** family (not the GBM overfitter), and the
-  shipped config's outer estimate tracks its public score far better than the inner-CV path did (which
-  shipped GBM 0.846-inner → 0.749-public; the rf generalizer scored public 0.79186).
-- The max-over-families honesty caveat is surfaced in the `select` report, not hidden.
+- **`metis run` on a sweep records the full nested CV to the ledger** — per-`(outer-fold, config)` inner-CV
+  rows + per-`(outer-fold, family)` outer-CV rows, level/fold-marked so inner and outer rows for the same
+  config+fold don't collide (today the nested path records nothing). A no-free-var shape degenerates to a
+  single-level CV automatically (hermetic test).
+- **`metis select <shape>`** reduces those → per-family honest `mean±SE`; **`--best`** applies the
+  lowest-SE-within-1-SE family rule + inner-CV config choice; **`--best-per-model-class`** reports per family;
+  **`--promote`** reconstructs each config from the ledger and ships it on ALL data (`runs/best-{family}-{hash}/`),
+  printing the run ids; **retires `metis ledger select` + `metis promote`**; the family↔config join is
+  fingerprint-scoped and errors sharply when required rows are absent.
+- **The `driver:` block is removed** from the shape schema; the run mode is derived; `ship` is retained and
+  activated by `--promote`.
+- On a fixture cv+inner ledger, `select --best` picks the **rf** family over the **gbm** overfitter
+  (hermetic gate). *(The real-Kaggle numbers — GBM 0.749 vs rf 0.79186 — are recorded evidence, not a
+  runnable test.)*
+- The max-over-families honesty caveat is surfaced in the `select` report (as the *family's* estimate).
 
 ## Plan
 
-- [x] **Brainstorm** (2026-07-13, operator) — resolved the mechanism: run/select separation (not a
-  select+ship driver mode), `metis select` merging select+promote, lowest-SE-within-1-SE family rule,
-  two-run workflow, all-data ship. Spec written above.
+- [x] **Brainstorm** (2026-07-13, operator) — converged the mechanism (see Log): derived run mode (nested
+  for sweeps, single-level CV degenerate), one nested run recording inner+outer, `metis select`
+  reconstruct-and-ship on all data, `driver:` dropped, one shared run engine. Spec above.
 - [ ] Durable plan via `superpowers-writing-plans` → `workshop/plans/000032-*-plan.md`, then `change-code`.
 
 ## Log
@@ -139,4 +168,23 @@ estimator this extends), metis#22 (consumes `--best-per-model-class`), metis#33 
     family-complexity order as unsound (effective params vary; it re-smuggles cross-family complexity). SE
     also penalizes inner-selection instability for free.
   - **Two-run workflow** (single → config ledger + ship; cv → family estimates), ship on all data.
-  - **Split out:** the repo-root-relative path key → its own issue (cwd-ergonomics, orthogonal).
+  - **Split out:** the repo-root-relative path key → its own issue (cwd-ergonomics, orthogonal). *(Filed as metis#34.)*
+- **Brainstorm 2026-07-13 (operator) — second evolution: DERIVED run mode; supersedes the two-run workflow.**
+  The spec review (fresh-eyes) surfaced C1: `driver:` is a shape field with an "exactly one of single|cv"
+  validator + no `--driver` flag, so "run under two drivers" means editing the .md → changes its blob-hash →
+  shifts all point-addresses + breaks `best-{hash}` naming. Resolving it collapsed the whole model:
+  - **ONE `metis run` does the nested CV** and records BOTH inner (per config) + outer (per family) rows —
+    no separate `driver: single` run. The two-run workflow is retired.
+  - **Run mode is DERIVED, not declared:** sweep (free vars) → nested CV; no free vars → single-level CV (the
+    outer selection loop has one candidate, so nested-CV mathematically *degenerates* — no special case);
+    bare experiment → run as-is. **The `driver:` block is deleted**; the outer loop reuses `sweeper.resample.cv`.
+    This dissolves C1 (no driver toggle → blob constant by construction) — the named-drivers machinery was
+    solving a problem the derived mode designs away.
+  - **`select --promote` reconstructs the config from the ledger** and runs it in ship mode (all data, no CV,
+    → submission) — the winner is NEVER pre-materialized. `metis run` measures + `select --promote` ships
+    funnel through the SAME run engine (`runResolvedExperiment`), two experiment assemblies (ARCH-DRY).
+  - **`ship:` stays** (latent during measure; activated only by `--promote`, which reconstructs the winner
+    from the shape and needs its predict/submission steps). Only `driver:` is obsolete.
+  - **Verbs:** `metis run` (kept, not `metis sweep`) / `metis select` / `kaggle submit` — three commands.
+  - Spec `## Spec` rewritten to this model; the C2 ledger extension (inner+outer rows, level-marked) is the
+    one substantial new backend piece — everything else reassembles existing parts.
