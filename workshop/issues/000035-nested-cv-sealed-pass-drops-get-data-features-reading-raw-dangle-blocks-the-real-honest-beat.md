@@ -5,7 +5,7 @@ deps: []
 github_issue:
 created: 2026-07-14
 updated: 2026-07-14
-estimate_hours:
+estimate_hours: 5
 started: 2026-07-14T07:43:17-07:00
 ---
 
@@ -53,17 +53,47 @@ Two entangled concerns to resolve (brainstorm-first):
 
 ## Done when
 
-- A nested-CV run of a real kbench-style sweep (features reading `raw: get-data`, incl. `ticket_survival`)
-  completes — the sealed pass reaches get-data's raw output, no dangling read.
-- A leakage test proves the fit_mask excludes the assessment rows from the target-encoding aggregate at
-  BOTH inner and outer levels (the outer honest estimate for a `ticket_survival` config tracks its inner
-  CV within noise, not inflated).
+- Nested CV runs the real kbench titanic sweep end-to-end under the ONE-ROAD model: `adapt` carries
+  the source columns (schema role `source`), `features` reads only its base dataset (no `raw:`),
+  `analysis_i` is shape-identical to the declared base (carries `test`). No dangling read.
 - The kbench nested smoke e2e (`e2e/thread_test.py::test_sweep_smoke_composes_and_trains`) un-xfails + passes.
+- The leakage tell (RUNBOOK §6 item 5) checked on the real honest-beat run: for each family whose
+  inner-winner includes `ticket_survival`, the outer honest estimate does NOT exceed its inner CV
+  beyond noise. (Outer-level protection = row absence in `analysis_i`; fit_mask = the INNER
+  cross-fit — the original "fit_mask at both levels" framing was wrong.)
+- The real honest-beat ran: `metis run titanic-sweep.md` → `select --best --promote` → operator
+  submit; numbers recorded in the issue Log + project file (closes the metis-v2 `done_when`).
 
 ## Plan
 
-- [ ] Brainstorm-first: the sealed-pass repoint generalization (any dropped-data-step ref, not just
-  `dataset`) + the fit_mask-both-levels leakage verification. Then spec + change-code.
+Durable plan: `workshop/plans/000035-stage-a-one-road-fix-plan.md` (review-hardened).
+
+- [ ] Task 0 — issue revision + estimate + `sdlc change-code`
+- [ ] Task 1 — metis: `source` schema role (TDD)
+- [ ] Task 2 — metis: outer-split carries `test` (TDD)
+- [ ] Task 3 — kbench: adapt carries source columns (TDD)
+- [ ] Task 4 — kbench: features reads base only (TDD)
+- [ ] Task 5 — kbench: shapes + relic deletion + RUNBOOK + atlas shadow-sweep
+- [ ] Task 6 — un-xfail nested smoke e2e; full e2e green
+- [ ] Task 7 — real honest-beat run (operator: kaggle submit)
+- [ ] Task 8 — close out (atlas, PR + sdlc merge, close, lessons)
+
+## Revisions
+
+### 2026-07-14 — stage-A scope (supersedes the original Spec's approach)
+- **Reason:** the brainstorm + research detour (see Log) rejected Spec item 1 (repoint `raw:` to
+  the preamble's get-data): `upstream_path` bypasses the metis#23 confinement chokepoint, so that
+  fix would hard-code a seal bypass into `metis/io.py`. Spec item 2's "fit_mask at BOTH levels"
+  framing was diagnosed wrong: outer protection is row ABSENCE in `analysis_i`; the fit_mask does
+  inner-level work only.
+- **Delta:** the fix is the ONE-ROAD model (adapt carries source columns under a new `source`
+  role; features drops `raw:`; outer-split carries `test` so `analysis_i` is a shape-identical
+  stand-in), leaving the metis sweep engine untouched. Transductive semantics declared (RUNBOOK),
+  not coded — the estimand knob is metis#36. Two sibling defects folded in: `analysis_i` lacked
+  `test`; `adapt`'s `fare_median` reclassified as legitimate-under-transduction (not a bug).
+  Done-when rewritten accordingly; plan at `workshop/plans/000035-stage-a-one-road-fix-plan.md`.
+  Note: prior references to "RUNBOOK §6.4" (including this issue's Problem section) mean **§6
+  list item 5** — miscitation, corrected at the RUNBOOK edit.
 
 ## Log
 
