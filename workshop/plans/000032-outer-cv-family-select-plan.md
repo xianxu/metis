@@ -152,6 +152,15 @@ func TestAggregateView_LevelKeyedNoCollision(t *testing.T) {
 
 ---
 
+## change-code plan-quality refinements (fold into implementation)
+
+1. **`--promote` reuses `promotedExperiment` (`ledger.go:59`), not `shapeConfigToExperiment` directly** — `promotedExperiment` is the free-params→experiment inverter `cmdPromote` uses (it `shape.Expand`s + matches the tuple, then calls `shapeConfigToExperiment`). Retiring `promote` must keep its inverter. (Task 2.3.)
+2. **`cmd/metis/select_cmd.go` already exists** (holds `cmdLedgerSelect`) — Task 2.2 is a **repurpose/modify in place**, not a new file.
+3. **Add an explicit failing-test step for the 1-config degenerate path** (Task 1.3/1.4) — pin its two new behaviors: records inner rows AND does NOT ship. Done-when commits to this hermetic test.
+4. **Pin the `(mean, SE)` carrier type** between `FamilyEstimate` and `familySelect` — a plain shared `{mean, se float64}` (not `sampler.MeanSE`'s struct with `ToldSet`), keeping `pkg/ledger` free of a `sampler` import.
+5. **`OuterFold` likely only needs to be a recorded COLUMN, not in `dedupKey`** — inner/outer rows already differ by PointAddr (different `baseRef`/`splitK`/`partRef`); the load-bearing fix is **`Level` in the `AggregateView` group key** (`ledger.go:216`). Don't over-constrain the key. Also state explicitly: the config-within-family inner reduction **pools inner folds across all outer folds** into one per-config `(mean, SE)` — that pooled estimate (not a flat all-data inner CV) is the intended config-selection signal.
+6. **Migration watch:** under the derived mode, every multi-config shape now defaults to the ~`outerK`× nested path and no longer auto-ships — when migrating fixtures/tests, confirm none silently become 5×+ costlier or assert a now-absent ship line (`--fast` is the escape hatch).
+
 ## Open note for the operator / executor
 
 - **The real acceptance** (`select --best` ships rf over the GBM overfitter, and the shipped config's outer estimate tracks public) needs the operator-gated real-Kaggle run (GBM 0.749 vs rf 0.79186 are recorded evidence). The hermetic gate is the fixture-ledger `select` test (Task 2.2 Step 1); the Kaggle confirmation is a separate operator run, not a blocking test.
