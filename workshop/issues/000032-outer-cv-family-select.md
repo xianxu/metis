@@ -226,12 +226,14 @@ total: 4.49
 Durable plan: `workshop/plans/000032-outer-cv-family-select-plan.md` (twice-reviewed spec decomposed;
 core-concepts tables + TDD tasks). **Two review-boundary milestones:**
 
-- [ ] **M1 — measure/record side:** ledger `Row` `Level`+outer-fold in the key + `FamilyEstimate` reducer;
+- [x] **M1 — measure/record side:** ledger `Row` `Level`+outer-fold in the key + `FamilyEstimate` reducer;
   drop `driver:` + config-count dispatch + `--fast`; nested run records inner + per-family outer rows.
-  (closes via `sdlc milestone-close --milestone M1`.)
-- [ ] **M2 — choose/ship side:** `familySelect` (lowest-SE-within-1-SE); `metis select` (dry: family+config
+  **DONE — milestone-close FIX-THEN-SHIP→fixed (1-config test + stale-docs), all 9 pkgs green -race.**
+- [x] **M2 — choose/ship side:** `familySelect` (lowest-SE-within-1-SE); `metis select` (dry: family+config
   report) + `--promote` (reconstruct+ship all-data, `best-{family}-{hash}`); `metis run` no-auto-ship; retire
-  `ledger select`+`promote`; migrate RUNBOOK/atlas/shapes/tests. (closes via `sdlc close --milestone M2`.)
+  `ledger select`+`promote`; migrate atlas/shapes/tests. **DONE — acceptance gate proves the flip (select
+  --best ships the generalizer over the inner-CV overfitter), all green -race.** *(kbench RUNBOOK = a
+  deferred peer write.)*
 
 ## Log
 
