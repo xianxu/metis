@@ -242,3 +242,37 @@ func TestFamilyOf(t *testing.T) {
 		t.Errorf("FamilyOf(empty) = %q, want \"\"", got)
 	}
 }
+
+// metis#32: familySelect picks the family by the honest OUTER estimate — lowest-SE within 1 SE
+// of the best mean — NOT the argmax (which is #32's whole point: don't ship the flashy overfitter).
+func TestFamilySelect_LowestSEWithin1SE(t *testing.T) {
+	// gbm has the higher mean but a wide SE; rf is within 1 SE of gbm's mean AND more stable.
+	est := map[string]MeanSE{
+		"rf":  {Mean: 0.80, SE: 0.01},
+		"gbm": {Mean: 0.805, SE: 0.03}, // best mean; band = mean >= 0.805-0.03 = 0.775 → rf qualifies
+	}
+	fam, caveat, ok := FamilySelect("maximize", est)
+	if !ok || fam != "rf" {
+		t.Fatalf("familySelect = %q (ok=%v), want rf (lowest-SE within 1 SE, not argmax gbm)", fam, ok)
+	}
+	if caveat == "" {
+		t.Error("expected a non-empty honesty caveat")
+	}
+}
+
+func TestFamilySelect_SingleFoldArgmaxMean(t *testing.T) {
+	est := map[string]MeanSE{"rf": {Mean: 0.80, SE: 0}, "gbm": {Mean: 0.81, SE: 0}}
+	fam, caveat, ok := FamilySelect("maximize", est)
+	if !ok || fam != "gbm" {
+		t.Fatalf("single-fold familySelect = %q, want gbm (argmax-mean, no SE)", fam)
+	}
+	if !strings.Contains(caveat, "single outer fold") {
+		t.Errorf("single-fold caveat should note no SE; got %q", caveat)
+	}
+}
+
+func TestFamilySelect_Empty(t *testing.T) {
+	if _, _, ok := FamilySelect("maximize", nil); ok {
+		t.Error("familySelect on empty est must return ok=false")
+	}
+}
