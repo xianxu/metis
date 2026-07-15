@@ -280,3 +280,113 @@ func TestSelectPromote_ShipRunIsCodeCaptured(t *testing.T) {
 		t.Error("the promoted ship run must write a record.json (code-capture provenance)")
 	}
 }
+
+// ── metis#41: select --point — publish an operator-chosen config by ledger row ──
+
+// A unique point_addr prefix resolves to its config; without --promote the board line prints
+// the config's free params + pooled inner estimate (the single-config inspect).
+func TestSelectPoint_ResolvesPrefixAndPrintsBoardLine(t *testing.T) {
+	dir := t.TempDir()
+	shapePath := writeSelectLedger(t, dir, taggedShapeForSelect, true)
+	var out strings.Builder
+	if err := runSelect(selectOpts{shapePath: shapePath, point: "i-rf8", out: &out}); err != nil {
+		t.Fatalf("select --point: %v", err)
+	}
+	s := out.String()
+	if !strings.Contains(s, "train.model=rf") || !strings.Contains(s, "max_depth=8") {
+		t.Errorf("--point board line must name the resolved config's free params; got:\n%s", s)
+	}
+	if !strings.Contains(s, "0.86") {
+		t.Errorf("--point board line must report the pooled inner estimate (0.86); got:\n%s", s)
+	}
+}
+
+// A prefix matching rows of MORE THAN ONE config is ambiguous — loud error listing candidates.
+func TestSelectPoint_AmbiguousPrefixListsCandidates(t *testing.T) {
+	dir := t.TempDir()
+	shapePath := writeSelectLedger(t, dir, taggedShapeForSelect, true)
+	err := runSelect(selectOpts{shapePath: shapePath, point: "i-rf", out: &strings.Builder{}})
+	if err == nil {
+		t.Fatal("an ambiguous --point prefix (matches rf4 AND rf8) must error")
+	}
+	if !strings.Contains(err.Error(), "i-rf4") || !strings.Contains(err.Error(), "i-rf8") {
+		t.Errorf("the ambiguity error should list candidate addrs; got %v", err)
+	}
+}
+
+// An unknown addr is a loud error.
+func TestSelectPoint_NoMatchErrors(t *testing.T) {
+	dir := t.TempDir()
+	shapePath := writeSelectLedger(t, dir, taggedShapeForSelect, true)
+	err := runSelect(selectOpts{shapePath: shapePath, point: "zzz", out: &strings.Builder{}})
+	if err == nil || !strings.Contains(err.Error(), "zzz") {
+		t.Fatalf("--point with no matching row must error naming the prefix; got %v", err)
+	}
+}
+
+// A --point addr that exists only OUTSIDE the pinned cohort must not resolve — the cohort
+// guard's filter applies before the row lookup (no silent cross-version ship).
+func TestSelectPoint_WrongCohortErrors(t *testing.T) {
+	dir := t.TempDir()
+	shapePath := filepath.Join(dir, "s.md")
+	if err := os.WriteFile(shapePath, []byte(taggedShapeForSelect), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	irow := func(cf, addr string, fp map[string]any, score float64) ledger.Row {
+		of, ff := 0, 0
+		return ledger.Row{CodeFingerprint: cf, PointAddr: addr, FreeParams: fp, Level: "inner", OuterFold: &of, Fold: &ff,
+			Metrics: map[string]float64{"train.fold_score": score}, Status: "ok"}
+	}
+	var led ledger.Ledger
+	led.Append(irow("cf1aaaaa", "i-lr1-0", lr1, 0.80), irow("cf2bbbbb", "i-rf8-0", rf8, 0.86))
+	b, err := ledger.Encode(led)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ledgerPath(shapePath), b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err = runSelect(selectOpts{shapePath: shapePath, point: "i-rf8", fingerprint: "cf1aaaaa", out: &strings.Builder{}})
+	if err == nil {
+		t.Fatal("--point resolving only outside the pinned --fingerprint cohort must error")
+	}
+}
+
+// --point is mutually exclusive with the rule-based selectors.
+func TestSelectPoint_ConflictsWithBest(t *testing.T) {
+	dir := t.TempDir()
+	shapePath := writeSelectLedger(t, dir, taggedShapeForSelect, true)
+	err := runSelect(selectOpts{shapePath: shapePath, point: "i-rf8", best: true, out: &strings.Builder{}})
+	if err == nil || !strings.Contains(err.Error(), "--point") {
+		t.Fatalf("--point with --best must be a sharp usage error; got %v", err)
+	}
+}
+
+// --point --promote reconstructs EXACTLY the row's config and ships it as point-{family}-{hash}
+// (operator-chosen provenance, distinct from the rule-chosen best- prefix).
+func TestSelectPoint_PromoteReconstructsRowConfig(t *testing.T) {
+	dir := t.TempDir()
+	shapePath := writeSelectLedger(t, dir, taggedShipShapeForSelect, true)
+	var out strings.Builder
+	err := runSelect(selectOpts{shapePath: shapePath, point: "i-rf8", promote: true,
+		exec: foldFakeExec{}, git: fakeGitProbe{name: "metis", sha: "sha"}, now: fixedNow(), out: &out})
+	if err != nil {
+		t.Fatalf("select --point --promote: %v", err)
+	}
+	subs, _ := filepath.Glob(filepath.Join(dir, "runs", "point-rf-*", "submission"))
+	if len(subs) == 0 {
+		t.Errorf("--point --promote must materialize runs/point-rf-*/submission; got none.\nout:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "point-rf-") {
+		t.Errorf("--point --promote must print the run id; got:\n%s", out.String())
+	}
+	// The reconstructed run's record carries the ROW's config (md=8), not the rule-based pick.
+	recs, _ := filepath.Glob(filepath.Join(dir, "runs", "point-rf-*", "record.json"))
+	if len(recs) == 0 {
+		t.Fatal("promoted point run must write record.json")
+	}
+	rec, _ := os.ReadFile(recs[0])
+	if !strings.Contains(string(rec), "\"max_depth\": 8") && !strings.Contains(string(rec), "\"max_depth\":8") {
+		t.Errorf("the promoted run must carry the row's config (rf max_depth=8); record:\n%s", rec)
+	}
+}
