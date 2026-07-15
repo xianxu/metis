@@ -12,19 +12,62 @@ import (
 	"github.com/xianxu/metis/pkg/ledger"
 )
 
-// cmdLedger handles `metis ledger show <shape.md> [--fingerprint HASH] [--sort metric] [--top N]`
-// — renders the shape's append-only ledger sidecar as a sorted/filtered VIEW (the CSV
-// stays append-order; sorting is never a storage concern).
+// cmdLedger routes the ledger VIEWS: `show` (sorted/filtered table) and `fingerprints`
+// (metis#39: the per-cohort inspect surface). Both render the shape's append-only
+// ledger sidecar (the CSV stays append-order; sorting is never a storage concern).
 func cmdLedger(args []string) error {
-	if len(args) == 0 || args[0] != "show" {
-		return fmt.Errorf("usage: metis ledger show <shape.md> [flags] (selection moved to `metis select`, metis#32)")
+	if len(args) == 0 {
+		return fmt.Errorf("usage: metis ledger show|fingerprints <shape.md> [flags] (selection moved to `metis select`, metis#32)")
 	}
+	switch args[0] {
+	case "show":
+		return cmdLedgerShow(args[1:])
+	case "fingerprints":
+		return cmdLedgerFingerprints(args[1:])
+	default:
+		return fmt.Errorf("unknown ledger subcommand %q (want: show | fingerprints)", args[0])
+	}
+}
+
+// cmdLedgerFingerprints handles `metis ledger fingerprints <shape.md>` — metis#39's
+// inspect surface: the ledger's code-fingerprint cohorts with the attributes that let
+// an operator pick a --fingerprint (rows by level, first…last run, commit+dirty, capture).
+func cmdLedgerFingerprints(args []string) error {
+	shapePath, flags, err := hoistShapePath(args)
+	if err != nil {
+		return fmt.Errorf("ledger fingerprints: %w (usage: metis ledger fingerprints <shape.md>)", err)
+	}
+	if len(flags) > 0 { // no flags yet — don't silently swallow a typo'd --bogus
+		return fmt.Errorf("ledger fingerprints: unexpected args %v (usage: metis ledger fingerprints <shape.md>)", flags)
+	}
+	return showFingerprints(shapePath, os.Stdout)
+}
+
+// showFingerprints is the testable core: load ledger + records, reduce, render.
+func showFingerprints(shapePath string, out io.Writer) error {
+	led, err := loadLedger(shapePath)
+	if err != nil {
+		return err
+	}
+	if len(led.Rows) == 0 {
+		fmt.Fprintf(out, "(no ledger rows in %s)\n", ledgerPath(shapePath))
+		return nil
+	}
+	cs := cohortSummaries(led, loadLedgerRecords(shapePath, led))
+	fmt.Fprintf(out, "metis: %s — %d code-fingerprint cohort(s):\n", ledgerPath(shapePath), len(cs))
+	renderCohorts(out, cs)
+	return nil
+}
+
+// cmdLedgerShow handles `metis ledger show <shape.md> [--fingerprint HASH] [--sort metric]
+// [--top N]`.
+func cmdLedgerShow(args []string) error {
 	fs := flag.NewFlagSet("ledger show", flag.ContinueOnError)
 	fingerprint := fs.String("fingerprint", "", "filter to one code-fingerprint (code-version, metis#27)")
 	sortMetric := fs.String("sort", "", "sort by this namespaced metric (e.g. train.fold_score)")
 	direction := fs.String("dir", "", "sort direction: maximize | minimize (default: the shape's objective direction)")
 	top := fs.Int("top", 0, "show only the top N (0 = all)")
-	shapePath, flags, err := hoistShapePath(args[1:])
+	shapePath, flags, err := hoistShapePath(args)
 	if err != nil {
 		return fmt.Errorf("ledger show: %w (usage: metis ledger show <shape.md> [--fingerprint HASH] [--sort metric] [--top N])", err)
 	}

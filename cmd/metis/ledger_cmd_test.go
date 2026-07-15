@@ -1,12 +1,16 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/xianxu/metis/pkg/ledger"
+	"github.com/xianxu/metis/pkg/record"
 )
 
 // A minimal parse-able experiment-shape (runPromote/cmdLedger only ParseShape it + read the
@@ -101,5 +105,88 @@ func TestHoistShapePath_ArgOrder(t *testing.T) {
 	}
 	if _, _, err := hoistShapePath([]string{"a.md", "b.md"}); err == nil {
 		t.Error("two <shape.md> positionals must error")
+	}
+}
+
+// writeFingerprintFixture builds a multi-cohort workspace: a shape + ledger CSV spanning
+// two fingerprint cohorts and a legacy blank row, plus runs/<id>/record.json for the two
+// cohort runs (r-old lacks a record — a cleaned run dir the summary must tolerate).
+func writeFingerprintFixture(t *testing.T, dir string) string {
+	t.Helper()
+	shapePath := filepath.Join(dir, "s.md")
+	if err := os.WriteFile(shapePath, []byte(foldShapeForLedger), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var led ledger.Ledger
+	led.Append(
+		ledger.Row{CodeFingerprint: "aaaa1111ffff", PointAddr: "r-a", Level: "inner",
+			FreeParams: map[string]any{"train.model": "a"}, Metrics: map[string]float64{"train.fold_score": 0.8}, Status: "ok"},
+		ledger.Row{CodeFingerprint: "bbbb2222ffff", PointAddr: "r-b", Level: "outer",
+			FreeParams: map[string]any{"train.model": "b"}, Metrics: map[string]float64{"train.fold_score": 0.7}, Status: "ok"},
+		ledger.Row{CodeFingerprint: "", PointAddr: "r-old",
+			FreeParams: map[string]any{"train.model": "a"}, Metrics: map[string]float64{"train.fold_score": 0.6}, Status: "ok"},
+	)
+	b, err := ledger.Encode(led)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ledgerPath(shapePath), b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	recA := record.RunRecord{RunID: "r-a", Started: "2026-07-14T10:00:00Z", Finished: "2026-07-14T10:05:00Z",
+		CodeFingerprint: "aaaa1111ffff", Dirty: true,
+		Steps: []record.StepRecord{{StepID: "train", Code: record.CodeManifest{Commit: "commita11", CaptureStatus: "captured"}}}}
+	recB := record.RunRecord{RunID: "r-b", Started: "2026-07-15T09:00:00Z", Finished: "2026-07-15T09:01:00Z",
+		CodeFingerprint: "bbbb2222ffff",
+		Steps: []record.StepRecord{{StepID: "train", Code: record.CodeManifest{Commit: "commitb22", CaptureStatus: "captured"}}}}
+	for id, rec := range map[string]record.RunRecord{"r-a": recA, "r-b": recB} {
+		runDir := filepath.Join(dir, "runs", id)
+		if err := os.MkdirAll(runDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		b, err := json.Marshal(rec)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(runDir, "record.json"), b, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return shapePath
+}
+
+// Drives the real `metis ledger fingerprints <shape.md>` CLI path (run() → cmdLedger),
+// documented arg order (lessons.md: never call the handler directly), and asserts the
+// per-cohort table: short fingerprints, the legacy group, level counts, timestamps,
+// commit + dirty, capture status.
+func TestLedgerFingerprints_CLI(t *testing.T) {
+	shapePath := writeFingerprintFixture(t, t.TempDir())
+
+	r, w, _ := os.Pipe()
+	orig := os.Stdout
+	os.Stdout = w
+	err := run([]string{"ledger", "fingerprints", shapePath})
+	_ = w.Close()
+	os.Stdout = orig
+	var buf bytes.Buffer
+	_, _ = io.Copy(&buf, r)
+	if err != nil {
+		t.Fatalf("run(ledger fingerprints): %v", err)
+	}
+	out := buf.String()
+	for _, want := range []string{"aaaa1111", "bbbb2222", "(legacy)", "inner:1", "outer:1", "flat:1",
+		"2026-07-14T10:00:00Z", "2026-07-15T09:01:00Z", "commit commita1, dirty, captured", "commit commitb2"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("fingerprints output missing %q:\n%s", want, out)
+		}
+	}
+	// Deterministic newest-last: bbbb (finished 07-15) renders after aaaa (07-14), legacy first.
+	if !(strings.Index(out, "(legacy)") < strings.Index(out, "aaaa1111") &&
+		strings.Index(out, "aaaa1111") < strings.Index(out, "bbbb2222")) {
+		t.Errorf("cohorts must order newest-last (legacy first):\n%s", out)
+	}
+	// Unknown args must not be silently swallowed.
+	if err := run([]string{"ledger", "fingerprints", shapePath, "--bogus"}); err == nil {
+		t.Error("unexpected flag must error, not be ignored")
 	}
 }
