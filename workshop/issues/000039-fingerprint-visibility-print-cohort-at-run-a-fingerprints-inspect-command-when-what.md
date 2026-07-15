@@ -5,7 +5,7 @@ deps: []
 github_issue:
 created: 2026-07-14
 updated: 2026-07-15
-estimate_hours:
+estimate_hours: 3
 started: 2026-07-15T14:49:03-07:00
 ---
 
@@ -49,8 +49,18 @@ Two additions, both presentation over existing capture data (no new instrumentat
 
 ## Plan
 
-- [ ] Spec at claim: pick the command name/placement, confirm record.json timestamp fields, then
-  TDD (pure cohort-summary reducer over ledger rows + records; thin cmd rendering).
+Durable plan: `workshop/plans/000039-fingerprint-visibility-plan.md` (reviewed; command named
+`metis ledger fingerprints`; record.json fields confirmed: Started/Finished RFC3339 +
+Steps[].Code.{Commit,CaptureStatus} + Dirty). Single-pass close, no milestones.
+
+- [ ] Task 1: pure core — `cohortSummaries` reducer + `resolveFingerprint` (git-style prefix) +
+  `renderCohorts` in `cmd/metis/fingerprints.go`, TDD
+- [ ] Task 2: `metis ledger fingerprints <shape.md>` verb (CLI test through real entrypoint)
+- [ ] Task 3: `metis run` prints its cohort line (backfill returns fp+dirty; both capture sites;
+  nested + flat output asserted)
+- [ ] Task 4: prefix resolution wired into `select` + `ledger show`; honest zero-match +
+  multi-cohort guard errors (inline cohort table, name the command); delete `distinctFingerprints`
+- [ ] Task 5: docs sweep (RUNBOOK/atlas), real-ledger smoke on the 566995b9 cohort, close
 
 ## Log
 
@@ -67,3 +77,16 @@ Two additions, both presentation over existing capture data (no new instrumentat
   must say so and LIST the cohorts present (fingerprint + row count + last-run time), which is
   exactly this issue's inspect surface. Until then the operator recipe is
   `tail -1 <ledger>.csv | cut -d, -f1` for the full hash.
+
+### 2026-07-15
+- Claimed + start-plan; durable plan authored at `workshop/plans/000039-fingerprint-visibility-plan.md`
+  and fresh-eyes plan-reviewed (2 substantive findings fixed: ExtraCommits fold respecified as
+  set-cardinality — ledger rows are not time-ordered; printFingerprintLine signature drift between
+  concepts table and task sketch reconciled). Lessons persisted to workshop/lessons.md.
+- Design decisions: command is `metis ledger fingerprints` (a ledger view, beside `ledger show`;
+  discoverability via the guard error naming it verbatim). `ledger.Filter` stays exact (storage
+  primitive); prefix resolution is a cmd-layer `resolveFingerprint` shared by select + ledger show
+  (ARCH-DRY — ends the --fingerprint/--point matching-semantics split). Record IO (`record.json`
+  reads) only on the inspect command + error paths, never the happy select path (ARCH-PURE).
+  Behavior change: `ledger show --fingerprint <no-match>` errors (was: `(no rows)`, exit 0) — Log
+  defect (b) applied consistently.
