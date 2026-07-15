@@ -61,28 +61,6 @@ type selectOpts struct {
 	out         io.Writer
 }
 
-// distinctFingerprints returns the sorted set of code-fingerprints (8-char) present in the ledger —
-// the multi-cohort check for select's join-soundness guard.
-func distinctFingerprints(led ledger.Ledger) []string {
-	seen := map[string]bool{}
-	for _, r := range led.Rows {
-		if r.CodeFingerprint == "" {
-			continue
-		}
-		f := r.CodeFingerprint
-		if len(f) > 8 {
-			f = f[:8]
-		}
-		seen[f] = true
-	}
-	out := make([]string, 0, len(seen))
-	for f := range seen {
-		out = append(out, f)
-	}
-	sort.Strings(out)
-	return out
-}
-
 // runSelect is the testable core: load shape + ledger, reduce the OUTER rows to per-family honest
 // estimates + the INNER rows to per-family config winners, pick, print, and (--promote) ship.
 func runSelect(o selectOpts) error {
@@ -98,16 +76,19 @@ func runSelect(o selectOpts) error {
 	if err != nil {
 		return err
 	}
-	led = ledger.Filter(led, o.fingerprint)
+	led, err = pinFingerprint(o.shapePath, led, o.fingerprint) // metis#39: git-style prefix + honest errors
+	if err != nil {
+		return fmt.Errorf("select: %w", err)
+	}
 	// Join soundness (metis#32 §"Join soundness" + workshop/lessons.md): the family↔config reduce pools
 	// OUTER rows by family AND INNER rows by config — both MUST be within ONE code-version. A ledger is
 	// append-only, so a re-run after a step's code changes adds a SECOND fingerprint cohort; reducing
 	// across cohorts silently blends versions into one estimate — the exact silently-wrong-winner class
 	// #32 exists to stop. With no explicit --fingerprint, refuse a multi-cohort ledger rather than guess.
+	// The count is a cheap pure predicate; the error path renders the full cohort summary (metis#39).
 	if o.fingerprint == "" {
-		if fps := distinctFingerprints(led); len(fps) > 1 {
-			return fmt.Errorf("select: %s spans %d code-fingerprint cohorts %v — a cross-version reduce would silently blend them; pin one with `--fingerprint <hash>` (or re-run `metis run %s` to refresh)",
-				ledgerPath(o.shapePath), len(fps), fps, filepath.Base(o.shapePath))
+		if n := distinctFingerprintCount(led); n > 1 {
+			return cohortGuardErr(o.shapePath, led, n)
 		}
 	}
 	metric := sh.Sweeper.Objective.Metric

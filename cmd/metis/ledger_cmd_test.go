@@ -190,3 +190,21 @@ func TestLedgerFingerprints_CLI(t *testing.T) {
 		t.Error("unexpected flag must error, not be ignored")
 	}
 }
+
+// metis#39: `ledger show --fingerprint` shares select's git-style prefix resolution
+// (one resolver — the flags must not diverge in matching semantics again).
+func TestLedgerShow_FingerprintPrefix(t *testing.T) {
+	shapePath := writeFingerprintFixture(t, t.TempDir())
+	var out strings.Builder
+	if err := showLedger(shapePath, "aaaa", "", "maximize", 0, &out); err != nil {
+		t.Fatalf("prefix filter: %v", err)
+	}
+	if !strings.Contains(out.String(), "aaaa1111") || strings.Contains(out.String(), "bbbb2222") {
+		t.Errorf("prefix must pin the aaaa cohort only:\n%s", out.String())
+	}
+	// A no-match prefix now errors with the cohort listing (was: silent "(no rows)").
+	if err := showLedger(shapePath, "cccc", "", "maximize", 0, &strings.Builder{}); err == nil ||
+		!strings.Contains(err.Error(), "nothing in the ledger matches") {
+		t.Errorf("no-match prefix must error with the cohort listing, got: %v", err)
+	}
+}

@@ -422,3 +422,109 @@ func TestSelectPoint_FailedFoldRowsWarnLoudly(t *testing.T) {
 		t.Errorf("--point must warn loudly about failed fold rows; got:\n%s", out.String())
 	}
 }
+
+// metis#39: the operator-hit UX defects around --fingerprint, all four fixed by
+// pinFingerprint (git-style prefix resolution + honest errors).
+func TestSelect_FingerprintPrefixAndHonestErrors(t *testing.T) {
+	dir := t.TempDir()
+	shapePath := writeSelectLedger(t, dir, taggedShapeForSelect, true) // single cohort "cf"... needs 2 cohorts
+	// Re-write the ledger with two DISTINCT full fingerprints sharing no prefix + one shared-prefix pair.
+	inner := func(cf, addr string, fp map[string]any, ofold, ifold int, score float64) ledger.Row {
+		of, ff := ofold, ifold
+		return ledger.Row{CodeFingerprint: cf, PointAddr: addr, FreeParams: fp, Level: "inner", OuterFold: &of, Fold: &ff,
+			Metrics: map[string]float64{"train.fold_score": score, "train.complexity": 6}, Status: "ok"}
+	}
+	outer := func(cf, addr string, fp map[string]any, ofold int, score float64) ledger.Row {
+		of := ofold
+		return ledger.Row{CodeFingerprint: cf, PointAddr: addr, FreeParams: fp, Level: "outer", OuterFold: &of,
+			Metrics: map[string]float64{"train.fold_score": score}, Status: "ok"}
+	}
+	var led ledger.Ledger
+	led.Append(
+		inner("566995b9aaaa", "i-lr1-0", lr1, 0, 0, 0.80), inner("566995b9aaaa", "i-lr1-1", lr1, 0, 1, 0.80),
+		outer("566995b9aaaa", "o-lr-0", lr1, 0, 0.80), outer("566995b9aaaa", "o-lr-1", lr1, 1, 0.82),
+		inner("deadbeef0000", "i2-lr1-0", lr1, 0, 0, 0.70),
+	)
+	b, err := ledger.Encode(led)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ledgerPath(shapePath), b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// (1) The operator's exact repro: an 8-char PREFIX of a full hash must resolve and
+	// filter (was: exact-match → silently empty → the "no scored configs" lie).
+	var out strings.Builder
+	if err := runSelect(selectOpts{shapePath: shapePath, best: true, fingerprint: "566995b9", out: &out}); err != nil {
+		t.Fatalf("8-char prefix must pin the cohort: %v", err)
+	}
+	if !strings.Contains(out.String(), "train.model=logreg") {
+		t.Errorf("prefix-pinned select should pick from the pinned cohort:\n%s", out.String())
+	}
+
+	// (2) Zero match: the error must SAY nothing matches and LIST the cohorts present —
+	// never the "no scored configs — run metis run first" lie.
+	err = runSelect(selectOpts{shapePath: shapePath, best: true, fingerprint: "cccc9999", out: &strings.Builder{}})
+	if err == nil {
+		t.Fatal("a no-match --fingerprint must error")
+	}
+	if !strings.Contains(err.Error(), "nothing in the ledger matches") {
+		t.Errorf("zero-match error must say so, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "566995b9") || !strings.Contains(err.Error(), "deadbeef") {
+		t.Errorf("zero-match error must list the cohorts present, got: %v", err)
+	}
+	if strings.Contains(err.Error(), "no scored configs") {
+		t.Errorf("the zero-match lie is back: %v", err)
+	}
+
+	// (3) Ambiguous prefix across two cohorts → error listing both.
+	led.Append(inner("566995ffbbbb", "i3-lr1-0", lr1, 0, 0, 0.60))
+	b, _ = ledger.Encode(led)
+	if err := os.WriteFile(ledgerPath(shapePath), b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err = runSelect(selectOpts{shapePath: shapePath, best: true, fingerprint: "566995", out: &strings.Builder{}})
+	if err == nil || !strings.Contains(err.Error(), "ambiguous") {
+		t.Errorf("shared prefix must be an ambiguity error, got: %v", err)
+	}
+}
+
+// metis#39: the multi-cohort no-pin guard now renders the per-cohort summary inline and
+// names the inspect command — an operator resolves the pin without opening the csv.
+func TestSelect_CohortGuardNamesInspectCommand(t *testing.T) {
+	dir := t.TempDir()
+	shapePath := filepath.Join(dir, "s.md")
+	if err := os.WriteFile(shapePath, []byte(taggedShapeForSelect), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	orow := func(cf, addr string, fp map[string]any, ofold int, score float64) ledger.Row {
+		of := ofold
+		return ledger.Row{CodeFingerprint: cf, PointAddr: addr, FreeParams: fp, Level: "outer", OuterFold: &of,
+			Metrics: map[string]float64{"train.fold_score": score}, Status: "ok"}
+	}
+	var led ledger.Ledger
+	led.Append(
+		orow("cf1aaaaa", "o-lr-0", lr1, 0, 0.80),
+		orow("cf2bbbbb", "o-lr-1", lr1, 1, 0.82),
+	)
+	b, err := ledger.Encode(led)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ledgerPath(shapePath), b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err = runSelect(selectOpts{shapePath: shapePath, best: true, out: &strings.Builder{}})
+	if err == nil {
+		t.Fatal("multi-cohort no-pin must refuse")
+	}
+	if !strings.Contains(err.Error(), "metis ledger fingerprints") {
+		t.Errorf("guard must name the inspect command, got: %v", err)
+	}
+	// The inline summary: one line per cohort with its row count (renderCohorts shape).
+	if !strings.Contains(err.Error(), "cf1aaaaa") || !strings.Contains(err.Error(), "rows") {
+		t.Errorf("guard must inline the per-cohort summary, got: %v", err)
+	}
+}

@@ -182,6 +182,56 @@ func codeStr(c cohortSummary) string {
 	return s
 }
 
+// pinFingerprint resolves a --fingerprint prefix against the ledger and filters to that
+// cohort. Zero match → an error that SAYS so and lists the cohorts present (the #39 fix
+// for the "no scored configs" lie); ambiguous → an error listing the candidates; "" →
+// no filter. The cohort table is rendered from records (IO) on the ERROR PATH only —
+// a resolved pin never reads record files. Shared by select and ledger show (ARCH-DRY).
+func pinFingerprint(shapePath string, led ledger.Ledger, prefix string) (ledger.Ledger, error) {
+	if prefix == "" {
+		return led, nil
+	}
+	full, matches := resolveFingerprint(led, prefix)
+	switch len(matches) {
+	case 1:
+		return ledger.Filter(led, full), nil
+	case 0:
+		var b strings.Builder
+		renderCohorts(&b, cohortSummaries(led, loadLedgerRecords(shapePath, led)))
+		return led, fmt.Errorf("nothing in the ledger matches --fingerprint %q — cohorts present:\n%s  (inspect: metis ledger fingerprints %s)",
+			prefix, b.String(), filepath.Base(shapePath))
+	default:
+		shorts := make([]string, len(matches))
+		for i, m := range matches {
+			shorts[i] = short(m)
+		}
+		return led, fmt.Errorf("--fingerprint %q is ambiguous across %d cohorts %v — disambiguate (inspect: metis ledger fingerprints %s)",
+			prefix, len(matches), shorts, filepath.Base(shapePath))
+	}
+}
+
+// cohortGuardErr renders the metis#32 multi-cohort refusal WITH the per-cohort summary
+// inline + the inspect command (metis#39) — the operator resolves the pin without
+// opening the csv. Record IO happens here, on the error path only.
+func cohortGuardErr(shapePath string, led ledger.Ledger, n int) error {
+	var b strings.Builder
+	renderCohorts(&b, cohortSummaries(led, loadLedgerRecords(shapePath, led)))
+	return fmt.Errorf("select: %s spans %d code-fingerprint cohorts — a cross-version reduce would silently blend them:\n%spin one with `--fingerprint <hash>` (inspect: metis ledger fingerprints %s; or re-run `metis run %s` to refresh)",
+		ledgerPath(shapePath), n, b.String(), filepath.Base(shapePath), filepath.Base(shapePath))
+}
+
+// distinctFingerprintCount counts the ledger's distinct NON-empty fingerprints — the
+// cheap (no record IO) multi-cohort predicate; legacy blank rows don't count as a cohort.
+func distinctFingerprintCount(led ledger.Ledger) int {
+	seen := map[string]bool{}
+	for _, r := range led.Rows {
+		if r.CodeFingerprint != "" {
+			seen[r.CodeFingerprint] = true
+		}
+	}
+	return len(seen)
+}
+
 // loadLedgerRecords reads record.json for each distinct run the ledger references
 // (Row.PointAddr IS the run id — rowsFromManifest). Missing/unparseable records are
 // SKIPPED (an inspect surface tolerates cleaned run dirs; the summary shows "?").

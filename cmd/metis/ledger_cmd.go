@@ -95,7 +95,10 @@ func showLedger(shapePath, fingerprint, sortMetric, direction string, top int, o
 	if err != nil {
 		return err
 	}
-	led = ledger.Filter(led, fingerprint)
+	led, err = pinFingerprint(shapePath, led, fingerprint) // metis#39: same resolution as select
+	if err != nil {
+		return fmt.Errorf("ledger show: %w", err)
+	}
 	rows := led.Rows
 	if sortMetric != "" {
 		// metis#18: the sidecar holds RAW per-fold rows — reduce to per-config (mean, SE)
