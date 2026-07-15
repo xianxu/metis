@@ -5,7 +5,7 @@ deps: []
 github_issue:
 created: 2026-07-13
 updated: 2026-07-15
-estimate_hours:
+estimate_hours: 1.63
 started: 2026-07-15T16:07:52-07:00
 ---
 
@@ -49,10 +49,40 @@ Injected `progress` defaults to a no-op (backward-compatible; pure `Run` tests p
 - `metis run` prints a live `k/n` + running best for a grid sweep, and `outer j/k · est mean±SE` for a
   `driver: cv` run — verified on a real (or fixture) sweep, not just asserted.
 
+## Estimate
+
+```estimate
+model: estimate-logic-v3.1
+familiarity: 1.0
+item: smaller-go-module   design=0.05 impl=0.25
+item: smaller-go-module   design=0.10 impl=0.35
+item: smaller-go-module   design=0.10 impl=0.40
+item: smaller-go-module   design=0.02 impl=0.15
+item: atlas-docs          design=0.02 impl=0.10
+design-buffer: 0.30
+total: 1.63
+```
+
+Row 1 = `SizeHint` on the Sampler interface + 6 impls (4 prod + 2 test fakes incl. the
+`countSampler` n-refactor) + table test. Row 2 = `Run`'s completion-fired `ProgressEvent[P,O]`
+(mutex-serialized wrapper) + 19 call-site updates + Seq/Par progress tests. Row 3 =
+`cmd/metis/progress.go` sink (per-pass hooks, seeded totals, throttled renderer) + fake-clock
+tests + the 4 wiring sites. Row 4 = fixture-sweep output pins (nested + flat). `atlas-docs` =
+atlas/RUNBOOK + issue Revisions + the real smoke-sweep evidence run. Calibration doc [stale]
+(#127) — provisional.
+
 ## Plan
 
-- [ ] (spec at claim) `SizeKind` + `SizeHint` on `Sampler`; grid impl; `progress` callback threaded
-  through `Run` (nesting-composed); `cmd/metis` renderer (aggregated, hierarchical); tests.
+Durable plan: `workshop/plans/000030-runner-progress-plan.md` (fresh-eyes reviewed; 5 findings
+folded: Task-4 e2e premises corrected to fixture pins + real evidence at close, countSampler
+refactor stated, 19 call sites grep-verified, totals seeded at wiring time, per-pass hooks carry
+outer-fold identity for #38). Single-pass close, no milestones.
+
+- [ ] Task 1: `SizeKind` + `SizeHint` on `Sampler` + 6 impls (TDD)
+- [ ] Task 2: `Run` fires `ProgressEvent[P,O]` at point completion; 19 call sites; Seq/Par tests
+- [ ] Task 3: `cmd/metis` sink (per-pass hooks, seeded totals, 1s-throttled line) + wiring
+- [ ] Task 4: fixture-sweep output pins (nested + flat)
+- [ ] Task 5: docs (atlas/RUNBOOK/Revisions) + real smoke-sweep evidence + close
 
 ## Log
 
@@ -66,3 +96,17 @@ Injected `progress` defaults to a no-op (backward-compatible; pure `Run` tests p
 - metis#38 filed (operator, during the #35 honest-beat run): a TUI/curses progress board over THIS
   issue's event stream — #30 stays the instrumentation + plain-line renderer (and the non-TTY
   degradation target), #38 owns the TTY presentation. This issue's scope is unchanged.
+
+### 2026-07-15
+- Claimed + start-plan (T2 order, operator-set). Durable plan authored + fresh-eyes reviewed
+  (verdict: issues found, all folded — see Plan section). Lessons persisted to workshop/lessons.md.
+- **Design decision (spec revision, full rationale in the plan):** the callback fires at POINT
+  COMPLETION, not per Tell — #31 (landed after this issue was filed) made exec batch-scoped and
+  every production sampler is one-batch static, so per-Tell events would all land at batch end
+  (dead as live progress). Count contract unchanged: exactly one event per point. Event =
+  `ProgressEvent[P,O]{K, Total, Kind, Point, Out}` (typed per level — no `any`); incumbents are
+  derived by the cmd/metis sink from outputs its closures already handle (S is opaque + un-Told
+  at completion time). SizeHint stays on the interface per spec (ARCH-DRY: the sampler owns n);
+  totals additionally SEEDED at wiring from direct SizeHint calls (stream-learned totals arrive
+  with a level's first completion — too late). #38's outer-fold identity rides per-pass closure
+  binding (`forPass(i)`), NOT a payload field (ARCH-PURE: pkg/sampler stays coordinate-free).
