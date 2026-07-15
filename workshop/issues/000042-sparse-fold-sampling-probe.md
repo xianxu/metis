@@ -81,10 +81,10 @@ k5-vs-k10 ledger reduction, and the #36-Log + RUNBOOK write-up.
 
 ## Plan
 
-- [ ] metis: `--sample m` flag on `run` (run.go) → `runFolds` (sweep.go); guards (m>k, flat
+- [x] metis: `--sample m` flag on `run` (run.go) → `runFolds` (sweep.go); guards (m>k, flat
       shape); `--fast` aliased; banner/estimate lines show m-of-k. TDD: extend the nested-CV
       e2e + a unit test on the guard paths.
-- [ ] kbench: `titanic-sweep-k10.md` (k:10 copy, new id, same seed); run the `--sample 3`
+- [x] kbench: `titanic-sweep-k10.md` (k:10 copy, new id, same seed); run the `--sample 3`
       probe (background, `--parallel`).
 - [ ] analysis: reduce k10 outer rows vs b7aee3de k5 cohort (ticket vs no-ticket); apply the
       decision rule; write findings to metis#36 Log + RUNBOOK note; log here.
@@ -101,6 +101,12 @@ k5-vs-k10 ledger reduction, and the #36-Log + RUNBOOK write-up.
   (ensembling — evidence downgraded its Titanic payoff; still a platform primitive).
 - Estimate 0.95h via the `## Estimate` block (v3.1 primitives). Calibration source flagged
   [stale] by start-plan — noted, derivation itemized anyway.
+- Seam BUILT (commit 2aa12e5, TDD red→green): `--sample` on run → guarded runFolds resolution in
+  runShapeSweep; full cmd/metis suite green. kbench side committed (321036d): titanic-sweep-k10.md
+  (one-delta copy, k:10) + the LB research pensive + noise-floor lesson; probe launched
+  `--sample 3` (3 × 99 × 10 inner). Side-quest in RUNBOOK §1: the documented
+  `metis run <path> --fast` was flag-order-broken (Go flag parsing stops at the first
+  positional) — reordered + noted, `--sample` row added.
 - Seam scoped: outer k reuses `Sweeper.Resample.CV.K` (sweep.go:202); `--fast` → `runFolds=1`
   (sweep.go:206-208) over an always-materialized k-way partition (sweep.go:322-324, "always
   split into k dirs; --fast just runs fewer") — `--sample m` is the same mechanism with m
