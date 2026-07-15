@@ -86,7 +86,7 @@ k5-vs-k10 ledger reduction, and the #36-Log + RUNBOOK write-up.
       e2e + a unit test on the guard paths.
 - [x] kbench: `titanic-sweep-k10.md` (k:10 copy, new id, same seed); run the `--sample 3`
       probe (background, `--parallel`).
-- [ ] analysis: reduce k10 outer rows vs b7aee3de k5 cohort (ticket vs no-ticket); apply the
+- [x] analysis: reduce k10 outer rows vs b7aee3de k5 cohort (ticket vs no-ticket); apply the
       decision rule; write findings to metis#36 Log + RUNBOOK note; log here.
 
 ## Log
@@ -107,6 +107,18 @@ k5-vs-k10 ledger reduction, and the #36-Log + RUNBOOK write-up.
   `--sample 3` (3 × 99 × 10 inner). Side-quest in RUNBOOK §1: the documented
   `metis run <path> --fast` was flag-order-broken (Go flag parsing stops at the first
   positional) — reordered + noted, `--sample` row added.
+- **PROBE RAN + DECISION RULE APPLIED: attenuation SUPPORTED.** Run: 3 outer × 99 × 10 inner,
+  ~28 min wall after a relaunch (first launch thrashed at load-avg 83 — the `--parallel` help's
+  own BLAS-oversubscription caveat; relaunched `OMP_NUM_THREADS=1 --parallel 8` on 12 cores,
+  load ~21, ~107 trains/min). Numbers (full tables in #36's Log; script
+  `scratchpad/k5_vs_k10.py`, rerunnable against the two ledger csvs): `+ticket_survival` inner
+  increment over all6, k5→k10: rf 0.0020→0.0078, gbm 0.0059→0.0098, logreg flat; label-free
+  `+ticket_size` control flat everywhere; sealed selection flips toward ticket configs (rf 2/3
+  outer folds at k10 vs 1/5 at k5). k10 honest outer means flat within (wide, m=3) noise.
+  Ledger sidecar `titanic-sweep-k10.ledger.csv` is gitignored like its k5 sibling — `git add -f`
+  if the cohort should survive.
+- Operator process feedback mid-run (filed to metis#38): the babysitting stats I read by hand
+  (trains done, trains/min) belong in the parallel-TUI progress board — moving-average runs/sec.
 - Seam scoped: outer k reuses `Sweeper.Resample.CV.K` (sweep.go:202); `--fast` → `runFolds=1`
   (sweep.go:206-208) over an always-materialized k-way partition (sweep.go:322-324, "always
   split into k dirs; --fast just runs fewer") — `--sample m` is the same mechanism with m
