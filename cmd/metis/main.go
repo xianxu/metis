@@ -41,7 +41,8 @@ func cmdRun(args []string) error {
 	runID := fs.String("run", "", "run id (default: run-<UTC timestamp>; ignored for a multi-point sweep — each point keys off its content-address)")
 	cache := fs.Bool("cache", true, "use the metis#2 validating-trace step cache (<expDir>/.metis-cache); --cache=false to disable")
 	dryRun := fs.Bool("dry-run", false, "metis#18 sweep: list the swept configs without running them")
-	fast := fs.Bool("fast", false, "metis#32: run ONE outer fold instead of the full k (a ~1/k-cost honest single-point per-family holdout) — for iteration; the full nested run (default) gives mean±SE. Only affects a nested (multi-config) run.")
+	fast := fs.Bool("fast", false, "metis#32: run ONE outer fold instead of the full k (a ~1/k-cost honest single-point per-family holdout) — for iteration; the full nested run (default) gives mean±SE. Shorthand for --sample 1. Only affects a nested (multi-config) run.")
+	sampleN := fs.Int("sample", 0, "metis#42: run m of the k outer folds (sparse fold sampling; 0/omitted = all k). k stays the estimand (each fold trains on (k-1)/k of the rows); m only trades precision for cost — use to probe a higher k (e.g. k=10, --sample 3) without the full k× bill. The SE over m<k folds is noisy (m-1 df): probe with it, don't re-select what ships on it. Errors on m>k, on a single-config (flat) run, and combined with --fast.")
 	parallel := fs.Int("parallel", defaultParallel(), "metis#31: max concurrent step subprocesses across ALL sweep levels (driver×sweeper×resample share one global cap); <=1 = serial (exact pre-#31 behavior). Default runtime.NumCPU(), overridable by METIS_MAX_PARALLEL. Caveat: each leaf is a Python process that may itself multi-thread (BLAS / sklearn n_jobs) — n=NumCPU can oversubscribe cores; pin OMP_NUM_THREADS=1 or set n below NumCPU. On a COLD cache the first batch's ≤n points may each recompute the shared upstream (a bounded thundering herd).")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -59,6 +60,7 @@ func cmdRun(args []string) error {
 		cache:       *cache,
 		dryRun:      *dryRun,
 		fast:        *fast,
+		sample:      *sampleN,
 		out:         os.Stdout,
 		maxParallel: *parallel,
 	})

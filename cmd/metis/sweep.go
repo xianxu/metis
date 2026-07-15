@@ -203,7 +203,23 @@ func runShapeSweep(o runOpts, sh experiment.Shape, now func() time.Time, out io.
 	stratify := sh.Sweeper.Resample.CV.Stratify
 	nested := len(configPts) > 1
 	runFolds := k
-	if o.fast {
+	switch {
+	case o.sample != 0:
+		// metis#42: m-of-k sparse fold sampling. The partition is ALWAYS split k ways (k is the
+		// estimand — the train fraction each fold simulates); --sample m just runs m of them
+		// (each an unbiased sample of that estimand; the seeded partition makes the 0..m-1
+		// prefix a valid random m-subset). Misuse fails loudly, not silently.
+		if o.fast {
+			return fmt.Errorf("run: --sample and --fast are mutually exclusive (--fast is shorthand for --sample 1)")
+		}
+		if !nested {
+			return fmt.Errorf("run: --sample only applies to a nested (multi-config) run — this shape has 1 config, a flat CV with no outer folds to sample")
+		}
+		if o.sample < 1 || o.sample > k {
+			return fmt.Errorf("run: --sample %d out of range — want 1 ≤ m ≤ k=%d (the outer partition has exactly k folds)", o.sample, k)
+		}
+		runFolds = o.sample
+	case o.fast:
 		runFolds = 1
 	}
 	if o.dryRun {
