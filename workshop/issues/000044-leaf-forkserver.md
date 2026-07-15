@@ -5,7 +5,7 @@ deps: []
 github_issue:
 created: 2026-07-14
 updated: 2026-07-15
-estimate_hours:
+estimate_hours: 1.08
 started: 2026-07-15T10:33:09-07:00
 ---
 
@@ -48,9 +48,35 @@ conceptually the engine's fold loop already — one fewer subprocess per run).
 
 -
 
+## Estimate
+
+```estimate
+model: estimate-logic-v3.1
+familiarity: 1.0
+item: greenfield-go-module   design=0.15 impl=0.35
+item: smaller-go-module      design=0.10 impl=0.30
+item: atlas-docs             design=0.02 impl=0.08
+design-buffer: 0.30
+total: 1.08
+```
+
+`greenfield-go-module` = the new `metis/forkserver.py` + the `run_traced` extraction (a single
+greenfield concern with real-fork tests — priced as the module primitive despite being Python).
+`smaller-go-module` = `cmd/metis/forkexec.go` (wrapperSpec + serverPool) + `Execute` routing +
+flag, mirroring the existing executor patterns. `atlas-docs` = atlas/RUNBOOK + perf write-up.
+
 ## Plan
 
-- [ ]
+Durable plan: `workshop/plans/000044-leaf-forkserver-plan.md` (entities, protocol, risks).
+
+- [ ] T1 extract `run_traced` from `metis/trace.py` main (pure refactor; suite green).
+- [ ] T2 `metis/forkserver.py` + real-fork pytest suite (round-trip, env isolation, failure,
+      concurrency, reads.json + forced used_site_packages).
+- [ ] T3 `wrapperSpec` parse in `cmd/metis/forkexec.go` (TDD; not-forkable fallback).
+- [ ] T4 `serverPool` + `Execute` routing + `--forkserver` flag (default on); hermetic
+      integration through the real server; `go test ./... -race` green.
+- [ ] T5 perf acceptance (loose-bound test + REAL kbench --fast smoke, before/after wall-clock
+      logged) + atlas/RUNBOOK; close.
 
 ## Log
 
