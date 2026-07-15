@@ -1,11 +1,12 @@
 ---
 id: 000030
-status: open
+status: working
 deps: []
 github_issue:
 created: 2026-07-13
-updated: 2026-07-13
+updated: 2026-07-15
 estimate_hours:
+started: 2026-07-15T16:07:52-07:00
 ---
 
 # runner progress reporting — SizeHint + progress callback (k/n + live outer-cv)
