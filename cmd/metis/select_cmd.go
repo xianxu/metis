@@ -30,18 +30,19 @@ func cmdSelect(args []string) error {
 	perClass := fs.Bool("best-per-model-class", false, "print/promote one winner per model family (the metis#22 ensembling seam)")
 	promote := fs.Bool("promote", false, "materialize the selected config(s): reconstruct from the ledger + run on ALL data → runs/best-{family}-{hash}/submission.csv; prints the run id(s)")
 	fingerprint := fs.String("fingerprint", "", "restrict to one code-fingerprint (metis#27)")
+	point := fs.String("point", "", "metis#41: publish an OPERATOR-CHOSEN config by ledger row — a point_addr (git-style prefix ok); ships as point-{family}-{hash}. Mutually exclusive with --best/--best-per-model-class")
 	shapePath, flags, err := hoistShapePath(args)
 	if err != nil {
-		return fmt.Errorf("select: %w (usage: metis select <shape.md> [--best | --best-per-model-class] [--promote] [--fingerprint HASH])", err)
+		return fmt.Errorf("select: %w (usage: metis select <shape.md> [--best | --best-per-model-class | --point ADDR] [--promote] [--fingerprint HASH])", err)
 	}
 	if err := fs.Parse(flags); err != nil {
 		return err
 	}
-	if !*best && !*perClass {
+	if *point == "" && !*best && !*perClass {
 		*best = true // default view = the single ship recommendation
 	}
 	return runSelect(selectOpts{
-		shapePath: shapePath, best: *best, perClass: *perClass, promote: *promote,
+		shapePath: shapePath, best: *best, perClass: *perClass, promote: *promote, point: *point,
 		fingerprint: *fingerprint, stepPath: stepPath(shapePath), out: os.Stdout,
 	})
 }
@@ -51,6 +52,7 @@ type selectOpts struct {
 	best        bool
 	perClass    bool
 	promote     bool
+	point       string // metis#41: point_addr (prefix) of an operator-chosen config; "" = rule-based
 	fingerprint string
 	stepPath    []string
 	git         gitProbe                    // nil → gitCLI (production)
@@ -109,6 +111,15 @@ func runSelect(o selectOpts) error {
 		}
 	}
 	metric := sh.Sweeper.Objective.Metric
+
+	// metis#41: --point publishes an operator-chosen config by ledger row — it bypasses the
+	// rule-based selection entirely (the cohort guard above still applied).
+	if o.point != "" {
+		if o.best || o.perClass {
+			return fmt.Errorf("select: --point is mutually exclusive with --best/--best-per-model-class — a point-select IS the choice")
+		}
+		return runPointSelect(o, sh, led, metric)
+	}
 	direction := sh.Sweeper.Objective.Direction
 
 	// Config side (inner rows): the metis#19 rule over the per-config inner-CV → each family's winner.
@@ -356,4 +367,163 @@ func familyTag(fam string) string {
 		return "config"
 	}
 	return fam
+}
+
+// ── metis#41: point-select — publish an operator-chosen config by ledger row ──
+
+// resolvePointRows resolves a point_addr prefix against the (already cohort-filtered) ledger:
+// the rows of EXACTLY ONE config (any of its fold rows works as a handle — they share the
+// config's FreeParams). 0 configs → not-found; >1 → ambiguous, listing candidates. Pure.
+func resolvePointRows(led ledger.Ledger, prefix string) ([]ledger.Row, error) {
+	var hit []ledger.Row
+	for _, r := range led.Rows {
+		if strings.HasPrefix(r.PointAddr, prefix) {
+			hit = append(hit, r)
+		}
+	}
+	if len(hit) == 0 {
+		return nil, fmt.Errorf("select --point: no ledger row's point_addr starts with %q (if the ledger spans cohorts, the row may be outside the pinned --fingerprint)", prefix)
+	}
+	// Group to distinct configs; expand hit → all rows of the one config if unique.
+	var configs []map[string]any
+	var sample []string // parallel to configs: a sample addr per config for the error text
+	for _, r := range hit {
+		found := false
+		for _, c := range configs {
+			if freeParamMapsEqual(c, r.FreeParams) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			configs = append(configs, r.FreeParams)
+			sample = append(sample, r.PointAddr)
+		}
+	}
+	if len(configs) > 1 {
+		var cands []string
+		for i, c := range configs {
+			cands = append(cands, fmt.Sprintf("%s (%s)", sample[i], freeParamMapStr(c)))
+		}
+		sort.Strings(cands)
+		return nil, fmt.Errorf("select --point: prefix %q is ambiguous across %d configs — disambiguate:\n    %s",
+			prefix, len(configs), strings.Join(cands, "\n    "))
+	}
+	// One config: return ALL its rows (not just the prefix hits) so the board line pools folds.
+	var rows []ledger.Row
+	for _, r := range led.Rows {
+		if freeParamMapsEqual(configs[0], r.FreeParams) {
+			rows = append(rows, r)
+		}
+	}
+	return rows, nil
+}
+
+// freeParamMapStr renders a free-param MAP as the sorted `k=v` line (the map-side sibling of
+// freeParamStrFromParams, which takes the Point's slice form).
+func freeParamMapStr(m map[string]any) string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		parts = append(parts, fmt.Sprintf("%s=%v", k, m[k]))
+	}
+	return strings.Join(parts, " ")
+}
+
+// freeParamMapsEqual compares two free-param maps by fmt.Sprint value identity (the same
+// tolerance freeParamsEqual applies between a Point and a map).
+func freeParamMapsEqual(a, b map[string]any) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		w, ok := b[k]
+		if !ok || fmt.Sprint(v) != fmt.Sprint(w) {
+			return false
+		}
+	}
+	return true
+}
+
+// runPointSelect prints the chosen config's board line (pooled inner mean±SE + outer rows) and,
+// with --promote, reconstructs it from the row's FreeParams (promotedExperiment — the SAME path
+// --best ships through) into runs/point-{family}-{hash}/ — the `point-` prefix marks the run as
+// OPERATOR-chosen (vs the rule-chosen `best-`), so provenance keeps the two apart.
+func runPointSelect(o selectOpts, sh experiment.Shape, led ledger.Ledger, metric string) error {
+	rows, err := resolvePointRows(led, o.point)
+	if err != nil {
+		return err
+	}
+	config := rows[0].FreeParams
+	// Family key via the same Expand+match → FamilyOf derivation the rule-based paths use.
+	fam := ""
+	if points, perr := shape.Expand(sh.Pipeline, 0); perr == nil {
+		for _, p := range points {
+			if freeParamsEqual(p, config) {
+				fam = sampler.FamilyOf(p)
+				break
+			}
+		}
+	}
+	// Board line via the SAME reduce every sibling selector uses (pkg/ledger.AggregateView —
+	// ARCH-DRY, close-review finding 1): the per-fold inner rows collapse to one aggregate row
+	// carrying metric/.se/.n and a `failed` Status marker; outer rows (Fold nil) pass through.
+	var view ledger.Ledger
+	view.Append(rows...)
+	agg := ledger.AggregateView(view, metric)
+	fmt.Fprintf(o.out, "metis: select --point %s → %s\n", o.point, freeParamMapStr(config))
+	hasFailed := false
+	for _, r := range agg.Rows {
+		if r.Level == "inner" {
+			if r.Status == "failed" {
+				hasFailed = true
+			}
+			if mean, ok := r.Metrics[metric]; ok {
+				fmt.Fprintf(o.out, "  pooled inner %s: mean %.4f  SE %.4f  (n=%.0f fold rows)\n",
+					metric, mean, r.Metrics[metric+".se"], r.Metrics[metric+".n"])
+			}
+		}
+	}
+	for _, r := range agg.Rows {
+		if r.Level == "outer" && r.OuterFold != nil {
+			if s, ok := r.Metrics[metric]; ok {
+				fmt.Fprintf(o.out, "  outer fold %d: %.4f\n", *r.OuterFold, s)
+			}
+		}
+	}
+	if hasFailed {
+		// Loud-error discipline (close-review finding 2): sibling selectors (--best) SKIP a
+		// failed config entirely — promoting one is an explicit operator override, so say so.
+		fmt.Fprintf(o.out, "  warning: this config has FAILED fold rows (pooled estimate covers the emitted metrics only); --best would skip it — promoting is an explicit operator override\n")
+	}
+	if !o.promote {
+		return nil
+	}
+	if len(sh.Ship) == 0 {
+		return fmt.Errorf("select --point --promote: shape %q has an empty `ship:` — nothing to submit", sh.ID)
+	}
+	now := o.now
+	if now == nil {
+		now = time.Now
+	}
+	exp, err := promotedExperiment(sh, config)
+	if err != nil {
+		return fmt.Errorf("select --point --promote: %w", err)
+	}
+	sbh, _ := shapeBlobHash(o.shapePath)
+	addr, err := pointAddressOf(exp, sbh)
+	if err != nil {
+		return fmt.Errorf("select --point --promote: %w", err)
+	}
+	runID := "point-" + familyTag(fam) + "-" + short(addr)
+	ro := runOpts{expPath: o.shapePath, runID: runID, stepPath: o.stepPath, cache: true, git: o.git, exec: o.exec, out: o.out}
+	if _, err := runResolvedExperiment(exp, ro, runID, now, o.out); err != nil {
+		return fmt.Errorf("select --point --promote (%s): %w", runID, err)
+	}
+	fmt.Fprintf(o.out, "  promoted (kaggle submit --run <id>):\n    %s\n", runID)
+	return nil
 }

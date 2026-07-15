@@ -83,3 +83,8 @@ Replace the row-cloning seal with a runner-owned label channel:
   current seal, closes metis-v2; B = this, the structural redesign; C = metis#37 constructor
   algebra). Design substance + verified literature in the pensive (in-repo; see Problem). Depends on
   #35 landing first — stage A's honest-beat run is this issue's regression baseline.
+- Hypothesis sharpened by the 2026-07-14 point-rf submission (public 0.78229 for the ticket config
+  the honest estimate ranked BELOW the no-ticket pick that scored 0.77751): three same-direction
+  public samples now suggest nested measurement under-ranks co-occurrence features (fragmentation:
+  labeled-partner coverage 38.6%→~30% under the seal + m=10 shrinkage). The ticket_size experiment
+  in this issue's acceptance should quantify exactly this bias, not just hoisted-vs-fold-scoped.

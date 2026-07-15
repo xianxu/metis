@@ -4,7 +4,7 @@ An experiment is a git-tracked, declarative **pipeline of steps** — *issue-sha
 frontmatter (the machine-executable pipeline + config) over a freeform body (hypothesis + prose).
 It is **immutable input** (#13): a run never writes back into the `.md` — run history lives in
 `runs/<id>/record.json` + the `.ledger.csv` sidecar (browse via `metis ledger show`; choose + ship via
-`metis select [--best|--best-per-model-class] [--promote]`, metis#32 — retired `metis ledger select`), so a
+`metis select [--best|--best-per-model-class|--point ADDR] [--promote]`, metis#32; `--point` = metis#41's operator-chosen publish-any-ledger-row, shipping as `point-{family}-{hash}` — retired `metis ledger select`), so a
 committed config is a stable content-hash. The Go step-runner
 (`metis run <id>`, M2) executes it with **no agent in the loop**, unifying data
 reconstruction, training, and experiment tracking under one entrypoint.
