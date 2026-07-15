@@ -35,7 +35,15 @@ identical on a non-Kaggle platform?* — if yes, it lives here.
   reduces them read-time → per-config `(mean, SE)` (`<metric>{,.se,.n}`) — the leaderboard `ledger show
   --sort` and `promote` sort over (metis#19's 1-SE select re-reduces the same rows, no re-run). A v1
   non-fold row passes through untouched (idempotent). **`metis ledger show <shape> [--fingerprint|--sort|--top]`**
-  renders sorted/filtered views. **metis#32 retired `metis ledger select` + `metis promote`** — selection
+  renders sorted/filtered views. **metis#39 (fingerprint visibility, `cmd/metis/fingerprints.go`):**
+  every `--fingerprint` flag (select + ledger show) resolves **git-style unique prefixes** via one
+  `pinFingerprint`/`resolveFingerprint`; **`metis ledger fingerprints <shape>`** lists the ledger's
+  cohorts (rows by level, first…last record timestamps, commit+dirty, capture status — the pure
+  `cohortSummaries` reducer over rows + `record.json`s, tolerant of cleaned run dirs → `?`); the
+  select multi-cohort guard and the zero-match error inline the same cohort table + name the
+  command (record IO on inspect/error paths only); each `metis run` prints
+  `recording under code_fingerprint <hash> (commit <sha>, clean|dirty)` at capture time.
+  **metis#32 retired `metis ledger select` + `metis promote`** — selection
   moved to **`metis select <shape> [--best | --best-per-model-class] [--promote]`** (see the run/select
   command model below): it reads the nested-CV ledger, picks the FAMILY on the honest OUTER estimate + the
   CONFIG on the inner CV, and `--promote` reconstructs the winner (the pure `promotedExperiment` —

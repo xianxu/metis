@@ -74,14 +74,14 @@ Durable plan: `workshop/plans/000039-fingerprint-visibility-plan.md` (reviewed; 
 `metis ledger fingerprints`; record.json fields confirmed: Started/Finished RFC3339 +
 Steps[].Code.{Commit,CaptureStatus} + Dirty). Single-pass close, no milestones.
 
-- [ ] Task 1: pure core — `cohortSummaries` reducer + `resolveFingerprint` (git-style prefix) +
+- [x] Task 1: pure core — `cohortSummaries` reducer + `resolveFingerprint` (git-style prefix) +
   `renderCohorts` in `cmd/metis/fingerprints.go`, TDD
-- [ ] Task 2: `metis ledger fingerprints <shape.md>` verb (CLI test through real entrypoint)
-- [ ] Task 3: `metis run` prints its cohort line (backfill returns fp+dirty; both capture sites;
+- [x] Task 2: `metis ledger fingerprints <shape.md>` verb (CLI test through real entrypoint)
+- [x] Task 3: `metis run` prints its cohort line (backfill returns fp+dirty; both capture sites;
   nested + flat output asserted)
-- [ ] Task 4: prefix resolution wired into `select` + `ledger show`; honest zero-match +
+- [x] Task 4: prefix resolution wired into `select` + `ledger show`; honest zero-match +
   multi-cohort guard errors (inline cohort table, name the command); delete `distinctFingerprints`
-- [ ] Task 5: docs sweep (RUNBOOK/atlas), real-ledger smoke on the 566995b9 cohort, close
+- [x] Task 5: docs sweep (RUNBOOK/atlas), real-ledger smoke on the 566995b9 cohort, close
 
 ## Log
 
@@ -111,3 +111,16 @@ Steps[].Code.{Commit,CaptureStatus} + Dirty). Single-pass close, no milestones.
   reads) only on the inspect command + error paths, never the happy select path (ARCH-PURE).
   Behavior change: `ledger show --fingerprint <no-match>` errors (was: `(no rows)`, exit 0) — Log
   defect (b) applied consistently.
+- Implemented (Tasks 1–5, all TDD red→green, full package green + go vet clean):
+  `cmd/metis/fingerprints.go` (pure cohortSummaries/resolveFingerprint/renderCohorts +
+  pinFingerprint/cohortGuardErr + loadLedgerRecords IO seam) · `ledger fingerprints` verb ·
+  run-time cohort line from both capture sites · prefix pinning in select + ledger show ·
+  `distinctFingerprints` deleted. atlas/index.md + kbench RUNBOOK (peer commit 2bd5d01) updated.
+- **Real-ledger smoke (live titanic-sweep.ledger.csv, 5,571 rows, 4 cohorts):**
+  `ledger fingerprints` lists (legacy) 420 flat · 4cc9b742 495 flat · 566995b9 2166 (2160 inner/6
+  outer) · b7aee3de 2490 — the exact hashes from this issue's Problem, identified at a glance.
+  The big sweep's run dirs were cleaned → timestamps/commit render `?` (the tolerated case);
+  on titanic-sweep-smoke (records present) full metadata renders (timestamps, commit 5585871a,
+  dirty, captured). **Operator repro fixed live:** `select --fingerprint 566995b9` (8-char prefix)
+  → resolves + prints the board (was: the "no scored configs" lie). Multi-cohort refusal and
+  zero-match both render the cohort table inline + name `metis ledger fingerprints`.

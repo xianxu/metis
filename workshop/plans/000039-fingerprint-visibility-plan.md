@@ -14,7 +14,7 @@
 
 | Issue spec item | Design |
 |---|---|
-| 1. `metis run` prints its cohort | `backfillCodeManifest` already mints the fingerprint and has the record open (it reads `rec.Dirty`); it now *returns* `(fp, dirty)`. The two capture sites (`captureSweepCode`, `captureSingleRun`) print one line via a shared `printFingerprintLine`. Nested and `--fast` runs go through `captureSweepCode`; a flat run through `captureSingleRun` — both covered, no third mint site created. |
+| 1. `metis run` prints its cohort | `backfillCodeManifest` already mints the fingerprint and has the record open (it reads `rec.Dirty`); it now *returns* `(fp, dirty)` (declared at capture.go:324, mint at :349). The two capture sites (`captureSweepCode`, `captureSingleRun`) print one line via a shared `printFingerprintLine`. Nested and `--fast` runs go through `captureSweepCode`; a flat run through `captureSingleRun` — both covered, no third mint site created. |
 | 2. inspect command | **Name decided: `metis ledger fingerprints <shape.md>`** — it is a view over the ledger sidecar, so it sits beside `metis ledger show` rather than claiming a top-level verb. Discoverability is carried by the guard error, which names the command verbatim. |
 | 3. guard upgrades | (a) prefix resolution before `ledger.Filter` (which stays exact — the storage primitive is untouched); (b) zero-match error says "nothing matches" and inlines the cohort table; (c) the multi-cohort refusal inlines the same table + names the command. |
 
@@ -132,6 +132,9 @@ func TestCohortSummaries(t *testing.T) {
 	if a.Records != 2 {
 		t.Errorf("aaaa matched records: %+v", a)
 	}
+	if leg := cs[0]; leg.Rows != 1 || leg.Records != 0 || leg.LastFinish != "" {
+		t.Errorf("legacy cohort: %+v", leg)
+	}
 }
 
 // ExtraCommits is DISTINCT-commit cardinality minus one, order-proof: rows arrive
@@ -160,9 +163,6 @@ func TestCohortSummaries_ExtraCommitsSetCardinality(t *testing.T) {
 	}
 	if cs[0].ExtraCommits != 1 { // {c1,c2} → 2 distinct → 1 extra, regardless of row order
 		t.Errorf("ExtraCommits must be set-cardinality-1, got %d", cs[0].ExtraCommits)
-	}
-	if leg := cs[0]; leg.Rows != 1 || leg.Records != 0 || leg.LastFinish != "" {
-		t.Errorf("legacy cohort: %+v", leg)
 	}
 }
 
