@@ -98,10 +98,21 @@ func TestCaptureSweepCode_BackfillsCodeManifest(t *testing.T) {
 		Steps: []record.StepRecord{{StepID: "train"}},
 	})
 
-	man := sweepManifest{ShapeRunID: "srun-e2e", Points: []pointRun{{RunID: runID, Status: "ok"}}}
-	o := runOpts{expPath: expPath, stepPath: []string{filepath.Join(root, "steps")}}
+	// metis#39: pt-0 is FIRST in the manifest but has NO record.json (a cleaned/failed
+	// point) — the cohort line must still print, sourced from the first point whose
+	// record exists (all points share one fingerprint; close-review finding).
+	man := sweepManifest{ShapeRunID: "srun-e2e", Points: []pointRun{{RunID: "pt-0", Status: "failed"}, {RunID: runID, Status: "ok"}}}
+	var out bytes.Buffer
+	o := runOpts{expPath: expPath, stepPath: []string{filepath.Join(root, "steps")}, out: &out}
 	if err := captureSweepCode(o, man); err != nil {
 		t.Fatalf("captureSweepCode: %v", err)
+	}
+
+	// metis#39: a sweep (nested/--fast) run states the cohort it records under — the hash
+	// the select guard later names must have scrolled by. Exactly once per sweep, even
+	// when the manifest's first point has no record.
+	if got := strings.Count(out.String(), "recording under code_fingerprint "); got != 1 {
+		t.Errorf("sweep capture must print the cohort line exactly once, got %d:\n%s", got, out.String())
 	}
 
 	// The record's CodeManifest is now populated with D + a real commit.
@@ -173,9 +184,15 @@ func TestCaptureSingleRun_CapturesCodeAndSpec(t *testing.T) {
 		RunID: runID, Steps: []record.StepRecord{{StepID: "train"}},
 	})
 
-	o := runOpts{expPath: expPath, stepPath: []string{filepath.Join(root, "steps")}}
+	var out bytes.Buffer
+	o := runOpts{expPath: expPath, stepPath: []string{filepath.Join(root, "steps")}, out: &out}
 	if err := captureSingleRun(o, runID); err != nil {
 		t.Fatalf("captureSingleRun: %v", err)
+	}
+
+	// metis#39: a flat single run states its cohort too (same line as the sweep path).
+	if !strings.Contains(out.String(), "recording under code_fingerprint ") {
+		t.Errorf("single-run capture must print the cohort line:\n%s", out.String())
 	}
 
 	rb, _ := os.ReadFile(filepath.Join(root, "runs", runID, "record.json"))
