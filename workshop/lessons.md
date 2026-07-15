@@ -149,3 +149,18 @@ Rules distilled from work in metis, to prevent repeats (AGENTS.md §4).
 - **A shadow-sweep grep must match every serialization of the reference, not just the canonical one.** The same `raw: get-data` edge existed as YAML in shapes and as JSON (`"raw":"get-data"`) in generated winner experiments; a pattern built from the hand-authored form under-enumerates. Derive the pattern from the KEY NAME, run it from the repo root (so `atlas/`, `workshop/`, generated artifacts are in the net).
 - **A two-repo fix must enumerate BOTH repos' atlases** — the close gate only checks the repo you close in; the peer's atlas goes stale silently by default (kbench's atlas documented the two-road boundary verbatim).
 - **An assertion written for a path that has never executed is untested code — expect it to be wrong the first time the path runs.** The nested smoke e2e's `0.0 < score` bound (authored in the #32 migration while the test was xfailed) rejected a legitimate 0.0 accuracy on ~3-row fixture folds the first time the test actually ran.
+
+## Default `--parallel NumCPU` thrashes on real sklearn leaves — pin BLAS threads
+
+**metis#42 probe (2026-07-14).** First launch of the k10 sweep with default `--parallel` (NumCPU=12)
+drove load-avg to 83: ~22 Python leaves × multi-threaded BLAS each. 885 trains STARTED, zero
+finished in ~4 min — the run looked alive while making no progress. The `--parallel` help text
+documents exactly this caveat; it still shipped as the default behavior on a real sweep. Relaunch
+with `OMP_NUM_THREADS=1 …=1 --parallel 8` → load ~21, ~107 trains/min, done in ~28 min.
+
+**Rule:** for a real (subprocess-leaf) sweep, ALWAYS pin the leaf's thread env
+(`OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 VECLIB_MAXIMUM_THREADS=1 MKL_NUM_THREADS=1`) and cap
+`--parallel` below core count. Diagnostic signature of the thrash: starts ≫ completions with the
+process alive (throughput ≈ 0) — which is also why the #38 progress board needs a moving-average
+runs/sec line, not just liveness. Deeper fix candidate: metis could set single-thread BLAS env for
+its leaf subprocesses BY DEFAULT (the parallelism budget belongs to the orchestrator, not the leaf).

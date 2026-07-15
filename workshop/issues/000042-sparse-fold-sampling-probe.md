@@ -1,12 +1,13 @@
 ---
 id: 000042
-status: working
+status: codecomplete
 deps: []
 github_issue:
 created: 2026-07-14
 updated: 2026-07-14
 estimate_hours: 0.95
 started: 2026-07-14T18:11:47-07:00
+actual_hours: 0.27
 ---
 
 # sparse fold sampling — generalize --fast to m-of-k + 10-fold attenuation probe
@@ -92,6 +93,7 @@ k5-vs-k10 ledger reduction, and the #36-Log + RUNBOOK write-up.
 ## Log
 
 ### 2026-07-14
+- 2026-07-14: closed — TDD: --sample e2e (m-of-k fold coverage, ledger rows, 4 loud-guard cases) red->green; full cmd/metis suite green (18s). Probe verified end-to-end on real data: 3x99x10 run completed exit 0, ledger cohort written, k5-vs-k10 analysis executed with pre-committed decision rule (attenuation SUPPORTED — findings in #36 Log). Atlas experiment.md updated for --sample. RUNBOOK updated (incl. flag-order side-quest fix).; review verdict: SHIP
 
 - Filed from the direction brainstorm (brain session): Titanic LB research digest
   (kbench pensive 2026-07-14-01) says the 0.78→0.83 headroom is WCG group-survival rules, not
