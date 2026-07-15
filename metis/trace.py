@@ -183,18 +183,33 @@ def _capture_target(target: str) -> None:
         _classify(spec.origin)
 
 
-def main() -> None:
-    if len(sys.argv) < 2:
-        print("usage: python -m metis.trace <module> [args...]", file=sys.stderr)
-        raise SystemExit(2)
-    target = sys.argv[1]
-    sys.argv = sys.argv[1:]  # present the target's own argv to it
+def run_traced(target: str, *, force_site_packages: bool = False) -> None:
+    """Install the read-sensor, run `target` as `__main__`, write reads.json on the way out
+    (even on a step error). The single entry BOTH launchers share: the legacy
+    `python -m metis.trace <mod>` subprocess and a metis.forkserver child (metis#44).
+
+    force_site_packages (metis#44): a fork-server child inherits the server's preloaded
+    third-party imports, so it would never OBSERVE a site-packages read and the uv.lock dep
+    would silently drop out of its cache key — the child forces the flag instead (the step's
+    behavior does depend on site-packages, observed or not)."""
+    global _used_site_packages
+    if force_site_packages:
+        _used_site_packages = True
     sys.addaudithook(_audit)
     _capture_target(target)  # #15: the target's own file (runpy runs it as __main__)
     try:
         runpy.run_module(target, run_name="__main__", alter_sys=True)
     finally:
         _write_reads()  # even on a step error — record what it read before failing
+
+
+def main() -> None:
+    if len(sys.argv) < 2:
+        print("usage: python -m metis.trace <module> [args...]", file=sys.stderr)
+        raise SystemExit(2)
+    target = sys.argv[1]
+    sys.argv = sys.argv[1:]  # present the target's own argv to it
+    run_traced(target)
 
 
 if __name__ == "__main__":
