@@ -149,11 +149,21 @@ func captureSweepCode(o runOpts, man sweepManifest) error {
 	primary := cacheProjectRoot(o.stepPath, filepath.Dir(o.expPath))
 	commit, d, status := captureRunCode(closureByRepo, primary, o.expPath, "refs/metis/sweeps/"+man.ShapeRunID)
 	warnOnUncaptured(o.out, status, "sweep "+man.ShapeRunID)
+	// metis#39: state the cohort identity ONCE per sweep — all points share one fingerprint
+	// (one capture), so the first point whose record exists is authoritative (a point with a
+	// missing record.json returns fp "" and is skipped).
+	var fp record.Hash
+	var dirty bool
 	for _, p := range man.Points {
-		if err := backfillCodeManifest(o.expPath, p.RunID, d, commit, status); err != nil {
+		pfp, pdirty, err := backfillCodeManifest(o.expPath, p.RunID, d, commit, status)
+		if err != nil {
 			return err
 		}
+		if fp == "" && pfp != "" {
+			fp, dirty = pfp, pdirty
+		}
 	}
+	printFingerprintLine(o.out, fp, commit, dirty)
 	return nil
 }
 
@@ -166,7 +176,31 @@ func captureSingleRun(o runOpts, runID string) error {
 	primary := cacheProjectRoot(o.stepPath, filepath.Dir(o.expPath))
 	commit, d, status := captureRunCode(closureByRepo, primary, o.expPath, "refs/metis/runs/"+runID)
 	warnOnUncaptured(o.out, status, "run "+runID)
-	return backfillCodeManifest(o.expPath, runID, d, commit, status)
+	fp, dirty, err := backfillCodeManifest(o.expPath, runID, d, commit, status)
+	if err != nil {
+		return err
+	}
+	printFingerprintLine(o.out, fp, commit, dirty) // metis#39: the flat run states its cohort too
+	return nil
+}
+
+// printFingerprintLine states the cohort identity a run records under — the hash the
+// select cohort-guard will later name, so the operator has SEEN it scroll by (metis#39).
+// Prints whatever will actually land in the ledger, even for degraded capture
+// (warnOnUncaptured owns durability messaging; this line is identity only).
+func printFingerprintLine(out io.Writer, fp record.Hash, commit string, dirty bool) {
+	if out == nil || fp == "" {
+		return
+	}
+	state := "clean"
+	if dirty {
+		state = "dirty"
+	}
+	c := "?"
+	if commit != "" {
+		c = short(commit)
+	}
+	fmt.Fprintf(out, "metis: recording under code_fingerprint %s (commit %s, %s)\n", short(string(fp)), c, state)
 }
 
 // warnOnUncaptured emits a LOUD one-line note when a run/sweep could not be durably
@@ -321,18 +355,21 @@ func sortedSets(sets map[string]map[string]bool) map[string][]string {
 // closure (D) + the durable commit SHA + the capture status — the record's #3 slots #2/#8
 // fill. A "captured" commit overrides the coarse HEAD SHA; a non-captured status is
 // recorded honestly (so the record itself carries the reproducibility gap, #14).
-func backfillCodeManifest(expPath, runID string, d []record.CodeRef, commit, status string) error {
+// Returns the minted fingerprint + the record's dirty flag (metis#39: this is the ONE
+// mint site and it has the record open — callers print, not re-derive); a missing
+// record returns ("", false, nil).
+func backfillCodeManifest(expPath, runID string, d []record.CodeRef, commit, status string) (record.Hash, bool, error) {
 	recPath := filepath.Join(filepath.Dir(expPath), "runs", runID, "record.json")
 	b, err := os.ReadFile(recPath)
 	if os.IsNotExist(err) {
-		return nil
+		return "", false, nil
 	}
 	if err != nil {
-		return err
+		return "", false, err
 	}
 	var rec record.RunRecord
 	if err := json.Unmarshal(b, &rec); err != nil {
-		return err
+		return "", false, err
 	}
 	for i := range rec.Steps {
 		rec.Steps[i].Code.D = d
@@ -348,10 +385,10 @@ func backfillCodeManifest(expPath, runID string, d []record.CodeRef, commit, sta
 	// for a string manifest) is surfaced rather than silently dropped.
 	fp, err := record.CodeFingerprint(d)
 	if err != nil {
-		return err
+		return "", false, err
 	}
 	rec.CodeFingerprint = fp
-	return writeRecordJSON(filepath.Join(filepath.Dir(expPath), "runs", runID), rec)
+	return fp, rec.Dirty, writeRecordJSON(filepath.Join(filepath.Dir(expPath), "runs", runID), rec)
 }
 
 // isPathDirty reports whether the working-tree blob (workHash) differs from HEAD's
