@@ -68,3 +68,11 @@ family selection) removes the *cross-family* need for a comparable complexity �
   decouples from effective DoF across ν") and deferred; the real run made it bite — cx pinned to
   `max_iter × max_leaf_nodes`, constant across nine configs spanning 0.81–0.85 mean → parsimony no-op. Sibling:
   metis#32 (outer-CV selection — the cross-family half; this is the GBM-intrinsic + intra-family half).
+- 2026-07-14 (kbench#9 cohort 566995b9, k=10 --sample 3): the NEW it=50 grid floor produced gbm's
+  top pooled-inner config (it50 lv15 [all6+size+ticket] 0.8424±0.0059) — operator point-submitted:
+  **public 0.77033** vs rf-best's 0.78947 on the same cohort. Lightly-boosted gbm still transfers
+  ~0.03 WORSE than rf (gap −0.072 vs rf's −0.039; public LB = all 418 rows, 1 flip = 0.239%).
+  Regularization via iter-floor improves the inner number, not the generalization gap — (b) needs
+  early-stopping/l2/min_samples_leaf, and (c)'s optimism-gap measure would have flagged this
+  config (huge inner mean, tiny inner SE, poor transfer). Honest outer at k10 m=3: gbm
+  0.8356±0.0274 vs rf 0.8283±0.0140 — the 1-SE rule correctly refused gbm a third time.
