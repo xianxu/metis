@@ -5,7 +5,7 @@ deps: []
 github_issue:
 created: 2026-07-14
 updated: 2026-07-14
-estimate_hours:
+estimate_hours: 0.47
 started: 2026-07-14T17:07:52-07:00
 ---
 
@@ -51,10 +51,34 @@ support, auditably.
 - The 2026-07-14 use case works end-to-end: promote the best ticket config from the b7aee3de
   cohort and `kaggle submit` it.
 
+## Estimate
+
+Derived per estimate-logic-v3.1 (thorough plan doc → 15% design buffer; impl at 40% of v2 ranges).
+One well-specced Go module extension (resolve fn + flag + tests on existing fixtures) + the close
+boundary review. Issue-spec/plan authoring already spent under #35's window.
+
+```estimate
+model: estimate-logic-v3.1
+familiarity: 1.0
+item: smaller-go-module        design=0.1 impl=0.2
+item: milestone-review         design=0.0 impl=0.15
+design-buffer: 0.15
+total: 0.47
+```
+
+Item→task mapping: smaller-go-module = Tasks 1–2 (resolve + promote, one module's surface);
+milestone-review = the close boundary review (Task 3).
+
+> Produced via `brain/data/life/42shots/velocity/estimate-logic-v3.1.md` against
+> `baseline-v3.1.md`. Method A only.
+
 ## Plan
 
-- [ ] Small: a ledger row lookup + the existing promotedExperiment path. TDD on a fixture ledger;
-  e2e assert reconstruct==row.
+Durable plan: `workshop/plans/000041-select-point-plan.md`.
+
+- [ ] Task 1 — resolve + errors (TDD)
+- [ ] Task 2 — promote path (TDD)
+- [ ] Task 3 — real-ledger verification (operator submit) + atlas/RUNBOOK + close
 
 ## Log
 
