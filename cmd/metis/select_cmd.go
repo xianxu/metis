@@ -4,7 +4,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -387,7 +386,7 @@ func resolvePointRows(led ledger.Ledger, prefix string) ([]ledger.Row, error) {
 	}
 	// Group to distinct configs; expand hit → all rows of the one config if unique.
 	var configs []map[string]any
-	sample := map[string]string{} // config index (by position) → a sample addr for the error text
+	var sample []string // parallel to configs: a sample addr per config for the error text
 	for _, r := range hit {
 		found := false
 		for _, c := range configs {
@@ -398,13 +397,13 @@ func resolvePointRows(led ledger.Ledger, prefix string) ([]ledger.Row, error) {
 		}
 		if !found {
 			configs = append(configs, r.FreeParams)
-			sample[fmt.Sprint(len(configs)-1)] = r.PointAddr
+			sample = append(sample, r.PointAddr)
 		}
 	}
 	if len(configs) > 1 {
 		var cands []string
 		for i, c := range configs {
-			cands = append(cands, fmt.Sprintf("%s (%s)", sample[fmt.Sprint(i)], freeParamMapStr(c)))
+			cands = append(cands, fmt.Sprintf("%s (%s)", sample[i], freeParamMapStr(c)))
 		}
 		sort.Strings(cands)
 		return nil, fmt.Errorf("select --point: prefix %q is ambiguous across %d configs — disambiguate:\n    %s",
@@ -470,37 +469,36 @@ func runPointSelect(o selectOpts, sh experiment.Shape, led ledger.Ledger, metric
 			}
 		}
 	}
-	var innerScores []float64
-	var outerRows []ledger.Row
-	for _, r := range rows {
-		if r.Level == "outer" {
-			outerRows = append(outerRows, r)
-			continue
-		}
-		if s, ok := r.Metrics[metric]; ok {
-			innerScores = append(innerScores, s)
-		}
-	}
+	// Board line via the SAME reduce every sibling selector uses (pkg/ledger.AggregateView —
+	// ARCH-DRY, close-review finding 1): the per-fold inner rows collapse to one aggregate row
+	// carrying metric/.se/.n and a `failed` Status marker; outer rows (Fold nil) pass through.
+	var view ledger.Ledger
+	view.Append(rows...)
+	agg := ledger.AggregateView(view, metric)
 	fmt.Fprintf(o.out, "metis: select --point %s → %s\n", o.point, freeParamMapStr(config))
-	if n := len(innerScores); n > 0 {
-		mean := 0.0
-		for _, s := range innerScores {
-			mean += s
-		}
-		mean /= float64(n)
-		se := 0.0
-		if n > 1 {
-			for _, s := range innerScores {
-				se += (s - mean) * (s - mean)
+	hasFailed := false
+	for _, r := range agg.Rows {
+		if r.Level == "inner" {
+			if r.Status == "failed" {
+				hasFailed = true
 			}
-			se = math.Sqrt(se / float64(n-1) / float64(n))
+			if mean, ok := r.Metrics[metric]; ok {
+				fmt.Fprintf(o.out, "  pooled inner %s: mean %.4f  SE %.4f  (n=%.0f fold rows)\n",
+					metric, mean, r.Metrics[metric+".se"], r.Metrics[metric+".n"])
+			}
 		}
-		fmt.Fprintf(o.out, "  pooled inner %s: mean %.4f  SE %.4f  (n=%d fold rows)\n", metric, mean, se, n)
 	}
-	for _, r := range outerRows {
-		if s, ok := r.Metrics[metric]; ok && r.OuterFold != nil {
-			fmt.Fprintf(o.out, "  outer fold %d: %.4f\n", *r.OuterFold, s)
+	for _, r := range agg.Rows {
+		if r.Level == "outer" && r.OuterFold != nil {
+			if s, ok := r.Metrics[metric]; ok {
+				fmt.Fprintf(o.out, "  outer fold %d: %.4f\n", *r.OuterFold, s)
+			}
 		}
+	}
+	if hasFailed {
+		// Loud-error discipline (close-review finding 2): sibling selectors (--best) SKIP a
+		// failed config entirely — promoting one is an explicit operator override, so say so.
+		fmt.Fprintf(o.out, "  warning: this config has FAILED fold rows (pooled estimate covers the emitted metrics only); --best would skip it — promoting is an explicit operator override\n")
 	}
 	if !o.promote {
 		return nil

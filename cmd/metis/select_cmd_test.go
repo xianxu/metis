@@ -390,3 +390,35 @@ func TestSelectPoint_PromoteReconstructsRowConfig(t *testing.T) {
 		t.Errorf("the promoted run must carry the row's config (rf max_depth=8); record:\n%s", rec)
 	}
 }
+
+// Close-review finding 2 (metis#41): a config with FAILED fold rows must be VISIBLE at --point —
+// sibling selectors skip it entirely, so promoting one is an explicit operator override.
+func TestSelectPoint_FailedFoldRowsWarnLoudly(t *testing.T) {
+	dir := t.TempDir()
+	shapePath := filepath.Join(dir, "s.md")
+	if err := os.WriteFile(shapePath, []byte(taggedShapeForSelect), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	of, f0, f1 := 0, 0, 1
+	var led ledger.Ledger
+	led.Append(
+		ledger.Row{CodeFingerprint: "cf", PointAddr: "i-rf8-0", FreeParams: rf8, Level: "inner", OuterFold: &of, Fold: &f0,
+			Metrics: map[string]float64{"train.fold_score": 0.86}, Status: "ok"},
+		ledger.Row{CodeFingerprint: "cf", PointAddr: "i-rf8-1", FreeParams: rf8, Level: "inner", OuterFold: &of, Fold: &f1,
+			Metrics: map[string]float64{"train.fold_score": 0.10}, Status: "failed"},
+	)
+	b, err := ledger.Encode(led)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ledgerPath(shapePath), b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out strings.Builder
+	if err := runSelect(selectOpts{shapePath: shapePath, point: "i-rf8", out: &out}); err != nil {
+		t.Fatalf("select --point over a partially-failed config should inspect (with warning), got: %v", err)
+	}
+	if !strings.Contains(out.String(), "FAILED fold rows") {
+		t.Errorf("--point must warn loudly about failed fold rows; got:\n%s", out.String())
+	}
+}
