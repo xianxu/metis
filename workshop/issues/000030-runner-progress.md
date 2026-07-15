@@ -60,3 +60,8 @@ Injected `progress` defaults to a no-op (backward-compatible; pure `Run` tests p
   fold with one `Run` loop for grid + adaptive; progress is the `SizeHint` (n) + a per-`Tell` callback
   (k + incumbent) hung off that loop — no per-sampler runner. Sibling: metis#31 (parallel batch exec) —
   same loop, the other injected seam. Near-term / high-value (you feel the blindness at 2,475 folds).
+
+### 2026-07-14
+- metis#38 filed (operator, during the #35 honest-beat run): a TUI/curses progress board over THIS
+  issue's event stream — #30 stays the instrumentation + plain-line renderer (and the non-TTY
+  degradation target), #38 owns the TTY presentation. This issue's scope is unchanged.

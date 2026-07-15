@@ -2,8 +2,10 @@
 
 Reads the FULL dataset (UNCONFINED — it must see all rows to split them) and
 materializes k `analysis_i/` subset dataset dirs: analysis_i holds the train rows
-whose outer fold != i (outer-analysis), so the outer-assessment rows (fold == i)
-are PHYSICALLY ABSENT from any sweep the driver points at analysis_i. Also writes
+whose outer fold != i (outer-analysis) PLUS the unchanged test frame, so it is a
+SHAPE-IDENTICAL stand-in for the declared base (metis#35 — only train rows
+differ; any pipeline that runs flat also runs sealed). The outer-assessment rows
+(fold == i) are PHYSICALLY ABSENT from any sweep the driver points at analysis_i. Also writes
 `outer_folds.json` (the positional fold assignment) so the outer scoring can refit
 the winner on outer-analysis and score on outer-assessment (via the fold mask).
 
@@ -42,7 +44,13 @@ def main() -> None:
     fold_arr = np.asarray(folds)
     for i in range(k):
         analysis = ds.train.iloc[np.flatnonzero(fold_arr != i)]
-        io.save_dataset(Dataset(schema=ds.schema, train=analysis, test=None),
+        # metis#35: carry the test frame — analysis_i is a SHAPE-IDENTICAL stand-in
+        # for the declared base (only train rows differ), so a both-frames feature
+        # (ticket_size over train+test) sees the same test rows sealed as at ship.
+        # Seal-neutral: the outer-assessment rows are fold-i TRAIN rows, which never
+        # appear in `test` — carrying test exposes no assessment label regardless of
+        # whether the test frame itself carries labels.
+        io.save_dataset(Dataset(schema=ds.schema, train=analysis, test=ds.test),
                         io.out_path(ctx, f"analysis_{i}"))
 
     io.write_metrics(ctx, {"k": float(k), "n": float(len(folds))})

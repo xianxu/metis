@@ -64,6 +64,22 @@ def test_outer_split_analysis_rows_carry_the_right_data(tmp_path, monkeypatch):
     assert a0.train.reset_index(drop=True).equals(full.train.iloc[kept0].reset_index(drop=True))
 
 
+def test_analysis_dirs_carry_test_frame(tmp_path, monkeypatch):
+    """analysis_i is a SHAPE-IDENTICAL stand-in for the declared base (metis#35):
+    only train rows differ — the test frame is carried through unchanged, so a
+    both-frames feature (e.g. ticket_size over train+test) sees the same test
+    rows sealed as it does flat/at-ship."""
+    sd = _run_step(monkeypatch, tmp_path / "runs" / "r3", "outer",
+                   {"dataset": "toy", "k": 3, "stratify": True}, outer_split.main)
+    full = io.load_dataset(str(TOY_PARENT / "toy"))
+    for i in range(3):
+        sub = io.load_dataset(str(sd / f"analysis_{i}"))
+        assert sub.test is not None and len(sub.test) == len(full.test)
+        assert list(sub.test.columns) == list(full.test.columns)
+        # carried through UNCHANGED — content, not just shape (mirrors the train-rows test)
+        assert sub.test.reset_index(drop=True).equals(full.test.reset_index(drop=True))
+
+
 # ── The seal, end-to-end through a real step + the real exp_path chokepoint (Task 1.5) ──
 
 

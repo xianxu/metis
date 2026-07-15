@@ -1,12 +1,13 @@
 ---
 id: 000035
-status: working
+status: codecomplete
 deps: []
 github_issue:
 created: 2026-07-14
 updated: 2026-07-14
-estimate_hours:
+estimate_hours: 2.05
 started: 2026-07-14T07:43:17-07:00
+actual_hours: 3.89
 ---
 
 # nested-CV sealed pass drops get-data → features reading raw dangle (blocks the real honest-beat)
@@ -53,21 +54,84 @@ Two entangled concerns to resolve (brainstorm-first):
 
 ## Done when
 
-- A nested-CV run of a real kbench-style sweep (features reading `raw: get-data`, incl. `ticket_survival`)
-  completes — the sealed pass reaches get-data's raw output, no dangling read.
-- A leakage test proves the fit_mask excludes the assessment rows from the target-encoding aggregate at
-  BOTH inner and outer levels (the outer honest estimate for a `ticket_survival` config tracks its inner
-  CV within noise, not inflated).
+- Nested CV runs the real kbench titanic sweep end-to-end under the ONE-ROAD model: `adapt` carries
+  the source columns (schema role `source`), `features` reads only its base dataset (no `raw:`),
+  `analysis_i` is shape-identical to the declared base (carries `test`). No dangling read.
 - The kbench nested smoke e2e (`e2e/thread_test.py::test_sweep_smoke_composes_and_trains`) un-xfails + passes.
+- The leakage tell (RUNBOOK §6 item 5) checked on the real honest-beat run: for each family whose
+  inner-winner includes `ticket_survival`, the outer honest estimate does NOT exceed its inner CV
+  beyond noise. (Outer-level protection = row absence in `analysis_i`; fit_mask = the INNER
+  cross-fit — the original "fit_mask at both levels" framing was wrong.)
+- The real honest-beat ran: `metis run titanic-sweep.md` → `select --best --promote` → operator
+  submit; numbers recorded in the issue Log + project file (closes the metis-v2 `done_when`).
+
+## Estimate
+
+Derived per estimate-logic-v3.1 (design from v2 table with the thorough-plan 15% buffer;
+impl at 40% of v2 ranges). Design is low across the board — the plan doc pre-resolves the
+decisions; the two metis changes and adapt are well-specced module extensions; features is the
+multi-file signature refactor (12 call sites, 2 non-mechanical); docs sweep spans two repos'
+atlases; the e2e/honest-beat runs are the real-API operational budget; one boundary review.
+
+```estimate
+model: estimate-logic-v3.1
+familiarity: 1.0
+item: smaller-go-module        design=0.1 impl=0.2
+item: smaller-go-module        design=0.1 impl=0.2
+item: smaller-go-module        design=0.1 impl=0.2
+item: cross-cutting-refactor   design=0.2 impl=0.2
+item: atlas-docs               design=0.1 impl=0.05
+item: atlas-docs               design=0.1 impl=0.05
+item: real-api-discovery       design=0.0 impl=0.2
+item: milestone-review         design=0.0 impl=0.15
+design-buffer: 0.15
+total: 2.05
+```
+
+Item→task mapping: smaller-go-module ×3 = Tasks 1 (schema role), 2 (outer-split), 3 (adapt);
+cross-cutting-refactor = Task 4 (features signature, 12 call sites); atlas-docs ×2 = Task 5
+(kbench shapes/RUNBOOK/atlas) + Task 8's metis atlas; real-api-discovery = Tasks 6–7 (e2e +
+honest-beat operational, incl. the STOP-and-diagnose slack); milestone-review = the close
+boundary review.
+
+> Produced via `brain/data/life/42shots/velocity/estimate-logic-v3.1.md` against
+> `baseline-v3.1.md`. Method A only.
 
 ## Plan
 
-- [ ] Brainstorm-first: the sealed-pass repoint generalization (any dropped-data-step ref, not just
-  `dataset`) + the fit_mask-both-levels leakage verification. Then spec + change-code.
+Durable plan: `workshop/plans/000035-stage-a-one-road-fix-plan.md` (review-hardened).
+
+- [x] Task 0 — issue revision + estimate + `sdlc change-code`
+- [x] Task 1 — metis: `source` schema role (TDD)
+- [x] Task 2 — metis: outer-split carries `test` (TDD)
+- [x] Task 3 — kbench: adapt carries source columns (TDD)
+- [x] Task 4 — kbench: features reads base only (TDD)
+- [x] Task 5 — kbench: shapes + relic deletion + RUNBOOK + atlas shadow-sweep
+- [x] Task 6 — un-xfail nested smoke e2e; full e2e green
+- [x] Task 7 — real honest-beat run (operator: kaggle submit)
+- [x] Task 8 — close out (atlas, PR + sdlc merge, close, lessons)
+
+## Revisions
+
+### 2026-07-14 — stage-A scope (supersedes the original Spec's approach)
+- **Reason:** the brainstorm + research detour (see Log) rejected Spec item 1 (repoint `raw:` to
+  the preamble's get-data): `upstream_path` bypasses the metis#23 confinement chokepoint, so that
+  fix would hard-code a seal bypass into `metis/io.py`. Spec item 2's "fit_mask at BOTH levels"
+  framing was diagnosed wrong: outer protection is row ABSENCE in `analysis_i`; the fit_mask does
+  inner-level work only.
+- **Delta:** the fix is the ONE-ROAD model (adapt carries source columns under a new `source`
+  role; features drops `raw:`; outer-split carries `test` so `analysis_i` is a shape-identical
+  stand-in), leaving the metis sweep engine untouched. Transductive semantics declared (RUNBOOK),
+  not coded — the estimand knob is metis#36. Two sibling defects folded in: `analysis_i` lacked
+  `test`; `adapt`'s `fare_median` reclassified as legitimate-under-transduction (not a bug).
+  Done-when rewritten accordingly; plan at `workshop/plans/000035-stage-a-one-road-fix-plan.md`.
+  Note: prior references to "RUNBOOK §6.4" (including this issue's Problem section) mean **§6
+  list item 5** — miscitation, corrected at the RUNBOOK edit.
 
 ## Log
 
 ### 2026-07-14
+- 2026-07-14: closed — kbench e2e 3/3 green incl. FIRST-EVER nested smoke through the real pipeline (was xfailed); metis py 79 tests + go suites green; real honest-beat ran on 891 rows: rf 0.8328±0.0045 selected by lowest-SE-within-1-SE (GBM higher-mean declined), promoted, public 0.77751; leakage tell (RUNBOOK §6 item 5, pre-committed threshold) PASSES — 15 fold×family winners, outer−inner mean ≈ −0.002, the ticket_survival winner +0.0068 ≪ 1 SE. Actual 3.89 measured (attribution split across the 9 issues touched today; fallback-confidence warnings on research-detour segments, no double-count).; review verdict: FIX-THEN-SHIP
 - Filed from the metis#32 kbench migration: the rewritten nested smoke e2e is the first time nested CV
   ran through the real kbench `features` step (which reads `raw: get-data`), and it hard-fails —
   `buildFoldExperiment` drops get-data but repoints only `dataset`, not `raw`. Confirms RUNBOOK §6.4's
@@ -89,3 +153,38 @@ Two entangled concerns to resolve (brainstorm-first):
   outer-split carries `test` through; declare transductive semantics; un-xfail e2e; run the real
   honest-beat) — closes metis-v2. Stage B = metis#36 (channel split, deletes the cloning seal).
   Stage C = metis#37 (constructor algebra, parked behind #36). This issue's scope stays stage A.
+
+### 2026-07-14 — session summary: stage A built + the real honest-beat ran
+- **Build (Tasks 1–6, all TDD, all green):** metis `source` role (schema.py + test) · outer-split
+  carries `test` (analysis_i shape-identical; test) · kbench adapt carries SOURCE_COLS (role
+  `source`, verbatim incl. NaN) · features reads base only (signature drops raw frames; loud
+  pre-#35-cache guard; 12 test call sites, the 2 ticket ones moved onto base fixtures) · 3 shapes
+  drop `raw:` from features (adapt's stays — it IS the demultiplexer) · 4 relic winner .md DELETED
+  (pre-#32, JSON-form "raw":"get-data") · RUNBOOK §6 reframed (outer = row absence, inner =
+  fit_mask; transductive estimand declared; threshold pre-committed) · kbench atlas + metis atlas
+  reconciled. Nested smoke e2e un-xfailed → **first-ever green nested run through the real
+  pipeline** (one test-side fix: inner-score bound 0.0<s → 0.0<=s; 0.0 is legitimate on ~3-row
+  fixture folds; the bound had never executed).
+- **Honest-beat (operator-run, 891 rows, 5 outer × 99 × 5 inner = 2,490 ledger rows):**
+  per-family honest outer estimates: hist_gbm 0.8361±0.0103 · rf 0.8328±0.0045 · logreg
+  0.7879±0.0074. Selector picked **rf** (lowest-SE-within-1-SE — declined GBM's higher-variance
+  mean; the 0.749-overfitter trap avoided by rule, not luck), config `[title,family,age]`
+  md=4 n=500 → promote → **public 0.77751**.
+- **Leakage tell (§6 item 5, threshold pre-committed): PASSES.** 15 (fold×family) winners,
+  outer−inner deltas mean ≈ −0.002 (−0.038…+0.042, two-sided); the one ticket_survival winner
+  (fold 3 rf) +0.0068 ≪ 1 SE. Outer-level leakage ruled out on the real pipeline.
+- **Interpretation:** internal honesty holds (outer≈inner); public sits ~0.055 below the honest
+  estimate — a train↔test distribution gap + LB subsample noise (public ≈209 rows → binomial SE
+  ±0.029; today's 0.77751, v1's 0.77990, rf-ticket's 0.79186 are all within ~1.4 LB-SE of each
+  other — the public LB cannot resolve differences at this size). Nested CV delivered what it
+  promises (same-distribution honesty); the project done_when's "public tracks the estimate"
+  clause conflated that with cross-distribution prediction — flagged to operator for a done_when
+  revision decision. The selector's no-ticket pick vs rf-ticket's 0.79186 (Δ0.014, inside LB
+  noise) feeds metis#36's transductive experiment.
+- **Incidents (all filed/recorded):** #32 cohort guard fired correctly (ledger spanned last
+  session's flat 495 rows + today's 2,490; identified by row-count arithmetic; pinned
+  b7aee3de) → **#39 filed** (fingerprint visibility). Zero-output minutes during the run →
+  **#38 filed** (parallel-run TUI). PATH gotcha: the kaggle#5 wrapper shadows the official
+  `kaggle` CLI if prepended (get-data dies: unknown subcommand "competitions") — RUNBOOK-worthy.
+  Suspected bug to verify: `metis select --best` WITHOUT --fingerprint printed nothing (expected
+  the cohort guard error) — check exit code / file if real.

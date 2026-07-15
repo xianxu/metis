@@ -14,8 +14,10 @@ from dataclasses import dataclass
 
 # The closed set of column roles. `feature` columns are model inputs; the single
 # `target` is the label; `id` identifies a row (carried into predictions, never a
-# model input); `weight` is an optional per-row sample weight.
-ROLES = frozenset({"id", "feature", "target", "weight"})
+# model input); `weight` is an optional per-row sample weight; `source` is a raw
+# column carried through for feature-engineering steps that know it — never a
+# model input, and (unlike feature/target) it may hold strings/NaN (metis#35).
+ROLES = frozenset({"id", "feature", "target", "weight", "source"})
 
 
 @dataclass(frozen=True)

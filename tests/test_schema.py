@@ -38,3 +38,14 @@ def test_unknown_role_rejected():
 def test_multiple_targets_rejected():
     with pytest.raises(ValueError, match="at most one target"):
         Schema(columns={"a": "target", "b": "target"}, dtypes={})
+
+
+def test_source_role_accepted_and_excluded_from_features():
+    # metis#35: 'source' = a raw column carried through for feature-engineering
+    # steps that know it — never a model input.
+    s = Schema(
+        columns={"id": "id", "y": "target", "f": "feature", "Name": "source"},
+        dtypes={"id": "int64", "y": "int64", "f": "float64", "Name": "object"},
+    )
+    assert s.feature_cols() == ["f"]
+    assert s.target_col() == "y"

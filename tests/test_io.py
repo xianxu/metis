@@ -61,3 +61,27 @@ def test_load_missing_train_raises(tmp_path):
     (tmp_path / "schema.json").write_text('{"columns": {"f0": "feature"}}')
     with pytest.raises(FileNotFoundError, match="no train"):
         load_dataset(str(tmp_path))
+
+
+def test_source_role_round_trip_object_dtype_with_nan(tmp_path):
+    """metis#35: `source` columns may hold strings/NaN (the ROLES contract). Pin the
+    parquet round-trip where that contract meets IO: role + dtype survive; a NaN in an
+    object column comes back as None (parquet's null) — None/NaN equivalence is the
+    contract consumers must honor (isna-safe ops, never `== np.nan`)."""
+    import numpy as np
+    schema = Schema(
+        columns={"id": "id", "f0": "feature", "target": "target", "Ticket": "source"},
+        dtypes={"id": "int64", "f0": "float64", "target": "int64", "Ticket": "object"},
+    )
+    train = pd.DataFrame({"id": [1, 2, 3], "f0": [0.5, 1.5, 2.5], "target": [0, 1, 0],
+                          "Ticket": ["A/5 21171", np.nan, "A/5 21171"]})
+    test = pd.DataFrame({"id": [4], "f0": [3.5], "Ticket": [np.nan]})
+    save_dataset(Dataset(schema=schema, train=train, test=test), str(tmp_path))
+
+    loaded = load_dataset(str(tmp_path))
+    assert loaded.schema == schema                       # role + dtype dict survive
+    assert loaded.schema.columns["Ticket"] == "source"
+    assert loaded.schema.feature_cols() == ["f0"]        # source never a model input
+    assert loaded.train["Ticket"].tolist()[0] == "A/5 21171"
+    assert loaded.train["Ticket"].isna().tolist() == [False, True, False]  # null survives (as None)
+    assert loaded.test["Ticket"].isna().all()
