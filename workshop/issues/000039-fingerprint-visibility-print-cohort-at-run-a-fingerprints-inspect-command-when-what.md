@@ -59,3 +59,10 @@ Two additions, both presentation over existing capture data (no new instrumentat
   with no way to inspect them; identification required hand-counting csv rows. Provenance is
   already captured (metis#14's CodeManifest + capture refs) — this is a surfacing issue, not new
   capture. Sibling UX issue from the same run: metis#38 (parallel-run TUI).
+- 2026-07-14 (kbench#9 ship, operator hit both live): (1) `select --fingerprint` is an EXACT
+  match — an 8-char prefix (`566995b9`) silently matches nothing; accept unique prefixes like
+  git does. (2) The zero-match error is a lie: "no scored configs in <ledger> — run `metis run`
+  first" when 2,166 rows exist under the full hash — a fingerprint filter that matches nothing
+  must say so and LIST the cohorts present (fingerprint + row count + last-run time), which is
+  exactly this issue's inspect surface. Until then the operator recipe is
+  `tail -1 <ledger>.csv | cut -d, -f1` for the full hash.
