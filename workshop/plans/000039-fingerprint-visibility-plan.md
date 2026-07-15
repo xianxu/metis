@@ -629,3 +629,16 @@ In `runSelect`: replace `led = ledger.Filter(led, o.fingerprint)` with `led, err
 | guard names the command / inlines summary; operator resolves without opening the csv | Task 4 test 4 + Task 5 smoke on the real 566995b9 ledger |
 | (Log defect a) prefix `--fingerprint` works | Task 4 test 1 + smoke |
 | (Log defect b) zero-match no longer lies | Task 4 test 2 |
+
+## Revisions
+
+*2026-07-15 — boundary review (metis#39 close, FIX-THEN-SHIP):* Core-concepts table corrections:
+(1) `backfillCodeManifest` belongs under **Integration points**, not Pure entities — it reads/writes
+`record.json` directly and its tests ride real fs+git; it is the mint-site IO seam. `printFingerprintLine`
+stays pure (a formatter over an injected writer). (2) Entities the implementation added that the table
+omits: `pinFingerprint` (fingerprints.go, integration — record IO on error paths), `cohortGuardErr`
+(fingerprints.go, integration), `distinctFingerprintCount` (fingerprints.go, pure — replaces deleted
+`distinctFingerprints`), `showFingerprints`/`cmdLedgerFingerprints`/`cmdLedgerShow` (ledger_cmd.go, CLI
+shell). Review fixes applied in-code: sweep cohort line sourced from the first point WITH a record
+(two-point test, first record missing); degraded-latest cohorts keep dirty+capture markers beside
+`commit ?` (fold updates headline fields regardless of commit presence).

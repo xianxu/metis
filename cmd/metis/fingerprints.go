@@ -66,11 +66,13 @@ func cohortSummaries(led ledger.Ledger, recs map[string]record.RunRecord) []coho
 		}
 		if commit := recCommit(rec); commit != "" {
 			commits[r.CodeFingerprint][commit] = true
-			// Latest record (by Finished; ties → later ledger row) wins the headline fields.
-			if rec.Finished >= latest[r.CodeFingerprint] {
-				cs.Commit, cs.Dirty, cs.CaptureStatus = commit, rec.Dirty, recStatus(rec)
-				latest[r.CodeFingerprint] = rec.Finished
-			}
+		}
+		// Latest record (by Finished; ties → later ledger row) wins the headline fields —
+		// even when its commit is empty (degraded capture): the dirty flag + capture status
+		// are still real and must not vanish behind a missing commit (close-review finding).
+		if rec.Finished >= latest[r.CodeFingerprint] {
+			cs.Commit, cs.Dirty, cs.CaptureStatus = recCommit(rec), rec.Dirty, recStatus(rec)
+			latest[r.CodeFingerprint] = rec.Finished
 		}
 	}
 	out := make([]cohortSummary, 0, len(byFP))
@@ -165,11 +167,13 @@ func orQ(s string) string {
 }
 
 // codeStr renders a cohort's code identity: commit (+extra-commit count), dirty, capture.
+// An unknown commit (degraded capture / no records) still renders the dirty + capture
+// markers when known — the dirty bit must not vanish behind a missing commit.
 func codeStr(c cohortSummary) string {
-	if c.Commit == "" {
-		return "commit ?"
+	s := "commit ?"
+	if c.Commit != "" {
+		s = "commit " + short(c.Commit)
 	}
-	s := "commit " + short(c.Commit)
 	if c.ExtraCommits > 0 {
 		s += fmt.Sprintf(" (+%d more)", c.ExtraCommits)
 	}

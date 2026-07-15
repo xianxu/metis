@@ -1,12 +1,13 @@
 ---
 id: 000039
-status: working
+status: codecomplete
 deps: []
 github_issue:
 created: 2026-07-14
 updated: 2026-07-15
 estimate_hours: 1.55
 started: 2026-07-15T14:49:03-07:00
+actual_hours: 0.65
 ---
 
 # fingerprint visibility — print cohort at run + a fingerprints inspect command (when/what)
@@ -100,6 +101,7 @@ Steps[].Code.{Commit,CaptureStatus} + Dirty). Single-pass close, no milestones.
   `tail -1 <ledger>.csv | cut -d, -f1` for the full hash.
 
 ### 2026-07-15
+- 2026-07-15: closed — TDD throughout (each task red→green); full package go test green + go vet clean; real-ledger smoke on live titanic-sweep.ledger.csv (5,571 rows): ledger fingerprints lists all 4 cohorts incl. the issue-Problem hashes; select --fingerprint 566995b9 8-char prefix resolves (the operator repro, was the no-scored-configs lie); multi-cohort + zero-match errors render cohort table inline + name the command; timestamps/commit verified on titanic-sweep-smoke where records exist; review verdict: FIX-THEN-SHIP
 - Claimed + start-plan; durable plan authored at `workshop/plans/000039-fingerprint-visibility-plan.md`
   and fresh-eyes plan-reviewed (2 substantive findings fixed: ExtraCommits fold respecified as
   set-cardinality — ledger rows are not time-ordered; printFingerprintLine signature drift between
@@ -124,3 +126,11 @@ Steps[].Code.{Commit,CaptureStatus} + Dirty). Single-pass close, no milestones.
   dirty, captured). **Operator repro fixed live:** `select --fingerprint 566995b9` (8-char prefix)
   → resolves + prints the board (was: the "no scored configs" lie). Multi-cohort refusal and
   zero-match both render the cohort table inline + name `metis ledger fingerprints`.
+- Boundary review (sidecar: workshop/plans/...-close-review.md): **FIX-THEN-SHIP**, no Critical.
+  Fixed before the close commit: (1) Important — sweep first-point-record-missing test gap (two-point
+  fixture added; the fold sources the line from the first point WITH a record); (2) Minor — degraded-
+  latest cohort dropped the dirty marker behind an empty commit (headline fields now update regardless
+  of commit presence; `commit ?, dirty, degraded` pinned by test); (3) plan Core-concepts table
+  reclassified via ## Revisions. Reviewer's Bash was broken (static review only) — full suite + vet
+  re-run green here post-fixes. Deferred as noted: legacy-blend guard asymmetry (pre-existing, now
+  visible in the inspect table — future issue), 8-char short-collision `--full` flag, `--json` output.

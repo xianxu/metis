@@ -98,7 +98,10 @@ func TestCaptureSweepCode_BackfillsCodeManifest(t *testing.T) {
 		Steps: []record.StepRecord{{StepID: "train"}},
 	})
 
-	man := sweepManifest{ShapeRunID: "srun-e2e", Points: []pointRun{{RunID: runID, Status: "ok"}}}
+	// metis#39: pt-0 is FIRST in the manifest but has NO record.json (a cleaned/failed
+	// point) — the cohort line must still print, sourced from the first point whose
+	// record exists (all points share one fingerprint; close-review finding).
+	man := sweepManifest{ShapeRunID: "srun-e2e", Points: []pointRun{{RunID: "pt-0", Status: "failed"}, {RunID: runID, Status: "ok"}}}
 	var out bytes.Buffer
 	o := runOpts{expPath: expPath, stepPath: []string{filepath.Join(root, "steps")}, out: &out}
 	if err := captureSweepCode(o, man); err != nil {
@@ -106,7 +109,8 @@ func TestCaptureSweepCode_BackfillsCodeManifest(t *testing.T) {
 	}
 
 	// metis#39: a sweep (nested/--fast) run states the cohort it records under — the hash
-	// the select guard later names must have scrolled by. Exactly once per sweep.
+	// the select guard later names must have scrolled by. Exactly once per sweep, even
+	// when the manifest's first point has no record.
 	if got := strings.Count(out.String(), "recording under code_fingerprint "); got != 1 {
 		t.Errorf("sweep capture must print the cohort line exactly once, got %d:\n%s", got, out.String())
 	}

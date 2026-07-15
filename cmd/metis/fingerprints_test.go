@@ -132,3 +132,30 @@ func TestRenderCohorts(t *testing.T) {
 		t.Errorf("fingerprint should render short-8:\n%s", out)
 	}
 }
+
+// A cohort whose LATEST record has a degraded capture (empty commit) still reports its
+// dirty flag + capture status — the dirty bit must not vanish behind a missing commit
+// (close-review finding). The older record's commit stays in the distinct-commit set.
+func TestCohortSummaries_DegradedLatestKeepsDirty(t *testing.T) {
+	var led ledger.Ledger
+	led.Append(fpRow("dddd4444dddd", "r1", "inner"), fpRow("dddd4444dddd", "r2", "inner"))
+	recs := map[string]record.RunRecord{
+		"r1": {Started: "2026-07-14T10:00:00Z", Finished: "2026-07-14T10:05:00Z",
+			Steps: []record.StepRecord{{Code: record.CodeManifest{Commit: "c1", CaptureStatus: "captured"}}}},
+		"r2": {Started: "2026-07-14T11:00:00Z", Finished: "2026-07-14T11:05:00Z", Dirty: true,
+			Steps: []record.StepRecord{{Code: record.CodeManifest{CaptureStatus: "degraded"}}}},
+	}
+	cs := cohortSummaries(led, recs)
+	if len(cs) != 1 {
+		t.Fatalf("want 1 cohort, got %+v", cs)
+	}
+	c := cs[0]
+	if c.Commit != "" || !c.Dirty || c.CaptureStatus != "degraded" {
+		t.Errorf("latest (degraded) record's dirty/status must win, commit honestly unknown: %+v", c)
+	}
+	var b strings.Builder
+	renderCohorts(&b, cs)
+	if !strings.Contains(b.String(), "commit ?, dirty, degraded") {
+		t.Errorf("render must keep dirty+status beside the unknown commit:\n%s", b.String())
+	}
+}
