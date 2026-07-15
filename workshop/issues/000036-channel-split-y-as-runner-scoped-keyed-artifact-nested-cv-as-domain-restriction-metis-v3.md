@@ -105,3 +105,13 @@ Replace the row-cloning seal with a runner-owned label channel:
   cosmetic — at 90% train we STILL under-measure vs the shipped model's full-coverage + 61%
   test-side split-group deployment; the channel split should make the estimand declarable
   rather than fold-count-implied. Full comparison script + numbers: metis#42 Log.
+- **Design input (2026-07-14 bootstrap brainstorm): the resampling UNIT should be declarable.**
+  Rows within a ticket/family group share fate — the exchangeable unit is the GROUP, not the row.
+  Every resampling surface (outer/inner folds, any future bootstrap replicate, and the estimand
+  the seal simulates) is a statement about which unit is drawn; today all of them silently assume
+  row-exchangeability. The channel split should let a shape declare a cluster key (e.g.
+  `cluster: Ticket`) once, with folds/seals/replicates restricting y by CLUSTER — Recio's
+  grouped-CV finding, metis#42's attenuation, and the transductive knob are all projections of
+  this one declaration. (Also from the same brainstorm: rf's bagging resamples rows with FROZEN
+  upstream encodings — replicate-scoped feature recompute is expressible once y-restriction is
+  runner-owned; a "full-pipeline bootstrap" falls out of the same mechanism as folds.)
