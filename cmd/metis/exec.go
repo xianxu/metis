@@ -35,6 +35,29 @@ type execStep struct {
 	//                        spawn ONLY (a cache HIT never reaches here). One shared channel across
 	//                        all nesting levels ⇒ ≤ cap(sem) concurrent step subprocesses no matter
 	//                        how driver×sweeper×resample fans out. nil = unbounded (the serial path).
+	pool *serverPool // metis#44: when non-nil, convention-conforming wrappers route through the
+	//                  warm fork-server (one per project root) instead of a fresh uv/python spawn;
+	//                  non-conforming wrappers + broken servers fall back to the legacy path below.
+}
+
+// stepEnv builds the per-step METIS_* contract vars — the ONE definition both executors
+// share: the legacy subprocess appends them to the ambient env; a fork-server request
+// carries them verbatim (the child scrubs METIS_* first, so absence — e.g. no READ_ROOT on
+// an unconfined run — is authoritative).
+func (e execStep) stepEnv(step experiment.Step, stepDir, runDir string) map[string]string {
+	m := map[string]string{
+		"METIS_STEP_DIR": stepDir,
+		"METIS_RUN_DIR":  runDir,
+		"METIS_STEP_ID":  step.ID,
+		"METIS_EXP_DIR":  e.expDir,
+		"METIS_SEED":     strconv.Itoa(e.seed),
+	}
+	if e.readRoot != "" {
+		// confinement: only inject when sealing an outer-fold sweep, so the flat
+		// driver:single path leaves the var unset (unconfined).
+		m["METIS_READ_ROOT"] = e.readRoot
+	}
+	return m
 }
 
 func (e execStep) Execute(step experiment.Step, runDir string) (experiment.StepResult, error) {
@@ -60,6 +83,38 @@ func (e execStep) Execute(step experiment.Step, runDir string) (experiment.StepR
 	}
 
 	fmt.Fprintf(e.out, "→ step %s (uses %s)\n", step.ID, step.Uses)
+	env := e.stepEnv(step, stepDir, runDir)
+
+	// metis#44: route a convention-conforming wrapper through the warm fork-server. A leaf
+	// slot is held around the in-flight fork exactly as around a legacy subprocess. ok=false
+	// (non-conforming wrapper, or a server that failed/died — noticed loudly, once) falls
+	// through to the legacy spawn below; a RESPONSE, even exit != 0, is a real step outcome.
+	if e.pool != nil {
+		if spec, forkable := parseWrapper(exe); forkable {
+			if e.sem != nil {
+				e.sem <- struct{}{}
+			}
+			resp, ok, ferr := e.pool.execute(spec, stepDir, env)
+			if e.sem != nil {
+				<-e.sem
+			}
+			if ferr != nil {
+				// I1: dispatched-and-lost — the forked child may still be running in this
+				// stepDir; a legacy re-run would double-execute. Error the step instead.
+				return experiment.StepResult{}, fmt.Errorf("exec %s (forkserver): %v", exe, ferr)
+			}
+			if ok {
+				if resp.Exit != 0 {
+					return experiment.StepResult{}, fmt.Errorf("exec %s (forkserver): exit status %d\n%s", exe, resp.Exit, resp.Output)
+				}
+				return e.collectResult(step, stepDir, runDir)
+			}
+		} else {
+			e.pool.noticeOnce("uses:"+step.Uses,
+				fmt.Sprintf("step %q wrapper doesn't match the uv/metis.trace convention — legacy exec (no warm-start)", step.Uses))
+		}
+	}
+
 	cmd := exec.Command(exe)
 	cmd.Dir = stepDir
 	// metis#23: strip any inherited METIS_READ_ROOT so an ambient shell value can never
@@ -70,18 +125,10 @@ func (e execStep) Execute(step experiment.Step, runDir string) (experiment.StepR
 			base = append(base, kv)
 		}
 	}
-	cmd.Env = append(base,
-		"METIS_STEP_DIR="+stepDir,
-		"METIS_RUN_DIR="+runDir,
-		"METIS_STEP_ID="+step.ID,
-		"METIS_EXP_DIR="+e.expDir,
-		"METIS_SEED="+strconv.Itoa(e.seed),
-	)
-	if e.readRoot != "" {
-		// confinement: only inject when sealing an outer-fold sweep, so the flat
-		// driver:single path leaves the var unset (unconfined).
-		cmd.Env = append(cmd.Env, "METIS_READ_ROOT="+e.readRoot)
+	for _, k := range sortedKeys(env) {
+		base = append(base, k+"="+env[k])
 	}
+	cmd.Env = base
 	// metis#31: acquire the global leaf budget around the ONLY real subprocess spawn
 	// (resolve/mkdir/with.json above are cheap, non-subprocess — they draw no budget).
 	// Release immediately after the process exits, before the cheap metrics/artifact
@@ -100,6 +147,12 @@ func (e execStep) Execute(step experiment.Step, runDir string) (experiment.StepR
 		return experiment.StepResult{}, fmt.Errorf("exec %s: %w\n%s", exe, cmdErr, combined)
 	}
 
+	return e.collectResult(step, stepDir, runDir)
+}
+
+// collectResult reads back a completed step's outputs (metrics.json + artifacts) — shared by
+// the legacy-subprocess and fork-server paths, which differ only in HOW the step ran.
+func (e execStep) collectResult(step experiment.Step, stepDir, runDir string) (experiment.StepResult, error) {
 	metrics, err := readMetrics(filepath.Join(stepDir, "metrics.json"))
 	if err != nil {
 		return experiment.StepResult{}, err
@@ -110,6 +163,16 @@ func (e execStep) Execute(step experiment.Step, runDir string) (experiment.StepR
 	}
 	fmt.Fprintf(e.out, "✓ step %s\n", step.ID)
 	return experiment.StepResult{Metrics: metrics, Artifacts: artifacts}, nil
+}
+
+// sortedKeys gives a deterministic env append order (map iteration is randomized).
+func sortedKeys(m map[string]string) []string {
+	ks := make([]string, 0, len(m))
+	for k := range m {
+		ks = append(ks, k)
+	}
+	sort.Strings(ks)
+	return ks
 }
 
 // resolve maps `uses: <layer>/<steptype>` to an executable by searching the step

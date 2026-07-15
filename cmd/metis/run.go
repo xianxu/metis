@@ -81,6 +81,10 @@ type runOpts struct {
 	readRoot string // metis#23: when set, the production execStep confines base-dataset reads to this root
 	maxParallel int          // metis#31: >1 ⇒ ParExec batches + a leaf semaphore; sizes leafSem
 	leafSem     chan struct{} // metis#31: the shared global subprocess budget (nil = serial/cache-only)
+	forkserver  bool          // metis#44: warm fork-server leaf executor (cmdRun default true;
+	//                           zero-value false keeps direct runOpts callers/tests on legacy exec)
+	forkPool *serverPool // metis#44: the per-root warm-server pool, created once per runExperiment
+	//                      when forkserver is set; threaded through nested runOpts copies.
 }
 
 // runExperiment reads the experiment at o.expPath and dispatches: a `type:
@@ -109,6 +113,12 @@ func runExperiment(o runOpts) (experiment.Run, error) {
 		}
 		out = &syncWriter{w: out}
 		o.out = out
+	}
+	// metis#44: one warm fork-server pool per top-level run, shut down (EOF-drain) when the
+	// run ends. Only the production executor uses it (an injected test exec bypasses execStep).
+	if o.forkserver && o.exec == nil && o.forkPool == nil {
+		o.forkPool = newServerPool(out)
+		defer o.forkPool.shutdown()
 	}
 
 	raw, err := os.ReadFile(o.expPath)
@@ -172,7 +182,7 @@ func runResolvedExperiment(exp experiment.Experiment, o runOpts, runID string, n
 		return experiment.Run{}, err
 	}
 
-	var exec experiment.StepExecutor = execStep{stepPath: o.stepPath, expDir: expDir, seed: exp.Seed, readRoot: o.readRoot, out: out, sem: o.leafSem}
+	var exec experiment.StepExecutor = execStep{stepPath: o.stepPath, expDir: expDir, seed: exp.Seed, readRoot: o.readRoot, out: out, sem: o.leafSem, pool: o.forkPool}
 	if o.exec != nil {
 		exec = o.exec // test seam: drive the loop/cache with a fake, no subprocess
 	}

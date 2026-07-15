@@ -199,6 +199,23 @@ wrapped by **thin step-executables** honoring the contract above. Hermetic via *
   in the sampler). Caveats (flag help): each leaf is a Python process that may itself multi-thread
   (BLAS/`n_jobs`) so `n=NumCPU` can oversubscribe; a COLD cache thundering-herds the shared upstream;
   clean per-`k/n` progress is deferred to metis#30.
+- **Warm fork-server leaf executor (metis#44) — `metis/forkserver.py` + `cmd/metis/forkexec.go`:**
+  kills the per-leaf `uv run → fresh python → import pandas/sklearn` tax (~1s measured/spawn, ~5k
+  spawns/sweep). One warm server per **project root** (metis's and kbench's venvs differ), started
+  lazily as `uv run --project <root> python -m metis.forkserver`; it preloads **third-party only**
+  (D is the child's first-party sys.modules snapshot — preloading first-party would widen every
+  step's D; a delta rule would under-capture it → stale hits; the zygote-per-module tier is the
+  documented future extension) and serves JSONL requests: per step it **forks (main thread only)**
+  — the child scrubs `METIS_*`, applies the request env (absence is authoritative — the seal),
+  chdirs, pipes its output, runs `metis.trace.run_traced(module, force_site_packages=True)`
+  (forced because a warm child never OBSERVES the site-packages reads that set the uv.lock dep
+  flag), and `os._exit`s. Every step keeps its own process/reads.json/crash boundary; the metis#31
+  leaf semaphore is held around the in-flight fork exactly as around a legacy spawn. Routing:
+  `execStep.Execute` parses the two-repo wrapper convention (`parseWrapper` — the ROOT line + the
+  `uv run … metis.trace <module>` exec line + a pyproject.toml at the derived root); non-conforming
+  wrappers and failed/dead servers fall back to the legacy subprocess LOUDLY, once per uses-type/
+  root. `metis run --forkserver=false` is the escape hatch. Step authoring is UNCHANGED (a step is
+  still a wrapper file; discovery/resolve untouched).
 - **Step entrypoints — `metis/steps/{cv_split,train,predict,outer_split}.py`:** thin `io → pure core → io`.
   - `cv-split`: load Dataset (`with.dataset`, exp-relative) → `cv_folds` → `folds.json` + `{k,n}`.
   - `train`: load Dataset + upstream `folds.json` → `cv_score` + fit-on-all → `model.pkl` + `{cv_score}`.

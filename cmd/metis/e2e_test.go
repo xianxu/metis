@@ -20,7 +20,14 @@ import (
 //
 // Skips when uv is absent (the hermetic Python env can't run); the venv must be
 // synced (`uv sync`) so the per-step `uv run` is fast and offline.
-func TestToyPipeline_EndToEnd(t *testing.T) {
+func TestToyPipeline_EndToEnd(t *testing.T) { toyPipelineE2E(t, false) }
+
+// TestToyPipeline_EndToEnd_ForkServer (metis#44) runs the SAME real-wrapper e2e with the
+// warm fork-server routing every leaf — the whole Go-runner → pool → fork → Python thread,
+// on the real steps/metis/* wrappers (which conform, so nothing falls back to legacy).
+func TestToyPipeline_EndToEnd_ForkServer(t *testing.T) { toyPipelineE2E(t, true) }
+
+func toyPipelineE2E(t *testing.T, forkserver bool) {
 	if _, err := exec.LookPath("uv"); err != nil {
 		t.Skip("uv not on PATH; skipping the Python data-plane e2e")
 	}
@@ -45,6 +52,7 @@ func TestToyPipeline_EndToEnd(t *testing.T) {
 		now:      func() time.Time { return time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC) },
 		git:      fakeGitProbe{name: "metis", sha: "toysha", dirty: false}, // workspace is a bare TempDir, not a git repo
 		out:      io.Discard,
+		forkserver: forkserver, // metis#44: exercised by the _ForkServer variant
 	})
 	if err != nil {
 		t.Fatalf("runExperiment: %v", err)
