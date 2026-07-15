@@ -35,6 +35,13 @@ AUTHORING contract (a step stays a bash wrapper; discovery/resolve untouched).
     snapshot at exit; preloaded first-party step modules would land in every child's snapshot
     and widen every step's D (over-invalidation). Third-party is excluded from D by design, so
     preloading it changes nothing. First-party imports stay in the child (~50ms, pure Python).
+    NOT a freshness concern (operator asked): freezing first-party at run start would be fine —
+    even good (metis#28's mid-run-edit hazard). The constraint is that D is DERIVED from the
+    child's sys.modules: preload+snapshot over-widens D (every step depends on every step);
+    preload+delta under-captures it (stale cache HITS after a code edit — a correctness bug).
+    Future extension if the ~50ms/child ever matters: a zygote tier — base server → per-module
+    template child (snapshot there = exactly that module's closure) → per-request forks. Precise
+    D + first-party warm, at the cost of a second fork tier. YAGNI now (~15-30s per sweep).
   - **`used_site_packages` forced true in forkserver children.** Today the flag is set by
     observing a site-packages read; children inherit the imports and would observe none,
     silently dropping the uv.lock dep from cache keys. Forcing it is conservative and correct.
