@@ -78,15 +78,35 @@ flag, mirroring the existing executor patterns. `atlas-docs` = atlas/RUNBOOK + p
 
 Durable plan: `workshop/plans/000044-leaf-forkserver-plan.md` (entities, protocol, risks).
 
-- [ ] T1 extract `run_traced` from `metis/trace.py` main (pure refactor; suite green).
-- [ ] T2 `metis/forkserver.py` + real-fork pytest suite (round-trip, env isolation, failure,
+- [x] T1 extract `run_traced` from `metis/trace.py` main (pure refactor; suite green).
+- [x] T2 `metis/forkserver.py` + real-fork pytest suite (round-trip, env isolation, failure,
       concurrency, reads.json + forced used_site_packages).
-- [ ] T3 `wrapperSpec` parse in `cmd/metis/forkexec.go` (TDD; not-forkable fallback).
-- [ ] T4 `serverPool` + `Execute` routing + `--forkserver` flag (default on); hermetic
+- [x] T3 `wrapperSpec` parse in `cmd/metis/forkexec.go` (TDD; not-forkable fallback).
+- [x] T4 `serverPool` + `Execute` routing + `--forkserver` flag (default on); hermetic
       integration through the real server; `go test ./... -race` green.
-- [ ] T5 perf acceptance (loose-bound test + REAL kbench --fast smoke, before/after wall-clock
+- [x] T5 perf acceptance (loose-bound test + REAL kbench --fast smoke, before/after wall-clock
       logged) + atlas/RUNBOOK; close.
 
 ## Log
+
+### 2026-07-15
+- BUILT (TDD throughout). T1 `run_traced` extraction (suite green). T2 `metis/forkserver.py` +
+  7 real-fork pytest tests — protocol round-trip, env authority (READ_ROOT no-bleed), failure
+  traceback, SystemExit pass-through, 4-way concurrency, reads.json + forced
+  used_site_packages, EOF drain. T3 `parseWrapper` (4 cases incl. ROOT-line and pyproject
+  guards). T4 `serverPool` + routing + `--forkserver` (default on; runOpts zero-value keeps
+  direct callers/tests legacy): real-server round trip, broken-root falls back with ONE loud
+  notice, non-conforming wrapper runs legacy loudly; toy e2e parameterized over both modes.
+  Full `go test ./... -race` + 87 pytest green.
+- **Measured:** toy e2e (4 real steps, incl. server startup+preload): legacy 3.70s →
+  forkserver 1.89s. Marginal per-leaf: ~30ms forked vs ~290ms spawned for a pandas-only leaf
+  (perf loose-bound test, n=4: 1.15s vs 0.91s incl. full preload); the real-sweep leaves
+  (sklearn+kbench imports, ~1s tax) amortize far better — next operator sweep vs the ~28-min
+  k10-probe baseline is the headline number. **Real cross-repo smoke:** titanic-sweep-smoke
+  (3 outer × 4 configs, real kbench+metis wrappers, BOTH venvs' servers, real sklearn fits in
+  forked children on macOS): completed 10.1s wall, honest estimate + ledger recorded, zero
+  fork hazards (no ObjC guard, pins inherited).
+- Docs: atlas/experiment.md fork-server bullet (executor section); kbench RUNBOOK §1 note
+  (committed kbench-side).
 
 ### 2026-07-14

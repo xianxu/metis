@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/xianxu/metis/pkg/experiment"
 )
@@ -191,5 +192,55 @@ func TestExecute_NonConformingWrapperUsesLegacyLoudly(t *testing.T) {
 	}
 	if n := strings.Count(out.String(), "doesn't match"); n != 1 {
 		t.Errorf("want ONE notice per uses-type, got %d", n)
+	}
+}
+
+// TestForkServerPerf_LooseBound (metis#44 acceptance): N leaves that each import pandas —
+// legacy pays uv+interpreter+import per spawn; the fork-server pays preload once and forks.
+// Loose bound (faster, not a ratio) to stay robust on loaded CI boxes; the real-sweep
+// wall-clock comparison lives in the issue Log.
+func TestForkServerPerf_LooseBound(t *testing.T) {
+	if testing.Short() {
+		t.Skip("perf bound — skipped in -short")
+	}
+	if _, err := exec.LookPath("uv"); err != nil {
+		t.Skip("uv not on PATH")
+	}
+	root := repoRoot(t)
+	mods := t.TempDir()
+	if err := os.WriteFile(filepath.Join(mods, "toyheavy.py"), []byte(
+		"import pandas\nimport json\njson.dump({\"ok\": 1}, open(\"metrics.json\", \"w\"))\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PYTHONPATH", mods)
+	const n = 4
+
+	start := time.Now()
+	for i := 0; i < n; i++ {
+		dir := t.TempDir()
+		cmd := exec.Command("uv", "run", "--project", root, "python", "-m", "metis.trace", "toyheavy")
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(), "METIS_STEP_DIR="+dir)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("legacy spawn: %v\n%s", err, out)
+		}
+	}
+	legacy := time.Since(start)
+
+	start = time.Now()
+	pool := newServerPool(io.Discard)
+	defer pool.shutdown()
+	for i := 0; i < n; i++ {
+		dir := t.TempDir()
+		resp, ok := pool.execute(wrapperSpec{root: root, module: "toyheavy"}, dir,
+			map[string]string{"METIS_STEP_DIR": dir})
+		if !ok || resp.Exit != 0 {
+			t.Fatalf("fork run failed: ok=%v resp=%+v", ok, resp)
+		}
+	}
+	forked := time.Since(start)
+	t.Logf("legacy %v vs forkserver %v (n=%d, forkserver incl. server start + full preload)", legacy, forked, n)
+	if forked >= legacy {
+		t.Errorf("forkserver (%v) not faster than legacy (%v) at n=%d", forked, legacy, n)
 	}
 }
