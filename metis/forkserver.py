@@ -31,6 +31,7 @@ POSIX-only by construction (os.fork).
 from __future__ import annotations
 
 import importlib
+import io
 import json
 import os
 import sys
@@ -117,12 +118,28 @@ def serve() -> None:
             continue
         req = json.loads(line)  # a malformed line is a protocol bug — fail loud, not skip
         r, w = os.pipe()
-        pid = os.fork()
+        # C1 (close review): fork UNDER the protocol lock. Waiter threads write responses to
+        # `out` only while holding `lock`, so holding it across fork() guarantees stdout's
+        # internal BufferedWriter/TextIOWrapper locks are FREE in the child — otherwise a
+        # fork landing mid-write copies a held io lock into the child (whose owner thread
+        # doesn't exist there) and the child deadlocks at its first stdout use, hanging the
+        # whole run. The child never touches `lock` itself.
+        with lock:
+            pid = os.fork()
         if pid == 0:  # ---- child
             os.close(r)
             os.dup2(w, 1)
             os.dup2(w, 2)
             os.close(w)
+            # Belt-and-braces for C1: rebind std streams onto fresh objects over the duped
+            # fds so NO parent buffer/lock state is reachable in the child at all.
+            sys.stdout = io.TextIOWrapper(io.FileIO(1, "wb", closefd=False), line_buffering=True)
+            sys.stderr = io.TextIOWrapper(io.FileIO(2, "wb", closefd=False), line_buffering=True)
+            # D symmetry: the child inherits metis.forkserver in sys.modules (first-party →
+            # it would land in every forkserver-run step's read-set D, making cache keys
+            # differ between executors for the same step). The step never imports it — drop
+            # it before the trace snapshot.
+            sys.modules.pop("metis.forkserver", None)
             _child(req)  # never returns
         # ---- parent
         os.close(w)

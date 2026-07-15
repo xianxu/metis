@@ -1,12 +1,13 @@
 ---
 id: 000044
-status: working
+status: codecomplete
 deps: []
 github_issue:
 created: 2026-07-14
 updated: 2026-07-15
 estimate_hours: 1.08
 started: 2026-07-15T10:33:09-07:00
+actual_hours: 2.35
 ---
 
 # leaf executor: warm fork-server — kill per-step interpreter+import cost
@@ -89,7 +90,25 @@ Durable plan: `workshop/plans/000044-leaf-forkserver-plan.md` (entities, protoco
 
 ## Log
 
-### 2026-07-15
+### 2026-07-15 (close review — FIX-THEN-SHIP, all findings fixed in the close commit)
+- **C1 (Critical, real production hang):** fork could land while a waiter thread held
+  stdout's internal io lock → held lock copied into the child → deadlock at the child's first
+  stdout use → whole run hangs. Fixed: `with lock: os.fork()` (writers only write under that
+  lock) + belt-and-braces fresh std-stream rebind in the child post-dup2. Also dropped
+  `metis.forkserver` from the child's sys.modules pre-snapshot (D symmetry: executor mode no
+  longer changes cache keys).
+- **I1:** mid-flight server death now ERRORS the step (`errDispatchedLost`) instead of legacy
+  re-run against a possibly-still-running forked child (double-execution hazard). En route:
+  `uv run` doesn't exec-replace — the server now gets its own process group (group-kill on
+  hung shutdown; the new SIGKILL-mid-flight test needed it too). Test added.
+- **I2:** perf test now ENFORCES the ≥2× bound on the warm marginal (measured: 43ms vs
+  ~1.16s/4-leaf legacy — the bound passes ~13×); and the REAL kbench before/after pair is in:
+  titanic-sweep-smoke, identical honest estimate 0.8103 both modes, **legacy 21.8s wall /
+  104.3s user-CPU vs forkserver 9.8s wall / 29.8s user-CPU** — 2.2× wall at 40-leaf scale
+  (server startup unamortized), **3.5× on the leaf-bound CPU** (Done-when's ≥3× target, met);
+  per-leaf import tax measured ~1.85s (104→30s CPU over ~40 leaves). Cache-bust between the
+  two runs = a one-line comment edit in kbench features.py, reverted (logged for provenance).
+- 2026-07-15: closed — TDD throughout: 7 real-fork pytest tests (protocol, env authority/no-bleed, failure traceback, SystemExit, concurrency, reads.json+forced used_site_packages, EOF drain) + Go parse/pool/routing/fallback tests + toy e2e parameterized over both executors; full go test ./... -race + 87 pytest green. Invocation-verified on the REAL cross-repo workload: titanic-sweep-smoke through BOTH venvs fork-servers on macOS, 10.1s wall, zero fork hazards. Measured: toy e2e 3.70s->1.89s; per-leaf marginal ~290ms->~30ms (pandas-only leaf; real sklearn leaves ~1s tax amortize better). Atlas + RUNBOOK reconciled.; review verdict: FIX-THEN-SHIP
 - BUILT (TDD throughout). T1 `run_traced` extraction (suite green). T2 `metis/forkserver.py` +
   7 real-fork pytest tests — protocol round-trip, env authority (READ_ROOT no-bleed), failure
   traceback, SystemExit pass-through, 4-way concurrency, reads.json + forced

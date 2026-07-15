@@ -94,9 +94,14 @@ func (e execStep) Execute(step experiment.Step, runDir string) (experiment.StepR
 			if e.sem != nil {
 				e.sem <- struct{}{}
 			}
-			resp, ok := e.pool.execute(spec, stepDir, env)
+			resp, ok, ferr := e.pool.execute(spec, stepDir, env)
 			if e.sem != nil {
 				<-e.sem
+			}
+			if ferr != nil {
+				// I1: dispatched-and-lost — the forked child may still be running in this
+				// stepDir; a legacy re-run would double-execute. Error the step instead.
+				return experiment.StepResult{}, fmt.Errorf("exec %s (forkserver): %v", exe, ferr)
 			}
 			if ok {
 				if resp.Exit != 0 {

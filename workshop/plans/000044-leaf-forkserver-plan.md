@@ -105,3 +105,18 @@ AUTHORING contract (a step stays a bash wrapper; discovery/resolve untouched).
   (never correctness) and says so loudly once.
 - Server crash mid-run: pending requests error that step (run aborts as a step failure would
   today); rerun with `--forkserver=false` if it recurs.
+
+## Revisions
+
+- **2026-07-15 (close review, FIX-THEN-SHIP):** (1) C1 — the plan's fork-safety stance
+  ("waiter threads do IO only") missed that the waiters' IO **shares a locked object with the
+  fork path**: forking while a waiter holds stdout's internal BufferedWriter lock copies the
+  held lock into the child → child deadlock → run hang. Fixed: fork under the protocol lock +
+  child rebinds fresh std streams post-dup2. (2) I1 — the "server crash → pending requests
+  error that step" risk clause is now ENFORCED in the contract: `errDispatchedLost` (post-
+  dispatch death) errors the step (the forked child may still be running — a legacy re-run
+  would double-execute into stepDir); only pre-dispatch failure falls back. Discovered en
+  route: `uv run` does NOT exec-replace, so the server gets its own process group (group-kill
+  on hung shutdown; graceful EOF-drain unchanged). (3) D-symmetry addendum: the child drops
+  `metis.forkserver` from sys.modules pre-snapshot so cache keys are identical across
+  executors (switching `--forkserver` on/off is not a cache-bust).

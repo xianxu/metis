@@ -20,6 +20,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"sync"
+	"syscall"
+	"time"
 )
 
 // wrapperSpec is the parse of a convention-conforming step wrapper: the uv project root the
@@ -111,6 +113,11 @@ type forkReq struct {
 func startForkServer(root string) (*forkServer, error) {
 	cmd := exec.Command("uv", "run", "--project", root, "python", "-m", "metis.forkserver")
 	cmd.Dir = root
+	// Own process GROUP: `uv run` spawns python as a child (no exec), and the server forks
+	// step children — group-kill is the only way to reap the whole tree on a hung shutdown
+	// (and a test's mid-flight kill). Normal shutdown stays graceful (stdin EOF → drain);
+	// Ctrl-C on `metis run` closes the stdin pipe, so detached servers still self-exit.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err
@@ -206,13 +213,19 @@ func (s *forkServer) readLoop(stdout io.Reader) {
 	close(s.done)
 }
 
-// execute runs one step request to completion. An error wrapping errServerUnavailable means
-// "this server can't serve" (fall back to legacy); any response — even exit != 0 — is a real
-// step outcome.
+// errDispatchedLost marks "the request was (possibly) handed to the server before it died" —
+// the forked child may STILL BE RUNNING and writing into stepDir, so the caller must ERROR
+// the step, never re-run it via legacy (double-execution would corrupt the step's outputs).
+// Close-review I1: only a PRE-dispatch failure is safe to fall back on.
+var errDispatchedLost = errors.New("fork-server died with the request in flight")
+
+// execute runs one step request to completion. errServerUnavailable = nothing dispatched,
+// legacy fallback is safe; errDispatchedLost = the child may be running, error the step; any
+// response — even exit != 0 — is a real step outcome.
 func (s *forkServer) execute(module, cwd string, env map[string]string) (forkResp, error) {
 	<-s.ready
 	s.mu.Lock()
-	if s.dead != nil {
+	if s.dead != nil { // nothing dispatched yet — safe to fall back
 		defer s.mu.Unlock()
 		return forkResp{}, s.dead
 	}
@@ -225,23 +238,30 @@ func (s *forkServer) execute(module, cwd string, env map[string]string) (forkRes
 		_, err = s.stdin.Write(append(b, '\n'))
 	}
 	if err != nil {
+		// The write was ATTEMPTED — a partial line may have reached a dying server. Treat as
+		// dispatched (conservative: no legacy re-run against a possibly-forked child).
 		delete(s.pending, id)
 		s.mu.Unlock()
-		return forkResp{}, fmt.Errorf("%w: write request: %v", errServerUnavailable, err)
+		return forkResp{}, fmt.Errorf("%w: write request: %v", errDispatchedLost, err)
 	}
 	s.mu.Unlock()
 	resp, ok := <-ch
-	if !ok { // channel closed by readLoop's death path
+	if !ok { // channel closed by readLoop's death path — request was in flight
 		s.mu.Lock()
 		defer s.mu.Unlock()
-		return forkResp{}, s.dead
+		return forkResp{}, fmt.Errorf("%w: %v", errDispatchedLost, s.dead)
 	}
 	return resp, nil
 }
 
 func (s *forkServer) shutdown() {
 	_ = s.stdin.Close() // EOF → server drains in-flight children and exits
-	<-s.done
+	select {
+	case <-s.done:
+	case <-time.After(60 * time.Second): // a hung drain (e.g. a wedged child) — group-kill
+		_ = syscall.Kill(-s.cmd.Process.Pid, syscall.SIGKILL)
+		<-s.done
+	}
 }
 
 // serverPool lazily starts one forkServer per project root and remembers roots whose start
@@ -276,13 +296,16 @@ func (p *serverPool) noticeOnce(key, msg string) {
 	fmt.Fprintf(p.out, "metis: forkserver: %s\n", msg)
 }
 
-// execute routes a parsed step through the root's warm server. (forkResp, true, nil) is a
-// real step outcome; ok=false means "use legacy exec" (server unavailable — already noticed).
-func (p *serverPool) execute(spec wrapperSpec, cwd string, env map[string]string) (forkResp, bool) {
+// execute routes a parsed step through the root's warm server. Outcomes:
+//   - (resp, true, nil)  — a real step outcome (even exit != 0);
+//   - (_, false, nil)    — nothing dispatched (broken/unstartable server) → legacy is SAFE;
+//   - (_, false, err)    — dispatched-and-lost → the caller must ERROR the step (I1: the
+//     forked child may still be running; a legacy re-run would double-execute into stepDir).
+func (p *serverPool) execute(spec wrapperSpec, cwd string, env map[string]string) (forkResp, bool, error) {
 	p.mu.Lock()
 	if p.broken[spec.root] {
 		p.mu.Unlock()
-		return forkResp{}, false
+		return forkResp{}, false, nil
 	}
 	s := p.servers[spec.root]
 	if s == nil {
@@ -292,7 +315,7 @@ func (p *serverPool) execute(spec wrapperSpec, cwd string, env map[string]string
 			p.broken[spec.root] = true
 			p.mu.Unlock()
 			p.noticeOnce("root:"+spec.root, fmt.Sprintf("start failed for %s (%v) — legacy exec for this root", spec.root, err))
-			return forkResp{}, false
+			return forkResp{}, false, nil
 		}
 		p.servers[spec.root] = s
 	}
@@ -303,10 +326,14 @@ func (p *serverPool) execute(spec wrapperSpec, cwd string, env map[string]string
 		p.mu.Lock()
 		p.broken[spec.root] = true
 		p.mu.Unlock()
-		p.noticeOnce("root:"+spec.root, fmt.Sprintf("server for %s died (%v) — legacy exec for this root", spec.root, err))
-		return forkResp{}, false
+		if errors.Is(err, errDispatchedLost) {
+			p.noticeOnce("root:"+spec.root, fmt.Sprintf("server for %s died mid-flight (%v) — erroring the step; later leaves use legacy", spec.root, err))
+			return forkResp{}, false, err
+		}
+		p.noticeOnce("root:"+spec.root, fmt.Sprintf("server for %s unavailable (%v) — legacy exec for this root", spec.root, err))
+		return forkResp{}, false, nil
 	}
-	return resp, true
+	return resp, true, nil
 }
 
 // shutdown closes every server (EOF-drain). Deferred by runExperiment.

@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -109,10 +110,10 @@ func TestForkServerPool_RealServerRoundTrip(t *testing.T) {
 	if err := os.MkdirAll(stepDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	resp, ok := pool.execute(wrapperSpec{root: root, module: "toyfork"}, stepDir,
+	resp, ok, ferr := pool.execute(wrapperSpec{root: root, module: "toyfork"}, stepDir,
 		map[string]string{"METIS_STEP_DIR": stepDir, "METIS_STEP_ID": "s1"})
-	if !ok || resp.Exit != 0 {
-		t.Fatalf("round trip failed: ok=%v resp=%+v", ok, resp)
+	if !ok || ferr != nil || resp.Exit != 0 {
+		t.Fatalf("round trip failed: ok=%v err=%v resp=%+v", ok, ferr, resp)
 	}
 	b, err := os.ReadFile(filepath.Join(stepDir, "out.txt"))
 	if err != nil || string(b) != "s1" {
@@ -127,9 +128,9 @@ func TestForkServerPool_RealServerRoundTrip(t *testing.T) {
 	if err := os.MkdirAll(boomDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	resp, ok = pool.execute(wrapperSpec{root: root, module: "toyboom"}, boomDir,
+	resp, ok, ferr = pool.execute(wrapperSpec{root: root, module: "toyboom"}, boomDir,
 		map[string]string{"METIS_STEP_DIR": boomDir})
-	if !ok {
+	if !ok || ferr != nil {
 		t.Fatal("a step FAILURE is a real outcome, not server-unavailable")
 	}
 	if resp.Exit == 0 || !strings.Contains(resp.Output, "fork-boom") {
@@ -148,8 +149,9 @@ func TestForkServerPool_BrokenRootFallsBack(t *testing.T) {
 	defer pool.shutdown()
 	bogus := t.TempDir() // no pyproject/venv — uv run will fail (or hang-free error)
 	for i := 0; i < 3; i++ {
-		if _, ok := pool.execute(wrapperSpec{root: bogus, module: "x"}, t.TempDir(), nil); ok {
-			t.Fatal("bogus root must be unavailable")
+		_, ok, ferr := pool.execute(wrapperSpec{root: bogus, module: "x"}, t.TempDir(), nil)
+		if ok || ferr != nil {
+			t.Fatal("bogus root must be unavailable pre-dispatch (fallback-safe, no step error)")
 		}
 	}
 	if n := strings.Count(out.String(), "legacy exec"); n != 1 {
@@ -230,17 +232,89 @@ func TestForkServerPerf_LooseBound(t *testing.T) {
 	start = time.Now()
 	pool := newServerPool(io.Discard)
 	defer pool.shutdown()
-	for i := 0; i < n; i++ {
+	forkOne := func() {
 		dir := t.TempDir()
-		resp, ok := pool.execute(wrapperSpec{root: root, module: "toyheavy"}, dir,
+		resp, ok, ferr := pool.execute(wrapperSpec{root: root, module: "toyheavy"}, dir,
 			map[string]string{"METIS_STEP_DIR": dir})
-		if !ok || resp.Exit != 0 {
-			t.Fatalf("fork run failed: ok=%v resp=%+v", ok, resp)
+		if !ok || ferr != nil || resp.Exit != 0 {
+			t.Fatalf("fork run failed: ok=%v err=%v resp=%+v", ok, ferr, resp)
 		}
 	}
+	for i := 0; i < n; i++ {
+		forkOne()
+	}
 	forked := time.Since(start)
-	t.Logf("legacy %v vs forkserver %v (n=%d, forkserver incl. server start + full preload)", legacy, forked, n)
+
+	// The Done-when bound: >=2x on the WARM MARGINAL (the per-leaf cost a sweep actually
+	// pays — the server is already up after the first leaf). Total-time stays a loose >1x
+	// (server start + preload amortize over ~5k leaves in a real sweep, not over n=4).
+	start = time.Now()
+	for i := 0; i < n; i++ {
+		forkOne()
+	}
+	warmMarginal := time.Since(start)
+	t.Logf("legacy %v vs forkserver %v cold / %v warm-marginal (n=%d)", legacy, forked, warmMarginal, n)
 	if forked >= legacy {
-		t.Errorf("forkserver (%v) not faster than legacy (%v) at n=%d", forked, legacy, n)
+		t.Errorf("forkserver cold (%v) not faster than legacy (%v) at n=%d", forked, legacy, n)
+	}
+	if 2*warmMarginal >= legacy {
+		t.Errorf("forkserver warm marginal (%v) not >=2x faster than legacy (%v) at n=%d", warmMarginal, legacy, n)
+	}
+}
+
+// TestForkServerPool_MidFlightDeathErrorsTheStep (close-review I1): SIGKILL the server with
+// a request in flight — the forked child may still be running, so pool.execute must return a
+// STEP ERROR (dispatched-and-lost), never ok=false (which would trigger a legacy re-run into
+// the same stepDir).
+func TestForkServerPool_MidFlightDeathErrorsTheStep(t *testing.T) {
+	if _, err := exec.LookPath("uv"); err != nil {
+		t.Skip("uv not on PATH")
+	}
+	root := repoRoot(t)
+	mods := t.TempDir()
+	if err := os.WriteFile(filepath.Join(mods, "toyslow.py"),
+		[]byte("import time\ntime.sleep(5)\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PYTHONPATH", mods)
+	t.Setenv("METIS_FORKSERVER_PRELOAD", "")
+
+	pool := newServerPool(io.Discard)
+	defer pool.shutdown()
+	type result struct {
+		ok  bool
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		_, ok, ferr := pool.execute(wrapperSpec{root: root, module: "toyslow"}, t.TempDir(),
+			map[string]string{})
+		done <- result{ok, ferr}
+	}()
+	// Wait until the server exists and the request had time to dispatch, then kill it.
+	var srv *forkServer
+	for i := 0; i < 200; i++ {
+		pool.mu.Lock()
+		srv = pool.servers[root]
+		pool.mu.Unlock()
+		if srv != nil {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if srv == nil {
+		t.Fatal("server never started")
+	}
+	<-srv.ready
+	time.Sleep(300 * time.Millisecond) // let the request dispatch + fork
+	// Group-kill: `uv run` spawns python as a child — killing only the uv parent would
+	// leave the real server (and its forked step child) alive and the request would
+	// complete normally after the sleep.
+	if err := syscall.Kill(-srv.cmd.Process.Pid, syscall.SIGKILL); err != nil {
+		t.Fatal(err)
+	}
+	res := <-done
+	if res.err == nil {
+		t.Fatalf("mid-flight death must be a STEP ERROR (dispatched-and-lost), got ok=%v err=nil", res.ok)
 	}
 }
