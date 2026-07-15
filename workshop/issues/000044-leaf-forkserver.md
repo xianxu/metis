@@ -1,11 +1,12 @@
 ---
 id: 000044
-status: open
+status: working
 deps: []
 github_issue:
 created: 2026-07-14
-updated: 2026-07-14
+updated: 2026-07-15
 estimate_hours:
+started: 2026-07-15T10:33:09-07:00
 ---
 
 # leaf executor: warm fork-server — kill per-step interpreter+import cost
