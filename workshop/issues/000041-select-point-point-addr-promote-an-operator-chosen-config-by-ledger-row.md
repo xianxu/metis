@@ -1,11 +1,12 @@
 ---
 id: 000041
-status: open
+status: working
 deps: []
 github_issue:
 created: 2026-07-14
 updated: 2026-07-14
 estimate_hours:
+started: 2026-07-14T17:07:52-07:00
 ---
 
 # select --point <point_addr> — promote an operator-chosen config by ledger row
