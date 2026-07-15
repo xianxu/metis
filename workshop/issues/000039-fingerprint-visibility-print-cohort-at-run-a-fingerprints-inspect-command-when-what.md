@@ -5,7 +5,7 @@ deps: []
 github_issue:
 created: 2026-07-14
 updated: 2026-07-15
-estimate_hours: 3
+estimate_hours: 1.55
 started: 2026-07-15T14:49:03-07:00
 ---
 
@@ -46,6 +46,27 @@ Two additions, both presentation over existing capture data (no new instrumentat
   ordering (newest last).
 - The select cohort-guard message names the command (or inlines the summary) — an operator hitting
   it can resolve the pin without opening the csv.
+
+## Estimate
+
+```estimate
+model: estimate-logic-v3.1
+familiarity: 1.0
+item: smaller-go-module   design=0.10 impl=0.40
+item: smaller-go-module   design=0.10 impl=0.40
+item: smaller-go-module   design=0.05 impl=0.30
+item: atlas-docs          design=0.02 impl=0.10
+design-buffer: 0.30
+total: 1.55
+```
+
+Row 1 = `cmd/metis/fingerprints.go` pure core (cohort reducer + prefix resolver + renderer +
+record loader, 4 unit tests) — well-specced mirror-pattern work, the plan carries complete code.
+Row 2 = the two thin wirings: `metis ledger fingerprints` verb (CLI-entrypoint test) + the
+`metis run` cohort line (backfill signature change, both capture sites, output assertions).
+Row 3 = select/ledger-show prefix pinning + honest guard/zero-match errors (cross-file edits,
+existing-test updates). `atlas-docs` = RUNBOOK/atlas sweep + the real-ledger smoke. Calibration
+doc is [stale] (#127) — hours provisional per estimate-source.
 
 ## Plan
 
