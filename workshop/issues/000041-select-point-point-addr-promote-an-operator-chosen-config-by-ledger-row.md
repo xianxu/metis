@@ -76,9 +76,9 @@ milestone-review = the close boundary review (Task 3).
 
 Durable plan: `workshop/plans/000041-select-point-plan.md`.
 
-- [ ] Task 1 — resolve + errors (TDD)
-- [ ] Task 2 — promote path (TDD)
-- [ ] Task 3 — real-ledger verification (operator submit) + atlas/RUNBOOK + close
+- [x] Task 1 — resolve + errors (TDD)
+- [x] Task 2 — promote path (TDD)
+- [x] Task 3 — real-ledger verification (operator submit) + atlas/RUNBOOK + close
 
 ## Log
 
@@ -88,3 +88,9 @@ Durable plan: `workshop/plans/000041-select-point-plan.md`.
   seam for metis#40 (/metis-select skill). Sibling: kaggle#6 (submit auto-description). Immediate
   use waiting on it: promote rf md=8 n=200 [all-6+ticket_size+ticket_survival] from the b7aee3de
   cohort (the operator-prior production experiment).
+
+- Built same-day (TDD, 6 new tests incl. ambiguity/no-match/wrong-cohort/conflict + promote
+  reconstruct==row). Real-ledger verification: `--point 04fb2b62` resolved the operator's target
+  config (rf md=8 n=200 all-6+tickets, pooled inner 0.8297±0.0043 — matches the hand computation),
+  `--promote` shipped `point-rf-3daa6310` (submission.csv materialized; operator submits). Atlas +
+  kbench RUNBOOK updated.
