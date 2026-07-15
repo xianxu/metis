@@ -46,7 +46,16 @@ conceptually the engine's fold loop already — one fewer subprocess per run).
 
 ## Done when
 
--
+- A real kbench `metis run --fast` (or `--sample`) sweep runs its leaves through the fork-server
+  with **measured before/after wall-clock in the Log** showing the import tax gone (target ≥3×
+  on the leaf-bound portion; the loose-bound perf test pins ≥2× vs legacy on toy leaves).
+- Per-step semantics preserved and tested: each leaf is its own forked process; `reads.json`
+  written per child with `used_site_packages: true`; request env authoritative (`METIS_*`
+  scrubbed — a prior request's `READ_ROOT` cannot leak); step failure → nonzero exit +
+  traceback surfaced; caching/e2e suites green (`go test ./... -race` + pytest).
+- Non-standard wrappers and server-start failure fall back to legacy exec LOUDLY (once per
+  uses-type); `--forkserver=false` escape hatch works.
+- atlas (executor section) + RUNBOOK reconciled.
 
 ## Estimate
 
