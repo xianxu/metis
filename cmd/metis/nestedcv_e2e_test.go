@@ -114,3 +114,92 @@ func TestNestedCV_DryRunSurfacesOuterCost(t *testing.T) {
 		t.Errorf("dry-run should note shipping moved to `metis select --promote`; got:\n%s", s)
 	}
 }
+
+// TestNestedCV_SampleRunsMOfKFolds (metis#42): `--sample m` runs exactly m of the k outer folds of
+// the ALWAYS-k-way partition — the m-of-k generalization of `--fast` (k stays the estimand: each
+// fold trains on (k-1)/k of the rows; m only sets how many unbiased samples of that estimand run).
+// Asserts: m held-out scores, m outer ledger rows (folds 0..m-1 of the k-partition), and the
+// estimate reported over m fold(s).
+func TestNestedCV_SampleRunsMOfKFolds(t *testing.T) {
+	ws := t.TempDir()
+	k3 := strings.Replace(foldShapeMD("[a, b]"), "k: 2", "k: 3", 1)
+	expPath := writeShapeFile(t, ws, k3)
+
+	var out strings.Builder
+	_, err := runExperiment(runOpts{
+		expPath: expPath, now: fixedNow(),
+		git:    fakeGitProbe{name: "metis", sha: "sha", dirty: false},
+		exec:   foldFakeExec{}, out: &out,
+		sample: 2,
+	})
+	if err != nil {
+		t.Fatalf("--sample 2 of k=3 should succeed: %v", err)
+	}
+	s := out.String()
+	if !strings.Contains(s, "2 outer fold(s)") {
+		t.Errorf("banner should show the SAMPLED outer-fold count (2), got:\n%s", s)
+	}
+	// 2 sampled outer folds × 1 family (a,b share the scalar `model` knob) = 2 held-out lines.
+	if n := strings.Count(s, "→ held-out "); n != 2 {
+		t.Errorf("expected 2 outer-fold held-out scores (--sample 2 × 1 family), got %d:\n%s", n, s)
+	}
+	if !strings.Contains(s, "over 2 outer fold(s)") {
+		t.Errorf("estimate should aggregate over the 2 SAMPLED folds, got:\n%s", s)
+	}
+	led := loadLedgerOrFatal(t, expPath)
+	outerFolds := map[int]bool{}
+	for _, r := range led.Rows {
+		if r.Level == "outer" && r.OuterFold != nil {
+			outerFolds[*r.OuterFold] = true
+		}
+	}
+	// Folds 0..m-1 of the k-way partition (the seeded partition makes a prefix a valid
+	// random m-subset); fold 2 must NOT have run.
+	if len(outerFolds) != 2 || !outerFolds[0] || !outerFolds[1] || outerFolds[2] {
+		t.Errorf("outer rows should cover exactly sampled folds {0,1} of k=3, got %v", outerFolds)
+	}
+}
+
+// TestNestedCV_SampleGuards (metis#42): the misuse edges fail LOUDLY — m>k (the partition has only
+// k folds), --sample on a single-config shape (the flat path has no outer folds to sample), and
+// --sample combined with --fast (--fast is shorthand for --sample 1; two knobs for one thing is
+// an ambiguity, not a convenience).
+func TestNestedCV_SampleGuards(t *testing.T) {
+	newShape := func(t *testing.T, models string) string {
+		return writeShapeFile(t, t.TempDir(), foldShapeMD(models))
+	}
+	base := func(expPath string) runOpts {
+		return runOpts{expPath: expPath, now: fixedNow(),
+			git: fakeGitProbe{name: "metis", sha: "sha", dirty: false},
+			exec: foldFakeExec{}, out: io.Discard}
+	}
+
+	t.Run("m exceeds k", func(t *testing.T) {
+		o := base(newShape(t, "[a, b]")) // k=2
+		o.sample = 3
+		if _, err := runExperiment(o); err == nil || !strings.Contains(err.Error(), "sample") {
+			t.Errorf("--sample 3 with k=2 must error mentioning sample, got %v", err)
+		}
+	})
+	t.Run("negative m", func(t *testing.T) {
+		o := base(newShape(t, "[a, b]"))
+		o.sample = -1
+		if _, err := runExperiment(o); err == nil || !strings.Contains(err.Error(), "sample") {
+			t.Errorf("--sample -1 must error mentioning sample, got %v", err)
+		}
+	})
+	t.Run("flat single-config shape", func(t *testing.T) {
+		o := base(newShape(t, "[a]")) // 1 config → flat CV, no outer folds
+		o.sample = 1
+		if _, err := runExperiment(o); err == nil || !strings.Contains(err.Error(), "sample") {
+			t.Errorf("--sample on a flat (single-config) run must error mentioning sample, got %v", err)
+		}
+	})
+	t.Run("sample plus fast", func(t *testing.T) {
+		o := base(newShape(t, "[a, b]"))
+		o.sample, o.fast = 2, true
+		if _, err := runExperiment(o); err == nil || !strings.Contains(err.Error(), "sample") {
+			t.Errorf("--sample + --fast must error (ambiguous), got %v", err)
+		}
+	})
+}

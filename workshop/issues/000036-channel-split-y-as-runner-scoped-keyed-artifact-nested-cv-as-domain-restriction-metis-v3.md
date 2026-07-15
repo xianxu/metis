@@ -88,3 +88,20 @@ Replace the row-cloning seal with a runner-owned label channel:
   public samples now suggest nested measurement under-ranks co-occurrence features (fragmentation:
   labeled-partner coverage 38.6%→~30% under the seal + m=10 shrinkage). The ticket_size experiment
   in this issue's acceptance should quantify exactly this bias, not just hoisted-vs-fold-scoped.
+- **ATTENUATION QUANTIFIED (metis#42 k10 probe, 2026-07-14 evening).** Same grid at k=10
+  (`titanic-sweep-k10.md`, seed 42) run `--sample 3` vs the k=5 b7aee3de cohort; seal-time
+  labeled-partner coverage ~64% → ~81% of ship-time. Pre-committed rule: SUPPORTED if ticket
+  increments rise for families that exploit them while controls stay flat. **Result: SUPPORTED.**
+  Inner increment of `+ticket_survival` over the all6 base, mean across configs (k5 → k10):
+  **rf 0.0020 → 0.0078 (+0.0058, ~4×) · hist_gbm 0.0059 → 0.0098 (+0.0039)** · logreg
+  0.0019 → 0.0024 (flat — logreg can't exploit the interaction anyway). **Internal control:**
+  `+ticket_size` is label-FREE (coverage doesn't depend on labeled partners) and its increment
+  stays flat (rf +0.0009, gbm +0.0004) — the shift is specific to the label-dependent channel,
+  exactly what the fragmentation mechanism predicts. **Selection flips:** the sealed inner
+  selection picks a ticket_survival config in 2/3 rf outer folds and 1/3 gbm folds at k10, vs
+  1/5 and 0/5 at k5. Honest outer means at k10 (3 folds, wide SE): gbm 0.8282±0.0250,
+  rf 0.8283±0.0140, logreg 0.7760±0.0179 — flat vs k5 within noise, as expected (outer mixes
+  winners). Implication for this issue's design: the transductive estimand knob is not
+  cosmetic — at 90% train we STILL under-measure vs the shipped model's full-coverage + 61%
+  test-side split-group deployment; the channel split should make the estimand declarable
+  rather than fold-count-implied. Full comparison script + numbers: metis#42 Log.

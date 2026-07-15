@@ -152,7 +152,10 @@ wrapped by **thin step-executables** honoring the contract above. Hermetic via *
   syscall sensor swap. Pairs with the **L1 structural** seal (`outer-split` subset dirs).
 - **Nested-CV (metis#23; derived, records — metis#32) — `cmd/metis/sweep.go`:** `metis run` on a
   `>1`-config sweep runs nested CV (the mode is now DERIVED by config-count — the shape `driver:` field
-  was removed in #32; outer folds = `sweeper.resample.cv.k`, or 1 under `--fast`). `runNestedCV` wraps
+  was removed in #32; outer folds = `sweeper.resample.cv.k`, or 1 under `--fast`, or m under
+  `--sample m` — metis#42's m-of-k sparse sampling: the partition is ALWAYS split k ways (k = the
+  estimand, the train fraction each fold simulates; m = precision/cost only), `--fast` ≡ `--sample 1`,
+  and misuse (m>k, single-config flat run, combined with `--fast`) fails loudly). `runNestedCV` wraps
   the black-box sweeper in an OUTER resample (the pure `sampler.CVDriver` over the unchanged `Run`
   loop). Preamble (`materializeOuterAnalysis`) runs `{data + outer-split(k=outerK)}` once →
   `analysis_i/` dirs. Per outer fold (`runOuterFold`): (a) a **sealed** sweep (`runSweeper` repointed
@@ -177,7 +180,9 @@ wrapped by **thin step-executables** honoring the contract above. Hermetic via *
   by the inner CV (`SelectConfigs.PerFamily`, the metis#19 rule). `--promote` reconstructs the winner
   (`promotedExperiment`) and runs it on ALL data → `runs/best-{family}-{hash}/submission.csv`. A multi-family
   ledger with no `outer` rows is a sharp error (never a silent inner-argmax). `metis run --fast` = one outer
-  fold (a ~1/k honest single-point for iteration). Retired `metis ledger select` + `metis promote`.
+  fold (a ~1/k honest single-point for iteration); `--sample m` = m of the k folds (metis#42 — probe-cost
+  control; an m<k SE has m−1 df: probe with it, never re-select what ships on it). Retired
+  `metis ledger select` + `metis promote`.
 - **Parallel batch executor (metis#31) — `pkg/sampler/exec.go` + `cmd/metis/{exec,run,sweep}.go`:**
   `Run` takes an injected `exec(batch, runPoint) []O` that runs one `Ask` batch and returns outputs
   **in batch order** (`SeqExec` serial default · `ParExec` goroutine fan-out · `ExecFor(parallel)`

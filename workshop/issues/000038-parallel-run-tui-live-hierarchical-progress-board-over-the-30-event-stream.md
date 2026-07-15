@@ -61,3 +61,10 @@ A live terminal progress board rendered from the #30 event stream (`SizeHint` + 
   a single aggregated line (the #30 renderer) insufficient for comprehension. Layering: #30 owns
   the instrumentation (SizeHint + progress callback), this issue owns the TUI presentation; deps
   reflect that.
+- Operator request (2026-07-14, during the metis#42 k10 probe): the board must carry a
+  **throughput line — a moving-average runs/sec (or trains/min) + implied ETA against the known
+  total** (`m outer × configs × k inner` is computable up front from the shape). During the probe
+  this was reconstructed by hand (`grep -c "✓ step train"` + wall clock ≈ 107/min → ~25 min ETA);
+  it also would have caught the BLAS-oversubscription thrash in seconds (throughput ~0 while the
+  process looked alive) instead of via system load inspection. Moving average, not instantaneous —
+  per-leaf times vary by config (rf500 ≫ logreg).
