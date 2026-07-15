@@ -1,12 +1,13 @@
 ---
 id: 000035
-status: working
+status: codecomplete
 deps: []
 github_issue:
 created: 2026-07-14
 updated: 2026-07-14
 estimate_hours: 2.05
 started: 2026-07-14T07:43:17-07:00
+actual_hours: 3.89
 ---
 
 # nested-CV sealed pass drops get-data → features reading raw dangle (blocks the real honest-beat)
@@ -130,6 +131,7 @@ Durable plan: `workshop/plans/000035-stage-a-one-road-fix-plan.md` (review-harde
 ## Log
 
 ### 2026-07-14
+- 2026-07-14: closed — kbench e2e 3/3 green incl. FIRST-EVER nested smoke through the real pipeline (was xfailed); metis py 79 tests + go suites green; real honest-beat ran on 891 rows: rf 0.8328±0.0045 selected by lowest-SE-within-1-SE (GBM higher-mean declined), promoted, public 0.77751; leakage tell (RUNBOOK §6 item 5, pre-committed threshold) PASSES — 15 fold×family winners, outer−inner mean ≈ −0.002, the ticket_survival winner +0.0068 ≪ 1 SE. Actual 3.89 measured (attribution split across the 9 issues touched today; fallback-confidence warnings on research-detour segments, no double-count).; review verdict: FIX-THEN-SHIP
 - Filed from the metis#32 kbench migration: the rewritten nested smoke e2e is the first time nested CV
   ran through the real kbench `features` step (which reads `raw: get-data`), and it hard-fails —
   `buildFoldExperiment` drops get-data but repoints only `dataset`, not `raw`. Confirms RUNBOOK §6.4's

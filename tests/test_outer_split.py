@@ -76,6 +76,8 @@ def test_analysis_dirs_carry_test_frame(tmp_path, monkeypatch):
         sub = io.load_dataset(str(sd / f"analysis_{i}"))
         assert sub.test is not None and len(sub.test) == len(full.test)
         assert list(sub.test.columns) == list(full.test.columns)
+        # carried through UNCHANGED — content, not just shape (mirrors the train-rows test)
+        assert sub.test.reset_index(drop=True).equals(full.test.reset_index(drop=True))
 
 
 # ── The seal, end-to-end through a real step + the real exp_path chokepoint (Task 1.5) ──

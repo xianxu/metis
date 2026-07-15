@@ -75,7 +75,7 @@ identical on a non-Kaggle platform?* — if yes, it lives here.
   **measures only** (ship via `metis select --promote`, not an auto-ship). Costs ~outerK×.
   racing/Bayesian = feedback-driven `Ask`. **metis#23 M1** is the outer-fold **sealing spine** the
   driver builds on: `outer-split` materializes k `analysis_i/` **subset dataset dirs** (L1 structural — assessment
-  rows physically absent from selection) + a `METIS_READ_ROOT` confinement asserted at `metis/io.py:exp_path`
+  rows physically absent from selection; test frame carried through — analysis_i shape-identical to the base, metis#35) + a `METIS_READ_ROOT` confinement asserted at `metis/io.py:exp_path`
   (L2 chokepoint — a base-dataset read outside the analysis root is a loud error; handoffs bypass it). Shared by
   #20/kbench#8. `Aggregate` → `MeanSE` (the honest per-config
   `(mean, SE, meanComplexity)`, keyed on the sorted told-set — an adaptive `Done` re-reduces the same

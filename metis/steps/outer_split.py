@@ -47,7 +47,9 @@ def main() -> None:
         # metis#35: carry the test frame — analysis_i is a SHAPE-IDENTICAL stand-in
         # for the declared base (only train rows differ), so a both-frames feature
         # (ticket_size over train+test) sees the same test rows sealed as at ship.
-        # Seal-neutral: test rows are unlabeled, no assessment label is exposed.
+        # Seal-neutral: the outer-assessment rows are fold-i TRAIN rows, which never
+        # appear in `test` — carrying test exposes no assessment label regardless of
+        # whether the test frame itself carries labels.
         io.save_dataset(Dataset(schema=ds.schema, train=analysis, test=ds.test),
                         io.out_path(ctx, f"analysis_{i}"))
 

@@ -101,7 +101,7 @@ sibling worktree, so keep the metis worktree on `issue-35` while running kbench 
   protection = row absence in `analysis_i`; fit_mask is inner-level) — pointer to this plan +
   the pensive. Rewrite `## Done when` to the stage-A list (one-road nested run completes; e2e
   un-xfailed; §6.4 leakage tell checked on the honest-beat run; honest-beat submitted).
-- [ ] **Step 2:** Set `estimate_hours: 5` in the issue frontmatter.
+- [ ] **Step 2:** Set `estimate_hours: 5` in the issue frontmatter. *(Superseded — see Revisions.)*
 - [ ] **Step 3:** Commit (metis, `main` — issue files live on main):
   `#35: revise Spec to stage A (one-road fix); estimate`. Then create branch: `git checkout -b issue-35`.
 - [ ] **Step 4:** Run `sdlc change-code --issue 35` (plan-quality gate reads this plan).
@@ -352,3 +352,11 @@ def test_missing_source_columns_fail_loud():
   get-data` AND JSON `\"raw\":\"get-data\"`) — derive the pattern from the key name, run from the
   repo root"; "a two-repo fix must enumerate BOTH repos' atlases — the close gate only checks the
   repo you close in").
+
+## Revisions
+
+### 2026-07-14 — estimate figure superseded (close-review bookkeeping)
+Task 0 Step 2's `estimate_hours: 5` was a placeholder typed before the change-code gate; the gate
+demanded a derived block, and the issue carries the estimate-logic-v3.1 derivation (2.05h, commits
+7003d98 + 0f25bce with the judge-prompted Task-3 itemization). The issue's ## Estimate block is
+authoritative; this plan line is historical.
