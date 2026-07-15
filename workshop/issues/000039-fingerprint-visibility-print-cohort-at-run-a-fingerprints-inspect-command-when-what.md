@@ -1,11 +1,12 @@
 ---
 id: 000039
-status: open
+status: working
 deps: []
 github_issue:
 created: 2026-07-14
-updated: 2026-07-14
+updated: 2026-07-15
 estimate_hours:
+started: 2026-07-15T14:49:03-07:00
 ---
 
 # fingerprint visibility — print cohort at run + a fingerprints inspect command (when/what)
