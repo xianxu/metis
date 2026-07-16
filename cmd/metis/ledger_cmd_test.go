@@ -138,7 +138,7 @@ func writeFingerprintFixture(t *testing.T, dir string) string {
 		Steps: []record.StepRecord{{StepID: "train", Code: record.CodeManifest{Commit: "commita11", CaptureStatus: "captured"}}}}
 	recB := record.RunRecord{RunID: "r-b", Started: "2026-07-15T09:00:00Z", Finished: "2026-07-15T09:01:00Z",
 		CodeFingerprint: "bbbb2222ffff",
-		Steps: []record.StepRecord{{StepID: "train", Code: record.CodeManifest{Commit: "commitb22", CaptureStatus: "captured"}}}}
+		Steps:           []record.StepRecord{{StepID: "train", Code: record.CodeManifest{Commit: "commitb22", CaptureStatus: "captured"}}}}
 	for id, rec := range map[string]record.RunRecord{"r-a": recA, "r-b": recB} {
 		runDir := filepath.Join(dir, "runs", id)
 		if err := os.MkdirAll(runDir, 0o755); err != nil {

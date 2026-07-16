@@ -22,6 +22,7 @@ import (
 //   - the model FAMILY on the honest OUTER estimate (FamilySelect: lowest-SE-within-1-SE) — the
 //     signal #23 measured and #32 now ACTUATES (not the optimistic inner-CV cross-family argmax);
 //   - the CONFIG within that family on the inner CV (the metis#19 rule).
+//
 // `--promote` reconstructs the chosen config from the ledger and ships it on ALL data
 // (`runs/best-{family}-{hash}/submission.csv`), printing the run id for `kaggle submit`.
 func cmdSelect(args []string) error {
@@ -55,9 +56,9 @@ type selectOpts struct {
 	point       string // metis#41: point_addr (prefix) of an operator-chosen config; "" = rule-based
 	fingerprint string
 	stepPath    []string
-	git         gitProbe                    // nil → gitCLI (production)
-	now         func() time.Time            // nil → time.Now
-	exec        experiment.StepExecutor     // test seam: injected into the --promote run (nil → production execStep)
+	git         gitProbe                // nil → gitCLI (production)
+	now         func() time.Time        // nil → time.Now
+	exec        experiment.StepExecutor // test seam: injected into the --promote run (nil → production execStep)
 	out         io.Writer
 }
 

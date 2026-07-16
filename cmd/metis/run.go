@@ -72,14 +72,14 @@ type runOpts struct {
 	sample   int  // metis#42: nested run does m of the k outer folds (0 = all k). k stays the
 	//               estimand knob (train fraction); m is the precision/cost knob — each fold is an
 	//               unbiased sample of the k-fold estimand. --fast ≡ --sample 1 (kept as shorthand).
-	inSweep  bool // metis#14: this run is a sweep point — suppress per-point single-run
+	inSweep bool // metis#14: this run is a sweep point — suppress per-point single-run
 	//               capture (the sweep captures once per shape-run in captureSweepCode)
 	out  io.Writer
 	exec experiment.StepExecutor // test seam: an injected fake replaces the subprocess
 	//                              execStep (nil → the production execStep). Composes with
 	//                              cache: the caching decorator still wraps it.
-	readRoot string // metis#23: when set, the production execStep confines base-dataset reads to this root
-	maxParallel int          // metis#31: >1 ⇒ ParExec batches + a leaf semaphore; sizes leafSem
+	readRoot    string        // metis#23: when set, the production execStep confines base-dataset reads to this root
+	maxParallel int           // metis#31: >1 ⇒ ParExec batches + a leaf semaphore; sizes leafSem
 	leafSem     chan struct{} // metis#31: the shared global subprocess budget (nil = serial/cache-only)
 	forkserver  bool          // metis#44: warm fork-server leaf executor (cmdRun default true;
 	//                           zero-value false keeps direct runOpts callers/tests on legacy exec)

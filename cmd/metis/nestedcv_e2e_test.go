@@ -128,8 +128,8 @@ func TestNestedCV_SampleRunsMOfKFolds(t *testing.T) {
 	var out strings.Builder
 	_, err := runExperiment(runOpts{
 		expPath: expPath, now: fixedNow(),
-		git:    fakeGitProbe{name: "metis", sha: "sha", dirty: false},
-		exec:   foldFakeExec{}, out: &out,
+		git:  fakeGitProbe{name: "metis", sha: "sha", dirty: false},
+		exec: foldFakeExec{}, out: &out,
 		sample: 2,
 	})
 	if err != nil {
@@ -170,7 +170,7 @@ func TestNestedCV_SampleGuards(t *testing.T) {
 	}
 	base := func(expPath string) runOpts {
 		return runOpts{expPath: expPath, now: fixedNow(),
-			git: fakeGitProbe{name: "metis", sha: "sha", dirty: false},
+			git:  fakeGitProbe{name: "metis", sha: "sha", dirty: false},
 			exec: foldFakeExec{}, out: io.Discard}
 	}
 
