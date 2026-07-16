@@ -319,6 +319,20 @@ func TestShapeSweep_OneConfigDegeneratesToSingleLevelCV(t *testing.T) {
 	if s := out.String(); !strings.Contains(s, "single-level CV") {
 		t.Errorf("a 1-config shape must run the flat single-level CV path; got:\n%s", s)
 	}
+	// metis#30: the flat path's final progress line carries the completed fold count +
+	// the running score (frozen fixture clock → always-emit lines only; see the nested
+	// twin assertion for the rationale).
+	{
+		s := out.String()
+		if !strings.Contains(s, "metis: progress") {
+			t.Errorf("a flat sweep must print progress lines; got:\n%s", s)
+		}
+		final := s[strings.LastIndex(s, "metis: progress"):]
+		final = final[:strings.IndexByte(final, '\n')]
+		if !strings.Contains(final, "folds 2/2") || !strings.Contains(final, "score 0.") {
+			t.Errorf("the flat final progress line must carry folds k/k + score; got: %q", final)
+		}
+	}
 	if strings.Contains(out.String(), "nested-CV") {
 		t.Errorf("a 1-config shape must NOT run nested-CV; got:\n%s", out.String())
 	}

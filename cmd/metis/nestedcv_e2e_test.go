@@ -57,6 +57,18 @@ func TestNestedCV_ProducesHonestEstimateNoShip(t *testing.T) {
 	if !strings.Contains(s, "nested-CV estimate — mean") {
 		t.Errorf("a nested run should report the honest mean±SE procedure estimate; got:\n%s", s)
 	}
+	// metis#30: live progress lines. The fixture clock is FROZEN (fixedNow), so the 1s
+	// throttle never elapses — only the always-emit lines appear (outer completions +
+	// finish); the throttle itself is pinned by the scripted-clock unit test. The FINAL
+	// line carries the complete outer count and a numeric est.
+	if !strings.Contains(s, "metis: progress") {
+		t.Errorf("a nested run must print live progress lines; got:\n%s", s)
+	}
+	finalProg := s[strings.LastIndex(s, "metis: progress"):]
+	finalProg = finalProg[:strings.IndexByte(finalProg, '\n')]
+	if !strings.Contains(finalProg, "outer 2/2") || !strings.Contains(finalProg, "est 0.") {
+		t.Errorf("the final progress line must carry the completed outer count + a numeric est; got: %q", finalProg)
+	}
 	// One held-out score per (outer fold × family): outerK = sweeper.cv.k = 2, and a,b are one
 	// family → 2 held-out lines.
 	if n := strings.Count(s, "→ held-out "); n != 2 {
