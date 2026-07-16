@@ -50,13 +50,17 @@ metis sets single-thread BLAS env for its LEAF subprocesses by default:
 ```estimate
 model: estimate-logic-v3.1
 familiarity: 1.0
-item: smaller-go-module   design=0.05 impl=0.25   # blasPins pure core + unit tests
-item: smaller-go-module   design=0.05 impl=0.30   # two spawn seams (execStep, fork-server) + seam tests
-item: smaller-go-module   design=0.02 impl=0.15   # runExperiment wiring + note + full-chain e2e
-item: atlas-docs          design=0.02 impl=0.10   # RUNBOOK rewrite + atlas + stale-pin grep-sweep
+item: smaller-go-module   design=0.05 impl=0.25
+item: smaller-go-module   design=0.05 impl=0.30
+item: smaller-go-module   design=0.02 impl=0.15
+item: atlas-docs          design=0.02 impl=0.10
 design-buffer: 0.15
 total: 0.96
 ```
+
+Rows: (1) blasPins pure core + unit tests; (2) two spawn seams (execStep, fork-server) +
+seam tests; (3) runExperiment wiring + note + full-chain e2e; (4) RUNBOOK rewrite + atlas +
+stale-pin grep-sweep.
 
 *Produced via `brain/data/life/42shots/velocity/estimate-logic-v3.1.md` against `baseline-v3.1.md`. Method A only.*
 
