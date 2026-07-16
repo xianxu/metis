@@ -137,7 +137,7 @@ func runExperiment(o runOpts) (experiment.Run, error) {
 	// Exactly ONE writer wrap (metis#38): board mode → the pin-bottom compositor (it
 	// serializes internally — no syncWriter stacking); else parallel → syncWriter.
 	if o.tui && exp.Type == "experiment-shape" && !o.dryRun {
-		o.board = newBoardWriter(out)
+		o.board = newBoardWriter(out, now)
 		out = o.board
 		o.out = out
 		defer o.board.close() // idempotent — an error return must not leak a hidden cursor

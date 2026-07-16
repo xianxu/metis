@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -123,12 +124,24 @@ func TestFmtETA(t *testing.T) {
 	}
 }
 
+// steppingClock advances a fixed step per reading — every budgeted operation sees
+// the flush budget elapsed, preserving the pre-#46 inline-flush semantics in tests
+// that assert immediate rendering.
+func steppingClock(step time.Duration) func() time.Time {
+	t := at(0)
+	return func() time.Time {
+		t = t.Add(step)
+		return t
+	}
+}
+
 // boardWriter pins the board to the bottom: passthrough writes scroll above the
 // stored frame; erase sequences separate frames; close is idempotent and restores
 // the cursor. Driven directly (no ticker) against a bytes.Buffer "terminal".
+// (metis#46: a stepping clock keeps each write on the quiet inline-flush path.)
 func TestBoardWriter_PinBottom(t *testing.T) {
 	var term strings.Builder
-	bw := newBoardWriter(&term)
+	bw := newBoardWriter(&term, steppingClock(300*time.Millisecond))
 
 	bw.paint([]string{"AGG line", "fold 0 ▸"})
 	first := term.String()
@@ -195,7 +208,7 @@ func TestBoardWriter_PinBottom(t *testing.T) {
 // final frame — no output is ever swallowed.
 func TestBoardWriter_CloseFlushesPending(t *testing.T) {
 	var term strings.Builder
-	bw := newBoardWriter(&term)
+	bw := newBoardWriter(&term, steppingClock(300*time.Millisecond))
 	bw.paint([]string{"B"})
 	bw.Write([]byte("tail-no-newline"))
 	bw.close()
@@ -214,7 +227,7 @@ func TestRunExperiment_BoardMode(t *testing.T) {
 	var term strings.Builder
 	_, err := runExperiment(runOpts{
 		expPath: expPath,
-		now:     fixedNow(),
+		now:     steppingClock(300 * time.Millisecond), // budget elapses every reading (#46)
 		git:     fakeGitProbe{name: "metis", sha: "sha", dirty: false},
 		exec:    foldFakeExec{},
 		tui:     true, // board mode: runExperiment wraps out in the compositor
@@ -244,8 +257,8 @@ func TestRunExperiment_BoardMode(t *testing.T) {
 	if warnIdx < 0 {
 		t.Fatalf("expected the uncaptured-code note in a fake-exec fixture:\n%s", s)
 	}
-	if lastErase := strings.LastIndex(s, "\x1b[J"); warnIdx > lastErase {
-		t.Errorf("the capture warning bypassed the compositor (after the last erase)")
+	if finalFrame := strings.LastIndex(s, "outer 2/2"); warnIdx > finalFrame {
+		t.Errorf("the capture warning bypassed the compositor (after the final frame)")
 	}
 
 	// Contrast: tui=false on the same fixture — byte-clean plain lines, no board.
@@ -285,7 +298,7 @@ func TestCmdRun_NoTUIFlagParses(t *testing.T) {
 // Important — the route is guarded by construction order; this pins it directly).
 func TestServerPool_NoticeRoutesThroughBoard(t *testing.T) {
 	var term strings.Builder
-	bw := newBoardWriter(&term)
+	bw := newBoardWriter(&term, steppingClock(300*time.Millisecond))
 	bw.paint([]string{"BOARD"})
 	pool := newServerPool(bw) // what runExperiment does post-reorder: pool captures the compositor
 	pool.noticeOnce("k", "server died; falling back to legacy exec")
@@ -302,5 +315,108 @@ func TestServerPool_NoticeRoutesThroughBoard(t *testing.T) {
 	}
 	if !strings.HasSuffix(s, "BOARD\n") {
 		t.Errorf("the board must be repainted below the notice: %q", s)
+	}
+}
+
+// metis#46: under a warm-cache burst the compositor COALESCES — one atomic
+// erase+dump+repaint per flush budget (~4Hz), never per line. Idealized emulators
+// tolerate per-line repaints; real terminals and mux layers (the operator's
+// ghostty-in-cmux) tear under hundreds of erase cycles per second.
+func TestBoardWriter_BurstCoalesces(t *testing.T) {
+	var term strings.Builder
+	// Scripted clock: construction, then one reading per Write; 100 writes 5ms apart
+	// (a 500ms burst) → with a 250ms budget only ~3 inline flushes may fire.
+	times := []time.Time{at(0)}
+	for i := 1; i <= 100; i++ {
+		times = append(times, at(i*5))
+	}
+	bw := newBoardWriter(&term, scriptedClock(times...))
+	bw.paint([]string{"AGG", "fold 0 ▸"})
+	for i := 0; i < 100; i++ {
+		bw.Write([]byte(fmt.Sprintf("⚡ step %d (cache hit)\n", i)))
+	}
+	bw.close()
+	s := term.String()
+	erases := strings.Count(s, "\x1b[J")
+	if erases > 5 { // budgeted: ~500ms/250ms + paint + close — NOT ~100
+		t.Errorf("burst must coalesce to ≤5 erase cycles, got %d", erases)
+	}
+	// Every passthrough byte still lands, in order.
+	for _, want := range []string{"step 0 ", "step 50 ", "step 99 "} {
+		if !strings.Contains(s, want) {
+			t.Errorf("coalescing lost passthrough %q", want)
+		}
+	}
+	if strings.Index(s, "step 50 ") < strings.Index(s, "step 0 ") {
+		t.Error("passthrough order must be preserved")
+	}
+	// The final frame survives close.
+	if !strings.Contains(s[strings.LastIndex(s, "\x1b[J"):], "AGG") {
+		t.Error("close must leave the final frame")
+	}
+}
+
+// Quiet writes (≥budget apart — a cold run's sparse step lines) flush INLINE: the
+// operator watching a slow sweep sees lines the moment they happen.
+func TestBoardWriter_QuietWritesFlushInline(t *testing.T) {
+	var term strings.Builder
+	bw := newBoardWriter(&term, scriptedClock(at(0), at(300), at(600), at(900)))
+	bw.paint([]string{"B"})
+	pre := term.Len()
+	bw.Write([]byte("slow line 1\n"))
+	if !strings.Contains(term.String()[pre:], "slow line 1") {
+		t.Error("a quiet write must appear immediately")
+	}
+	pre = term.Len()
+	bw.Write([]byte("slow line 2\n"))
+	if !strings.Contains(term.String()[pre:], "slow line 2") {
+		t.Error("the next quiet write must also flush inline")
+	}
+}
+
+// A flood that outruns the budget still bounds memory: the pending buffer force-
+// flushes at the size cap rather than growing without limit.
+func TestBoardWriter_PendingSizeCap(t *testing.T) {
+	var term strings.Builder
+	bw := newBoardWriter(&term, func() time.Time { return at(0) }) // frozen: budget never elapses
+	bw.paint([]string{"B"})
+	line := strings.Repeat("x", 1024) + "\n"
+	for i := 0; i < 100; i++ { // ~100KB > the 64KB cap
+		bw.Write([]byte(line))
+	}
+	if !strings.Contains(term.String(), "xxxx") {
+		t.Error("the size cap must force a flush during a frozen-clock flood")
+	}
+}
+
+// The tick's forceFlush drains mid-budget pending output and re-pins the board —
+// the path that restores the display after a burst window (close-review Important:
+// a stranded-pending regression here would ship silently without this pin).
+func TestBoardWriter_ForceFlushDrainsPending(t *testing.T) {
+	var term strings.Builder
+	bw := newBoardWriter(&term, func() time.Time { return at(0) }) // frozen: budget never elapses
+	bw.paint([]string{"BOARD"}) // first flush (zero lastFlush) paints; budget now frozen shut
+	pre := term.Len()
+	bw.Write([]byte("mid-budget line\n"))
+	if strings.Contains(term.String()[pre:], "mid-budget") {
+		t.Fatal("a mid-budget write must coalesce, not flush")
+	}
+	bw.forceFlush() // what sp.tick() calls
+	s := term.String()[pre:]
+	if !strings.Contains(s, "mid-budget line\n") {
+		t.Errorf("forceFlush must drain the pending line: %q", s)
+	}
+	if !strings.HasSuffix(term.String(), "BOARD\n") {
+		t.Errorf("forceFlush must re-pin the board below the drained output: %q", s)
+	}
+	// And through the sink: tick() stores a fresh frame then force-flushes.
+	var term2 strings.Builder
+	prog := newSweepProgress(&term2, func() time.Time { return at(0) }, "maximize",
+		progressTotals{nested: true, outer: 1, outerKind: sampler.SizeExact})
+	bw2 := newBoardWriter(&term2, func() time.Time { return at(0) })
+	prog.bw, prog.width = bw2, 100
+	prog.tick()
+	if !strings.Contains(term2.String(), "outer 0/1") {
+		t.Errorf("tick must render + force-paint the current frame: %q", term2.String())
 	}
 }
