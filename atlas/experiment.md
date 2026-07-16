@@ -203,9 +203,17 @@ wrapped by **thin step-executables** honoring the contract above. Hermetic via *
   (non-nil sem + a `syncWriter` over `out`) in one home. Determinism of persisted artifacts: the fan-out's
   completion-order `pass.points` are `sortPointRuns`-sorted before the manifest/ledger write; the
   `sweepPass` mutex guards the shared `configs`/`points`/`err` bookkeeping (the honest reduce stays pure
-  in the sampler). Caveats (flag help): each leaf is a Python process that may itself multi-thread
-  (BLAS/`n_jobs`) so `n=NumCPU` can oversubscribe; a COLD cache thundering-herds the shared upstream;
-  clean per-`k/n` progress is deferred to metis#30.
+  in the sampler). Caveats (flag help): a COLD cache thundering-herds the shared upstream; clean
+  per-`k/n` progress is deferred to metis#30.
+- **Default leaf BLAS pins (metis#48) — `cmd/metis/blaspins.go`:** the parallelism budget belongs
+  to the ORCHESTRATOR (the #31 semaphore), so `runExperiment` computes the four single-thread pins
+  (`OMP/OPENBLAS/VECLIB/MKL_NUM_THREADS=1`) ONCE per top-level run — minus any name the operator
+  exported (an explicit value always wins) — announces one loud note, and injects them at BOTH
+  spawn seams: the legacy `execStep` child env and the fork-server process env (children inherit).
+  `metis select --promote` is deliberately unpinned (serial single all-data fit — multi-threaded
+  BLAS wanted). Env is outside run identity by design (`Kpre` = {step_id, uses, with, seed,
+  upstream}; HIT-validation re-hashes read-set D; fingerprint is git state), so pins perturb no
+  cache key or fingerprint.
 - **Warm fork-server leaf executor (metis#44) — `metis/forkserver.py` + `cmd/metis/forkexec.go`:**
   kills the per-leaf `uv run → fresh python → import pandas/sklearn` tax (~1s measured/spawn, ~5k
   spawns/sweep). One warm server per **project root** (metis's and kbench's venvs differ), started

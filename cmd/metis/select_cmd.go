@@ -358,6 +358,8 @@ func promoteSelected(o selectOpts, sh experiment.Shape, picks []familyPick) erro
 			return fmt.Errorf("select --promote %s: %w", famLabel(p.family), err)
 		}
 		runID := "best-" + familyTag(p.family) + "-" + short(addr)
+		// no leafPins: a promoted ship is a SERIAL single all-data fit — multi-threaded
+		// BLAS is wanted here, and one leaf can't oversubscribe (#48's conscious exclusion)
 		ro := runOpts{expPath: o.shapePath, runID: runID, stepPath: o.stepPath, cache: true, git: o.git, exec: o.exec, out: o.out}
 		if _, err := runResolvedExperiment(exp, ro, runID, now, o.out); err != nil {
 			return fmt.Errorf("select --promote %s (%s): %w", famLabel(p.family), runID, err)
@@ -530,6 +532,8 @@ func runPointSelect(o selectOpts, sh experiment.Shape, led ledger.Ledger, metric
 		return fmt.Errorf("select --point --promote: %w", err)
 	}
 	runID := "point-" + familyTag(fam) + "-" + short(addr)
+	// no leafPins: a promoted ship is a SERIAL single all-data fit — multi-threaded
+	// BLAS is wanted here, and one leaf can't oversubscribe (#48's conscious exclusion)
 	ro := runOpts{expPath: o.shapePath, runID: runID, stepPath: o.stepPath, cache: true, git: o.git, exec: o.exec, out: o.out}
 	if _, err := runResolvedExperiment(exp, ro, runID, now, o.out); err != nil {
 		return fmt.Errorf("select --point --promote (%s): %w", runID, err)

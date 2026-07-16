@@ -103,7 +103,7 @@ func TestForkServerPool_RealServerRoundTrip(t *testing.T) {
 	t.Setenv("PYTHONPATH", mods)
 	t.Setenv("METIS_FORKSERVER_PRELOAD", "") // fast start; preload is a python-side concern
 
-	pool := newServerPool(io.Discard)
+	pool := newServerPool(io.Discard, nil)
 	defer pool.shutdown()
 
 	stepDir := filepath.Join(t.TempDir(), "s1")
@@ -145,7 +145,7 @@ func TestForkServerPool_BrokenRootFallsBack(t *testing.T) {
 		t.Skip("uv not on PATH")
 	}
 	var out strings.Builder
-	pool := newServerPool(&syncWriter{w: &out})
+	pool := newServerPool(&syncWriter{w: &out}, nil)
 	defer pool.shutdown()
 	bogus := t.TempDir() // no pyproject/venv — uv run will fail (or hang-free error)
 	for i := 0; i < 3; i++ {
@@ -175,7 +175,7 @@ func TestExecute_NonConformingWrapperUsesLegacyLoudly(t *testing.T) {
 	ws := t.TempDir()
 	var out strings.Builder
 	e := execStep{stepPath: []string{filepath.Join(root, "steps")}, expDir: ws,
-		out: &out, pool: newServerPool(&out)}
+		out: &out, pool: newServerPool(&out, nil)}
 	defer e.pool.shutdown()
 	runDir := filepath.Join(ws, "runs", "r1")
 	res, err := e.Execute(experiment.Step{ID: "sh", Uses: "test/shellstep"}, runDir)
@@ -230,7 +230,7 @@ func TestForkServerPerf_LooseBound(t *testing.T) {
 	legacy := time.Since(start)
 
 	start = time.Now()
-	pool := newServerPool(io.Discard)
+	pool := newServerPool(io.Discard, nil)
 	defer pool.shutdown()
 	forkOne := func() {
 		dir := t.TempDir()
@@ -279,7 +279,7 @@ func TestForkServerPool_MidFlightDeathErrorsTheStep(t *testing.T) {
 	t.Setenv("PYTHONPATH", mods)
 	t.Setenv("METIS_FORKSERVER_PRELOAD", "")
 
-	pool := newServerPool(io.Discard)
+	pool := newServerPool(io.Discard, nil)
 	defer pool.shutdown()
 	type result struct {
 		ok  bool
@@ -316,5 +316,48 @@ func TestForkServerPool_MidFlightDeathErrorsTheStep(t *testing.T) {
 	res := <-done
 	if res.err == nil {
 		t.Fatalf("mid-flight death must be a STEP ERROR (dispatched-and-lost), got ok=%v err=nil", res.ok)
+	}
+}
+
+// TestForkServer_ChildInheritsBlasPins (metis#48): the pool's pins land on the SERVER
+// process env at spawn, and a forked step child inherits them (per-request env carries
+// only METIS_*). Real uv + real fork-server — the seam the operator's sweeps ride.
+func TestForkServer_ChildInheritsBlasPins(t *testing.T) {
+	if _, err := exec.LookPath("uv"); err != nil {
+		t.Skip("uv not on PATH")
+	}
+	root := repoRoot(t)
+	mods := t.TempDir()
+	if err := os.WriteFile(filepath.Join(mods, "toyenv.py"), []byte(
+		"import json, os\n"+
+			"json.dump({\"omp\": os.environ.get(\"OMP_NUM_THREADS\", \"\")}, open(\"envcap.json\", \"w\"))\n"+
+			"json.dump({\"ok\": 1}, open(\"metrics.json\", \"w\"))\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PYTHONPATH", mods)
+	t.Setenv("METIS_FORKSERVER_PRELOAD", "") // fast start; preload is a python-side concern
+	// exactness: an ambient OMP_NUM_THREADS would DUPLICATE the appended pin (CPython's
+	// os.environ is last-wins so the assertion would still green, but keep it unambiguous):
+	t.Setenv("OMP_NUM_THREADS", "sentinel") // registers restore...
+	os.Unsetenv("OMP_NUM_THREADS")          // ...then genuinely absent for the spawn
+
+	pool := newServerPool(io.Discard, []string{"OMP_NUM_THREADS=1"})
+	defer pool.shutdown()
+
+	stepDir := filepath.Join(t.TempDir(), "s1")
+	if err := os.MkdirAll(stepDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	resp, ok, ferr := pool.execute(wrapperSpec{root: root, module: "toyenv"}, stepDir,
+		map[string]string{"METIS_STEP_DIR": stepDir})
+	if !ok || ferr != nil || resp.Exit != 0 {
+		t.Fatalf("fork exec failed: ok=%v err=%v resp=%+v", ok, ferr, resp)
+	}
+	b, err := os.ReadFile(filepath.Join(stepDir, "envcap.json"))
+	if err != nil {
+		t.Fatalf("read envcap.json: %v", err)
+	}
+	if !strings.Contains(string(b), `"omp": "1"`) {
+		t.Errorf("forked child must inherit the server's pin; envcap.json = %s", b)
 	}
 }

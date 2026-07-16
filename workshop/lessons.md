@@ -158,12 +158,12 @@ finished in ~4 min — the run looked alive while making no progress. The `--par
 documents exactly this caveat; it still shipped as the default behavior on a real sweep. Relaunch
 with `OMP_NUM_THREADS=1 …=1 --parallel 8` → load ~21, ~107 trains/min, done in ~28 min.
 
-**Rule:** for a real (subprocess-leaf) sweep, ALWAYS pin the leaf's thread env
-(`OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 VECLIB_MAXIMUM_THREADS=1 MKL_NUM_THREADS=1`) and cap
-`--parallel` below core count. Diagnostic signature of the thrash: starts ≫ completions with the
-process alive (throughput ≈ 0) — which is also why the #38 progress board needs a moving-average
-runs/sec line, not just liveness. Deeper fix candidate: metis could set single-thread BLAS env for
-its leaf subprocesses BY DEFAULT (the parallelism budget belongs to the orchestrator, not the leaf).
+**Rule:** for a real (subprocess-leaf) sweep, the leaf's thread env must be pinned and
+`--parallel` capped below core count. **RESOLVED BY DEFAULT since metis#48** — bare `metis run`
+now injects the four pins at both spawn seams (export a `*_NUM_THREADS` value to override); the
+rule survives for non-metis contexts and as the WHY behind the default. Diagnostic signature of
+the thrash: starts ≫ completions with the process alive (throughput ≈ 0) — which is also why the
+#38 progress board needs a moving-average runs/sec line, not just liveness.
 
 ## Plan-sketch folds: set-cardinality, not incremental counts (metis#39 plan review)
 - **A "keep the latest, count the others" fold specified incrementally silently overcounts under non-monotone input — specify it as set-cardinality (`len(set)-1`) with the latest tracked separately.** The #39 plan's ExtraCommits sketch counted displacement transitions per ROW; interleaved-timestamp records (two concurrent sweeps, same fingerprint) would have inflated it row-for-row, and the plan's own happy-path fixture (2 records, monotone) structurally couldn't catch it — add an out-of-order fixture whenever a fold's correctness depends on input order. metis-specific ground truth: **ledger rows are NOT time-ordered** (`sortPointRuns` orders by content key; append order is sweep-completion order).
@@ -179,3 +179,9 @@ its leaf subprocesses BY DEFAULT (the parallelism budget belongs to the orchestr
 - **Writer identity is temporal, not call-graph.** When a plan claims "all output routes through one wrapper," audit every construction-time capture of the underlying writer (pools, closures, structs built earlier in the call chain) — a component that grabbed the writer BEFORE the wrap exists is an invisible bypass. Grep the writer variable at every `new*(out)` site, not just Fprintf sites. (The forkserver pool + captureSweepCode's o.out both captured pre-board writers.)
 - **"Ticker calls repaint()" is a deadlock-or-staleness smell.** In state-owner + painter designs, fix ONE global lock order (state.mu → painter.mu) and route timers through the state owner; a painter-first timer either inverts locks via a state callback or repaints a frame that can't refresh time-derived values (ETA/rate decay).
 - **A stdlib-only TUI plan must name its terminal-size mechanism explicitly.** Width detection is the one capability ANSI pin-bottom genuinely needs beyond stdlib's comfortable surface, and a wrong width isn't cosmetic — a wrapped line breaks the cursor-up erase-count bookkeeping the whole repaint scheme rests on.
+
+## Plan-review lessons (metis#48 plan)
+- **A constructor-grep is not a coverage proof — also grep direct callers of the layer BELOW the wiring point.** Wiring computed in an entry function (`runExperiment`) silently misses call paths that enter beneath it (select_cmd.go builds fresh `runOpts` and calls `runResolvedExperiment` directly). When a plan claims "every production construction is threaded," check the constructor sites AND downstream-function callers; every bypass found is either threaded or documented as a conscious exclusion.
+- **Doc-consistency sweeps must include Go sources, not just `*.md`** — operator guidance lives in flag `--help` strings and load-bearing comments (main.go's `--parallel` help told operators to hand-pin BLAS).
+- **A plan's inline test code must be written against the VERIFIED fixture/format; promote any fixture gap to an explicit numbered step.** A parenthetical "check the fixture" hedge next to code that contradicts it breaks the TDD red-green sequence and invites wrong-reason debugging (env-dump dumps METIS_* only; experiment steps live in YAML frontmatter, not a fenced block).
+- **A cross-repo deliverable is invisible to the closing repo's review window — pin the peer repository + exact commit in the issue Log before close.** A checked plan row and prose saying “RUNBOOK updated” are not independently traceable when the actual diff lives in kbench. Record the peer commit as soon as it lands so the boundary reviewer can verify the requirement without trusting the implementor's assertion.
