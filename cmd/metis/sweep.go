@@ -88,6 +88,7 @@ type shapeSweep struct {
 	parallel      bool           // metis#31: >1 max-parallel ⇒ the sweeper/resample/driver batches run via ParExec
 	manMu         sync.Mutex     // metis#32: guards man.Points — concurrent outer folds (ParExec) each record rows
 	prog          *sweepProgress // metis#30: the live-progress sink (nil = silent)
+	start         time.Time      // metis#50: sweep wall-clock start (injected clock)
 }
 
 // addManPoints appends a batch of manifest rows under the manifest lock (metis#32: the
@@ -180,6 +181,7 @@ func (ss *shapeSweep) runSweeper(ctx sampler.Ctx, configPts []shape.Point, pass 
 // + the manifest + the raw per-fold ledger. Per-fold failure is fatal to the sweep (surfaced,
 // not swallowed — a partial resample is not an honest estimate).
 func runShapeSweep(o runOpts, sh experiment.Shape, now func() time.Time, out io.Writer) error {
+	sweepStart := now() // metis#50: the run-end summary reports wall-clock elapsed
 	// probeRepo's HEAD sha still drives the mid-sweep code-freeze guard (codeID) — NOT the
 	// identity (metis#27 dropped repo_shas). The shape's blob-hash content-addresses the intent.
 	_, sha, _ := probeRepo(o.git, filepath.Dir(o.expPath))
@@ -243,7 +245,7 @@ func runShapeSweep(o runOpts, sh experiment.Shape, now func() time.Time, out io.
 		return err
 	}
 	ss := &shapeSweep{
-		o: o, sh: sh, now: now, out: out, shapeBlobHash: sbh, codeID: sha,
+		o: o, sh: sh, now: now, out: out, shapeBlobHash: sbh, codeID: sha, start: sweepStart,
 		partRef:  partitionRef(sh),
 		man:      sweepManifest{ShapeRunID: shapeRunID, Shape: sh.ID, Sampler: sh.Sweeper.Sampler, Seed: sh.Seed},
 		parallel: o.maxParallel > 1, // metis#31: fan out the sweeper/resample/driver batches
@@ -308,7 +310,8 @@ func runShapeSweep(o runOpts, sh experiment.Shape, now func() time.Time, out io.
 	}
 	// Capture the sweep's code closure to a git side ref (metis#8/#14) — BEST-EFFORT: the
 	// records + manifest are already valid, so a capture hiccup warns, never aborts.
-	if err := captureSweepCode(o, ss.man); err != nil {
+	cohort, err := captureSweepCode(o, ss.man)
+	if err != nil {
 		fmt.Fprintf(out, "metis: warning: code capture failed (%v) — the sweep's records are valid but not committed to a side ref\n", err)
 	}
 	// Persist the raw per-fold rows to the shape's append-only ledger sidecar (metis#8/#18):
@@ -326,6 +329,7 @@ func runShapeSweep(o runOpts, sh experiment.Shape, now func() time.Time, out io.
 		return err
 	}
 	ss.reportWinner(res)
+	printRunSummary(out, o.expPath, now().Sub(sweepStart), len(ss.man.Points), cohort)
 	return nil
 }
 
@@ -425,13 +429,15 @@ func (ss *shapeSweep) runNestedCV(ctx sampler.Ctx, configPts []shape.Point, k, r
 	if err := writeManifest(ss.o.expPath, ss.man); err != nil {
 		return err
 	}
-	if err := captureSweepCode(ss.o, ss.man); err != nil {
-		fmt.Fprintf(ss.out, "metis: warning: code capture failed (%v) — the nested run's records are valid but not committed to a side ref\n", err)
+	cohort, cerr := captureSweepCode(ss.o, ss.man)
+	if cerr != nil {
+		fmt.Fprintf(ss.out, "metis: warning: code capture failed (%v) — the nested run's records are valid but not committed to a side ref\n", cerr)
 	}
 	if err := writeSweepLedger(ss.o.expPath, ss.man); err != nil {
 		return err
 	}
 	ss.reportEstimate(est, runFolds)
+	printRunSummary(ss.out, ss.o.expPath, ss.now().Sub(ss.start), len(ss.man.Points), cohort)
 	return nil
 }
 
@@ -885,4 +891,25 @@ func freeParamStrFromParams(fps []shape.FreeParam) string {
 		return "(no free params)"
 	}
 	return s
+}
+
+// printRunSummary is metis#50's run-end handoff: elapsed wall-clock, what landed where,
+// and the paste-ready follow-up commands with the cohort fingerprint pre-filled — the
+// operator should never scrape the scrollback to assemble a `metis select`. A degraded
+// capture (no fingerprint) degrades honestly: `cohort ?` and un-pinned hints (a
+// single-cohort ledger needs no pin).
+func printRunSummary(out io.Writer, expPath string, elapsed time.Duration, rows int, cohort record.Hash) {
+	base := filepath.Base(ledgerPath(expPath))
+	if cohort == "" {
+		fmt.Fprintf(out, "metis: done in %s — %d rows → %s (cohort ?)\n", fmtETA(elapsed), rows, base)
+		fmt.Fprintf(out, "  next: metis select %s\n", expPath)
+		fmt.Fprintf(out, "        metis select %s --best --promote\n", expPath)
+		fmt.Fprintf(out, "        metis ledger fingerprints %s\n", expPath)
+		return
+	}
+	fp := short(string(cohort))
+	fmt.Fprintf(out, "metis: done in %s — %d rows → %s (cohort %s)\n", fmtETA(elapsed), rows, base, fp)
+	fmt.Fprintf(out, "  next: metis select %s --fingerprint %s               # the honest pick\n", expPath, fp)
+	fmt.Fprintf(out, "        metis select %s --fingerprint %s --best --promote   # materialize it\n", expPath, fp)
+	fmt.Fprintf(out, "        metis ledger fingerprints %s                   # cohorts\n", expPath)
 }

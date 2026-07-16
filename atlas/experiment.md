@@ -166,7 +166,11 @@ wrapped by **thin step-executables** honoring the contract above. Hermetic via *
   `Aggregate` → **mean±SE**, the honest procedure estimate (`reportEstimate`). **metis#32:** the run now
   **records** per-`(outer-fold, config)` inner rows + per-`(outer-fold, family)` outer rows to the ledger
   (`Level`-keyed) — the signal `metis select` reduces to pick the family. `metis run` **measures only,
-  never ships** (shipping moved to `metis select --promote`). Honesty of the score-over-full-data
+  never ships** (shipping moved to `metis select --promote`). **metis#50:** a sweep ends with the
+  run-end summary — elapsed wall-clock, rows→ledger, the cohort fingerprint, and the paste-ready
+  `metis select … --fingerprint <fp>` follow-ups (completing #39's visibility loop: the operator
+  never scrapes scrollback to assemble the next command; degraded capture degrades to `cohort ?`
+  with un-pinned hints). Honesty of the score-over-full-data
   refit holds while features are stateless; stateful features (metis#20) inherit fold-safety via the
   fold-expressed score run.
 - **Honest family selection (metis#32) — three commands, `run` measures / `select` chooses / `kaggle

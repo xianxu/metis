@@ -332,6 +332,10 @@ func TestShapeSweep_OneConfigDegeneratesToSingleLevelCV(t *testing.T) {
 		if !strings.Contains(final, "folds 2/2") || !strings.Contains(final, "score 0.") {
 			t.Errorf("the flat final progress line must carry folds k/k + score; got: %q", final)
 		}
+		// metis#50: the flat path ends with the same summary block.
+		if !strings.Contains(s, "metis: done in ") || !strings.Contains(s, "metis select ") {
+			t.Errorf("flat run missing the run-end summary:\n%s", s)
+		}
 	}
 	if strings.Contains(out.String(), "nested-CV") {
 		t.Errorf("a 1-config shape must NOT run nested-CV; got:\n%s", out.String())
@@ -520,4 +524,21 @@ func loadLedgerOrFatal(t *testing.T, expPath string) ledger.Ledger {
 		t.Fatalf("load ledger: %v", err)
 	}
 	return led
+}
+
+// metis#50: a degraded capture (no fingerprint) degrades the summary honestly —
+// `cohort ?` and NO lying `--fingerprint` pin (a single-cohort ledger needs none).
+func TestPrintRunSummary_DegradedCohort(t *testing.T) {
+	var out strings.Builder
+	printRunSummary(&out, "s.md", 90*time.Second, 42, "")
+	s := out.String()
+	if !strings.Contains(s, "(cohort ?)") {
+		t.Errorf("degraded capture must render cohort ?: %s", s)
+	}
+	if strings.Contains(s, "--fingerprint") {
+		t.Errorf("degraded capture must not emit a lying pin: %s", s)
+	}
+	if !strings.Contains(s, "done in 1m30s") || !strings.Contains(s, "42 rows") || !strings.Contains(s, "metis select s.md") {
+		t.Errorf("summary basics: %s", s)
+	}
 }

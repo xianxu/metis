@@ -1,12 +1,13 @@
 ---
 id: 000050
-status: working
+status: codecomplete
 deps: []
 github_issue:
 created: 2026-07-16
 updated: 2026-07-16
-estimate_hours: 0.55
+estimate_hours: 0.54
 started: 2026-07-16T08:14:43-07:00
+actual_hours: 0.25
 ---
 
 # run-end summary — elapsed time, fingerprint, rows, and paste-ready next commands
@@ -50,15 +51,38 @@ metis: done in 42m10s — 2,160 rows → titanic-sweep.ledger.csv (cohort 18e6e0
 - Degraded/absent fingerprint degrades the block gracefully (no lying pin).
 - A real smoke run shows the block with a sane elapsed.
 
+## Estimate
+
+```estimate
+model: estimate-logic-v3.1
+familiarity: 1.0
+item: smaller-go-module   design=0.05 impl=0.35
+item: atlas-docs          design=0.02 impl=0.10
+design-buffer: 0.30
+total: 0.54
+```
+
+One helper + start-time capture + captureSweepCode return-value change (2 call sites) +
+fixture assertions; docs row = RUNBOOK/atlas touch + smoke evidence.
+
 ## Plan
 
-- [ ] TDD: summary assertions in the nested + flat fixture tests → `printRunSummary` helper
+- [x] TDD: summary assertions in the nested + flat fixture tests → `printRunSummary` helper
   + start-time capture + captureSweepCode returns fp.
 
 ## Log
 
 ### 2026-07-16
+- 2026-07-16: closed — Judgment actual 0.25h (gate found no measurable window). Presentation-only addition at existing sweep-exit seams. TDD red-green nested+flat; real smoke: done in 2s - 42 rows -> ledger (cohort 01bb9bf0) + three paste-ready commands. Full suite green, vet clean.; review verdict: FIX-THEN-SHIP
 - Filed from operator request ("print at the end: actual time took, fingerprint, and any
   other information needed for further commands"). Completes the #39 fingerprint-visibility
   loop: run prints its cohort at record time AND hands the operator the paste-ready select
   commands at exit.
+- Implemented TDD (nested + flat fixture assertions red→green): printRunSummary at the end of
+  both sweep paths; sweepStart via the injected clock; captureSweepCode returns the minted
+  cohort (one mint site, ARCH-DRY — 3 test call sites updated). Real smoke:
+  "done in 2s — 42 rows → titanic-sweep-smoke.ledger.csv (cohort 01bb9bf0)" + the three
+  paste-ready commands with the fingerprint pre-filled. Full suite green + vet clean.
+- Close review FIX-THEN-SHIP (no Critical): fixed pre-commit — atlas/experiment.md gains the
+  run-end-summary sentence in the run/select flow section; the degraded `(cohort ?)` branch
+  pinned by a pure unit test (no lying --fingerprint pin). Full suite re-run green.

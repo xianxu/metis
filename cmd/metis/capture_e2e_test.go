@@ -104,7 +104,7 @@ func TestCaptureSweepCode_BackfillsCodeManifest(t *testing.T) {
 	man := sweepManifest{ShapeRunID: "srun-e2e", Points: []pointRun{{RunID: "pt-0", Status: "failed"}, {RunID: runID, Status: "ok"}}}
 	var out bytes.Buffer
 	o := runOpts{expPath: expPath, stepPath: []string{filepath.Join(root, "steps")}, out: &out}
-	if err := captureSweepCode(o, man); err != nil {
+	if _, err := captureSweepCode(o, man); err != nil {
 		t.Fatalf("captureSweepCode: %v", err)
 	}
 
