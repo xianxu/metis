@@ -122,3 +122,84 @@ func TestFmtETA(t *testing.T) {
 		}
 	}
 }
+
+// boardWriter pins the board to the bottom: passthrough writes scroll above the
+// stored frame; erase sequences separate frames; close is idempotent and restores
+// the cursor. Driven directly (no ticker) against a bytes.Buffer "terminal".
+func TestBoardWriter_PinBottom(t *testing.T) {
+	var term strings.Builder
+	bw := newBoardWriter(&term)
+
+	bw.paint([]string{"AGG line", "fold 0 ▸"})
+	first := term.String()
+	if !strings.HasPrefix(first, "\x1b[?25l") {
+		t.Errorf("first paint must hide the cursor: %q", first)
+	}
+	if !strings.Contains(first, "AGG line\nfold 0 ▸\n") {
+		t.Errorf("frame not painted: %q", first)
+	}
+	if strings.Contains(first, "\x1b[2A") {
+		t.Errorf("first paint has nothing to erase: %q", first)
+	}
+
+	// Passthrough: erase (up 2 + clear), the step line, the repainted stored frame.
+	if _, err := bw.Write([]byte("⚡ step train\n")); err != nil {
+		t.Fatal(err)
+	}
+	s := term.String()[len(first):]
+	wantOrder := []string{"\x1b[2A\x1b[J", "⚡ step train\n", "AGG line\nfold 0 ▸\n"}
+	pos := 0
+	for _, w := range wantOrder {
+		i := strings.Index(s[pos:], w)
+		if i < 0 {
+			t.Fatalf("passthrough sequence missing %q in order: %q", w, s)
+		}
+		pos += i + len(w)
+	}
+
+	// An unterminated write is held back until its newline arrives.
+	pre := term.Len()
+	bw.Write([]byte("partial"))
+	if got := term.String()[pre:]; strings.Contains(got, "partial") {
+		t.Errorf("unterminated tail must be held, not fused into the board: %q", got)
+	}
+	bw.Write([]byte(" line\n"))
+	if !strings.Contains(term.String(), "partial line\n") {
+		t.Error("the completed line must flush")
+	}
+
+	// A fresh paint replaces the frame.
+	bw.paint([]string{"AGG line", "fold 0 ✓"})
+	if !strings.Contains(term.String(), "fold 0 ✓") {
+		t.Error("paint must draw the new frame")
+	}
+
+	// close: final frame stays, cursor restored; idempotent.
+	bw.close()
+	if !strings.HasSuffix(term.String(), "\x1b[?25h") {
+		t.Errorf("close must restore the cursor last: %q", term.String()[term.Len()-20:])
+	}
+	n := term.Len()
+	bw.close()
+	if term.Len() != n {
+		t.Error("close must be idempotent")
+	}
+	// Post-close writes pass straight through (no board left to protect).
+	bw.Write([]byte("after\n"))
+	if !strings.HasSuffix(term.String(), "after\n") {
+		t.Error("post-close writes pass through")
+	}
+}
+
+// A close with a held unterminated tail flushes it (newline-completed) above the
+// final frame — no output is ever swallowed.
+func TestBoardWriter_CloseFlushesPending(t *testing.T) {
+	var term strings.Builder
+	bw := newBoardWriter(&term)
+	bw.paint([]string{"B"})
+	bw.Write([]byte("tail-no-newline"))
+	bw.close()
+	if !strings.Contains(term.String(), "tail-no-newline\n") {
+		t.Errorf("held tail must flush at close: %q", term.String())
+	}
+}
