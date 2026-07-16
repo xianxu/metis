@@ -1,11 +1,12 @@
 ---
 id: 000048
-status: open
+status: working
 deps: []
 github_issue:
 created: 2026-07-16
 updated: 2026-07-16
 estimate_hours:
+started: 2026-07-16T11:10:34-07:00
 ---
 
 # pin leaf BLAS threads by default — the parallelism budget belongs to the orchestrator
