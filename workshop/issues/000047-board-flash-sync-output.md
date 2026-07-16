@@ -5,23 +5,38 @@ deps: []
 github_issue:
 created: 2026-07-16
 updated: 2026-07-16
-estimate_hours:
+estimate_hours: 0.35
 ---
 
 # board flashes on repaint — wrap flushes in DEC 2026 synchronized output
 
 ## Problem
 
+Operator (2026-07-16, ghostty + iTerm2): the board visibly flashes on each flush. The #46
+coalescing bounded the RATE (4Hz), but each flush is still erase-region → dump → redraw —
+and a terminal that renders between the erase and the redraw shows a blank board for one
+display frame. At 4Hz that reads as flashing.
+
 ## Spec
+
+Wrap every flush (and close) in DEC private mode 2026 "synchronized output":
+`\x1b[?2026h` before the erase, `\x1b[?2026l` after the redraw. Supporting terminals
+(ghostty, iTerm2 ≥3.5, kitty, wezterm, alacritty ≥0.13) apply the whole update atomically —
+zero flash; terminals without it ignore unknown private modes (safe no-op — degradation is
+today's behavior, not corruption).
 
 ## Done when
 
--
+- Every flushed update (Write-inline, paint, forceFlush, close) is bracketed by BSU/ESU in
+  the byte stream (unit-asserted; balanced pairs, nothing outside close unbracketed).
+- Live pty run shows the bracketing; existing board tests keep passing.
 
 ## Plan
 
-- [ ]
+- [ ] TDD: bracket assertions in board_test.go → emit in flushLocked + close.
 
 ## Log
 
 ### 2026-07-16
+- Filed from the operator's UX pass (issue 1 of 3: flashes / startup delay / 3h ETA). BSU/ESU
+  is the standard flicker cure for erase+redraw compositors; private-mode no-op elsewhere.
