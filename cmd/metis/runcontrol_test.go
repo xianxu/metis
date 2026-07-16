@@ -165,6 +165,19 @@ func TestRunControlSerialStillLatchesFailure(t *testing.T) {
 	}
 }
 
+func TestRunControlFailureWithoutLabelPreservesError(t *testing.T) {
+	control := newRunControl(1)
+	cause := errors.New("unlabeled failure")
+
+	got := control.fail("", cause)
+	if got != cause {
+		t.Fatalf("unlabeled failure = %v (%p), want original error %v (%p)", got, got, cause, cause)
+	}
+	if stored := control.firstError(); stored != cause {
+		t.Fatalf("stored unlabeled failure = %v (%p), want original error %v (%p)", stored, stored, cause, cause)
+	}
+}
+
 func TestRunControlConcurrentFailuresKeepOneContextualCause(t *testing.T) {
 	control := newRunControl(2)
 	entered := make(chan struct{}, 2)

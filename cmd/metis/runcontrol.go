@@ -41,7 +41,10 @@ func (c *runControl) fail(label string, err error) error {
 	if err == nil {
 		return nil
 	}
-	contextual := fmt.Errorf("%s: %w", label, err)
+	contextual := err
+	if label != "" {
+		contextual = fmt.Errorf("%s: %w", label, err)
+	}
 	if c.beforeFailureLock != nil {
 		c.beforeFailureLock()
 	}
