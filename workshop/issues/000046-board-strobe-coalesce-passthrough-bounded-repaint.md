@@ -5,7 +5,7 @@ deps: []
 github_issue:
 created: 2026-07-15
 updated: 2026-07-15
-estimate_hours: 0.75
+estimate_hours: 0.61
 started: 2026-07-15T23:19:12-07:00
 ---
 
@@ -62,7 +62,7 @@ familiarity: 1.0
 item: smaller-go-module   design=0.10 impl=0.35
 item: atlas-docs          design=0.02 impl=0.10
 design-buffer: 0.30
-total: 0.73
+total: 0.61
 ```
 
 One focused module touch (boardWriter coalescing + clock injection + test updates) + the
