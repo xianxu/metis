@@ -92,6 +92,18 @@ identical on a non-Kaggle platform?* — if yes, it lives here.
   **Outer-fold identity rides the per-pass closure binding** (`prog.forPass(i)` → `passHooks`), never an
   event payload field — metis#38's TTY board extends the sink behind those hooks with zero pkg/sampler
   change. (`FoldPoint.Partition` looks like a discriminator but is byte-identical across outer folds.)
+  **metis#38 (the live board, `cmd/metis/board.go`):** on a TTY a sweep pins a live board to the bottom
+  while step logs scroll above — aggregate line, one row per outer fold (`✓ held-out` | `▸ configs a/b ·
+  folds x/y · best` | queued, ≤12 rows + overflow), and `leaves b/c · R folds/min · ETA` (leaves =
+  `len/cap(leafSem)`; rate = a 64-completion ring with `now` in the denominator so a stall DECAYS it live
+  — the BLAS-thrash signature). Hand-rolled ANSI pin-bottom, NO TUI lib (output-only board; 2-dep module).
+  Split: `renderBoard` is pure (plain lines, zero ANSI) / `boardWriter` is the paint-only compositor
+  (erase-count bookkeeping; holds unterminated passthrough tails; idempotent deferred close). **Writer
+  identity is temporal:** `runExperiment` parses FIRST, then wraps exactly one writer (boardWriter XOR
+  syncWriter) before the fork-server pool or anything else captures `out` — all output routes through the
+  compositor. Lock order everywhere: `sink.mu → bw.mu` (the 500ms ticker enters via the sink's `tick()`).
+  Mode: board iff char-device stdout && sweep && !`--no-tui` && !dry-run; piped/CI output stays the #30
+  plain lines (byte-stable, no escape codes). Width = `$COLUMNS`|80, read once.
   racing/Bayesian = feedback-driven `Ask`. **metis#23 M1** is the outer-fold **sealing spine** the
   driver builds on: `outer-split` materializes k `analysis_i/` **subset dataset dirs** (L1 structural — assessment
   rows physically absent from selection; test frame carried through — analysis_i shape-identical to the base, metis#35) + a `METIS_READ_ROOT` confinement asserted at `metis/io.py:exp_path`

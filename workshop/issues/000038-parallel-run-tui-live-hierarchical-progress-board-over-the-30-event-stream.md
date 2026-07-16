@@ -77,12 +77,12 @@ Durable plan: `workshop/plans/000038-parallel-run-tui-plan.md` (fresh-eyes revie
 pool, o.out) would bypass a late-constructed compositor; sink.mu → bw.mu global lock order with the
 ticker routed through the sink; $COLUMNS/80 width source named). Single-pass close, no milestones.
 
-- [ ] Task 1: per-pass rows + `movingRate` (ring, stall-decay) in the sink — pure, TDD
-- [ ] Task 2: `renderBoard` pure frame (fold rows ✓/▸/queued, overflow, width clamp, no ANSI)
-- [ ] Task 3: `boardWriter` pin-bottom compositor (erase/passthrough/repaint, idempotent close)
-- [ ] Task 4: wiring — `--no-tui`, char-device detect, runExperiment reorder, ticker, leaf gauge,
+- [x] Task 1: per-pass rows + `movingRate` (ring, stall-decay) in the sink — pure, TDD
+- [x] Task 2: `renderBoard` pure frame (fold rows ✓/▸/queued, overflow, width clamp, no ANSI)
+- [x] Task 3: `boardWriter` pin-bottom compositor (erase/passthrough/repaint, idempotent close)
+- [x] Task 4: wiring — `--no-tui`, char-device detect, runExperiment reorder, ticker, leaf gauge,
   bypass test (forkserver notice + capture warning route through the compositor)
-- [ ] Task 5: docs + Revisions (no-lib; pinned-bottom vs full-screen) + pty/redirect evidence + close
+- [x] Task 5: docs + Revisions (no-lib; pinned-bottom vs full-screen) + pty/redirect evidence + close
 
 ## Log
 
@@ -115,3 +115,32 @@ ticker routed through the sink; $COLUMNS/80 width source named). Single-pass clo
   semaphore IS the occupancy — no new accounting, ARCH-DRY). `pkg/sampler` untouched (the spec's
   hard constraint): everything rides #30's hooks (ARCH-PURE: renderer pure, ANSI only in the
   compositor).
+
+## Revisions
+
+### 2026-07-15 (at design, implemented same-day)
+1. **No TUI library** (spec sketched "bubbletea or tcell — pick at design"): the board is
+   output-only — no keyboard, no focus, no alternate screens — so a model/update/view framework
+   earns nothing; metis stays a 2-dep module; the sandbox lacks a module-proxy route. Hand-rolled
+   ANSI pin-bottom, ~120 lines of stdlib (`renderBoard` pure + `boardWriter` compositor).
+2. **Pinned-bottom board, not the spec's "full-screen curses board"**: full-screen (alt-screen)
+   would hide the scrolling step logs — losing exactly the "downloading vs hung" signal this
+   issue was filed to provide. The board pins to the bottom; everything else scrolls above it
+   through the compositor.
+
+## Log (continued)
+
+### 2026-07-15 (implementation)
+- Tasks 1–4 TDD: per-pass rows + `movingRate` (stall-decay pinned) · pure `renderBoard`
+  (✓/▸/queued, overflow, width clamp, zero ANSI) · `boardWriter` (pin-bottom; erase-order test;
+  held unterminated tails; idempotent close) · wiring (parse-first runExperiment reorder — the
+  plan-review Critical: the fork pool + o.out captured the pre-board writer; the o.out bypass
+  route is pinned by test; `--no-tui`; char-device detect; 500ms sink-first ticker; leafSem
+  gauge). Full module green + `-race` on touched packages; vet clean.
+- **Real evidence:** pty via `script -q` (sandbox blocks openpty — loud override, like pushes) on
+  the real smoke sweep, COLD cache (comment-edit methodology, reverted): 246 repaints, cursor
+  hide/show exactly once, leaves gauge live (0/8→8/8), moving rate 664→1890 folds/min, in-flight
+  rows with incumbents (`fold 0 ▸ configs 2/4 · folds 11/12 · best 0.8064`), final frame
+  `outer 3/3 … est 0.8103 ± 0.0062` + 3 ✓ rows. Redirected contrast (same binary, no pty):
+  0 escape bytes, the 6 plain #30 lines. leaves shows 0/8 on a warm-cache run (no leaf ever
+  held) — expected, not a bug.
