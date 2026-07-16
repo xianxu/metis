@@ -102,7 +102,7 @@ func TestCodeIdentity_TwoRowsOnCodeChange(t *testing.T) {
 		})
 	}
 	capture := func() record.RunRecord {
-		if err := captureSweepCode(o, man); err != nil {
+		if _, err := captureSweepCode(o, man); err != nil {
 			t.Fatalf("captureSweepCode: %v", err)
 		}
 		rb, _ := os.ReadFile(filepath.Join(root, "runs", pa, "record.json"))

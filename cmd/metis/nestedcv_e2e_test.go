@@ -69,6 +69,17 @@ func TestNestedCV_ProducesHonestEstimateNoShip(t *testing.T) {
 	if !strings.Contains(finalProg, "outer 2/2") || !strings.Contains(finalProg, "est 0.") {
 		t.Errorf("the final progress line must carry the completed outer count + a numeric est; got: %q", finalProg)
 	}
+	// metis#50: the run ends with a paste-ready summary — elapsed, rows → ledger, cohort,
+	// and the select commands with the fingerprint pre-filled.
+	if !strings.Contains(s, "metis: done in ") {
+		t.Errorf("missing the run-end summary:\n%s", s)
+	}
+	sum := s[strings.Index(s, "metis: done in "):]
+	for _, want := range []string{"rows →", ".ledger.csv", "cohort ", "metis select ", "--fingerprint ", "--best --promote", "metis ledger fingerprints "} {
+		if !strings.Contains(sum, want) {
+			t.Errorf("summary missing %q:\n%s", want, sum)
+		}
+	}
 	// One held-out score per (outer fold × family): outerK = sweeper.cv.k = 2, and a,b are one
 	// family → 2 held-out lines.
 	if n := strings.Count(s, "→ held-out "); n != 2 {

@@ -144,7 +144,7 @@ func captureRunCode(closureByRepo map[string][]string, primaryRoot, specPath, re
 // captureSweepCode captures the sweep's code closure + spec ONCE (per-shape-run: the
 // closure is the same across points) to `refs/metis/sweeps/<shapeRunID>` and backfills
 // every point-record's CodeManifest with the D + commit + capture status.
-func captureSweepCode(o runOpts, man sweepManifest) error {
+func captureSweepCode(o runOpts, man sweepManifest) (record.Hash, error) {
 	closureByRepo := sweepClosure(o.expPath, man)
 	primary := cacheProjectRoot(o.stepPath, filepath.Dir(o.expPath))
 	commit, d, status := captureRunCode(closureByRepo, primary, o.expPath, "refs/metis/sweeps/"+man.ShapeRunID)
@@ -157,14 +157,14 @@ func captureSweepCode(o runOpts, man sweepManifest) error {
 	for _, p := range man.Points {
 		pfp, pdirty, err := backfillCodeManifest(o.expPath, p.RunID, d, commit, status)
 		if err != nil {
-			return err
+			return fp, err
 		}
 		if fp == "" && pfp != "" {
 			fp, dirty = pfp, pdirty
 		}
 	}
 	printFingerprintLine(o.out, fp, commit, dirty)
-	return nil
+	return fp, nil // metis#50: the run-end summary reuses the minted cohort (one mint site)
 }
 
 // captureSingleRun captures ONE run's code closure + spec to `refs/metis/runs/<runID>`

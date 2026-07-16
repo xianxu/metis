@@ -66,7 +66,7 @@ fixture assertions; docs row = RUNBOOK/atlas touch + smoke evidence.
 
 ## Plan
 
-- [ ] TDD: summary assertions in the nested + flat fixture tests → `printRunSummary` helper
+- [x] TDD: summary assertions in the nested + flat fixture tests → `printRunSummary` helper
   + start-time capture + captureSweepCode returns fp.
 
 ## Log
@@ -76,3 +76,8 @@ fixture assertions; docs row = RUNBOOK/atlas touch + smoke evidence.
   other information needed for further commands"). Completes the #39 fingerprint-visibility
   loop: run prints its cohort at record time AND hands the operator the paste-ready select
   commands at exit.
+- Implemented TDD (nested + flat fixture assertions red→green): printRunSummary at the end of
+  both sweep paths; sweepStart via the injected clock; captureSweepCode returns the minted
+  cohort (one mint site, ARCH-DRY — 3 test call sites updated). Real smoke:
+  "done in 2s — 42 rows → titanic-sweep-smoke.ledger.csv (cohort 01bb9bf0)" + the three
+  paste-ready commands with the fingerprint pre-filled. Full suite green + vet clean.
