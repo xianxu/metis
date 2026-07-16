@@ -388,3 +388,35 @@ func TestBoardWriter_PendingSizeCap(t *testing.T) {
 		t.Error("the size cap must force a flush during a frozen-clock flood")
 	}
 }
+
+// The tick's forceFlush drains mid-budget pending output and re-pins the board —
+// the path that restores the display after a burst window (close-review Important:
+// a stranded-pending regression here would ship silently without this pin).
+func TestBoardWriter_ForceFlushDrainsPending(t *testing.T) {
+	var term strings.Builder
+	bw := newBoardWriter(&term, func() time.Time { return at(0) }) // frozen: budget never elapses
+	bw.paint([]string{"BOARD"}) // first flush (zero lastFlush) paints; budget now frozen shut
+	pre := term.Len()
+	bw.Write([]byte("mid-budget line\n"))
+	if strings.Contains(term.String()[pre:], "mid-budget") {
+		t.Fatal("a mid-budget write must coalesce, not flush")
+	}
+	bw.forceFlush() // what sp.tick() calls
+	s := term.String()[pre:]
+	if !strings.Contains(s, "mid-budget line\n") {
+		t.Errorf("forceFlush must drain the pending line: %q", s)
+	}
+	if !strings.HasSuffix(term.String(), "BOARD\n") {
+		t.Errorf("forceFlush must re-pin the board below the drained output: %q", s)
+	}
+	// And through the sink: tick() stores a fresh frame then force-flushes.
+	var term2 strings.Builder
+	prog := newSweepProgress(&term2, func() time.Time { return at(0) }, "maximize",
+		progressTotals{nested: true, outer: 1, outerKind: sampler.SizeExact})
+	bw2 := newBoardWriter(&term2, func() time.Time { return at(0) })
+	prog.bw, prog.width = bw2, 100
+	prog.tick()
+	if !strings.Contains(term2.String(), "outer 0/1") {
+		t.Errorf("tick must render + force-paint the current frame: %q", term2.String())
+	}
+}

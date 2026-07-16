@@ -1,12 +1,13 @@
 ---
 id: 000046
-status: working
+status: codecomplete
 deps: []
 github_issue:
 created: 2026-07-15
 updated: 2026-07-15
 estimate_hours: 0.61
 started: 2026-07-15T23:19:12-07:00
+actual_hours: 0.13
 ---
 
 # board strobes under warm-cache bursts — coalesce passthrough + repaint at a bounded rate
@@ -78,6 +79,7 @@ live-pty verification and atlas/Log sweep. Calibration doc [stale] (#127) — pr
 ## Log
 
 ### 2026-07-15
+- 2026-07-15: closed — TDD red-green (burst-coalesce, quiet-inline, size-cap); pre-#46 tests updated to injected clocks; full package green + vet clean. Live warm pty of the operator exact invocation (190x50): 2.4s wall, 7 erase cycles total vs ~150+ pre-fix (4Hz budget bound holds), pyte render 0 fused rows, final board frame intact.; review verdict: FIX-THEN-SHIP
 - Filed from the operator's smoke test (ghostty in cmux): fused rows mid-run, truncated tail,
   no final frame. My pty+pyte replays of the same invocation render CLEAN — the corruption
   lives in real/mux terminal timing under the per-line repaint flood, so the fix targets
@@ -93,3 +95,7 @@ live-pty verification and atlas/Log sweep. Calibration doc [stale] (#127) — pr
 - **Live warm pty verification (the operator's exact invocation, 190×50):** wall 2.4s, **7 erase
   cycles total (pre-#46: ~150+)** — within the 4Hz budget bound; pyte render: 0 fused rows; final
   frame intact (outer 3/3, 3 ✓ rows, leaves line).
+- Close review: **FIX-THEN-SHIP**, no Critical. Fixed pre-commit: the tick/forceFlush drain path
+  pinned (TestBoardWriter_ForceFlushDrainsPending — frozen-budget pending write stays coalesced,
+  forceFlush drains + re-pins, sp.tick() renders + force-paints). Reviewer's shell was down
+  (static review); full suite + vet re-run green here post-fix.
