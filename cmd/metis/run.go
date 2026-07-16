@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -148,6 +149,19 @@ func runExperiment(o runOpts) (experiment.Run, error) {
 		out = &syncWriter{w: out}
 		o.out = out
 	}
+	// metis#48: default leaf BLAS pins — computed ONCE per top-level run from the ambient
+	// env (an exported operator value wins by exclusion in blasPins), announced loudly,
+	// and injected at both spawn seams (legacy execStep child env; fork-server process
+	// env). Fake-exec runs spawn nothing (no pins, no note); dry-run lists configs (same).
+	// Placed AFTER the writer wrap (the note must route through the board) and BEFORE the
+	// pool creation (the server spawn env needs the pins).
+	if o.exec == nil && !o.dryRun && o.leafPins == nil {
+		o.leafPins = blasPins(os.Environ())
+		if len(o.leafPins) > 0 {
+			fmt.Fprintf(out, "metis: leaf BLAS pinned single-thread (%s) — the parallelism budget is --parallel; export a value yourself to override\n",
+				strings.Join(o.leafPins, " "))
+		}
+	}
 	// metis#44: one warm fork-server pool per top-level run, shut down (EOF-drain) when the
 	// run ends. Only the production executor uses it (an injected test exec bypasses execStep).
 	// Constructed AFTER the writer wrap — its fallback notices must route through the board.
@@ -205,7 +219,7 @@ func runResolvedExperiment(exp experiment.Experiment, o runOpts, runID string, n
 		return experiment.Run{}, err
 	}
 
-	var exec experiment.StepExecutor = execStep{stepPath: o.stepPath, expDir: expDir, seed: exp.Seed, readRoot: o.readRoot, out: out, sem: o.leafSem, pool: o.forkPool}
+	var exec experiment.StepExecutor = execStep{stepPath: o.stepPath, expDir: expDir, seed: exp.Seed, readRoot: o.readRoot, out: out, sem: o.leafSem, pool: o.forkPool, pins: o.leafPins}
 	if o.exec != nil {
 		exec = o.exec // test seam: drive the loop/cache with a fake, no subprocess
 	}
