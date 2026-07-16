@@ -1,7 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
 	"runtime"
 	"strings"
@@ -11,6 +14,29 @@ import (
 
 	"github.com/xianxu/metis/pkg/experiment"
 )
+
+func TestRunResolvedExperiment_AbortedBeforeSideEffects(t *testing.T) {
+	ws := t.TempDir()
+	control := newRunControl(2)
+	control.fail("earlier fold", errors.New("failed"))
+	var out bytes.Buffer
+	exp := experiment.Experiment{Header: experiment.Header{Type: "experiment", ID: "queued"}}
+
+	_, err := runResolvedExperiment(exp, runOpts{
+		expPath:    filepath.Join(ws, "shape.md"),
+		runControl: control,
+		runLabel:   "queued fold",
+	}, "queued", fixedNow(), &out)
+	if !errors.Is(err, errRunAborted) {
+		t.Fatalf("error = %v, want errRunAborted", err)
+	}
+	if out.Len() != 0 {
+		t.Fatalf("aborted run wrote output: %q", out.String())
+	}
+	if _, statErr := os.Stat(filepath.Join(ws, "runs", "queued")); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("queued run created state: %v", statErr)
+	}
+}
 
 const runControlTestTimeout = 2 * time.Second
 

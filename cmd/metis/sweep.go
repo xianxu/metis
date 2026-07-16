@@ -462,8 +462,9 @@ func (ss *shapeSweep) materializeOuterAnalysis(outerK int, stratify bool) ([]str
 	preOpts := ss.o
 	preOpts.inSweep = true // one preamble run; skip the per-run capture noise
 	preOpts.readRoot = ""  // outer-split legitimately reads the full dataset
+	preOpts.runLabel = fmt.Sprintf("outer-analysis preamble (%s)", preID)
 	if _, err := runResolvedExperiment(exp, preOpts, preID, ss.now, ss.out); err != nil {
-		return nil, fmt.Errorf("nested-CV preamble (%s): %w", preID, err)
+		return nil, err
 	}
 	refs := make([]string, outerK)
 	for i := 0; i < outerK; i++ {
@@ -487,7 +488,7 @@ func (ss *shapeSweep) runOuterFold(ctx sampler.Ctx, configPts []shape.Point, k i
 		hooks: ss.prog.forPass(i)} // metis#30/#38: outer-fold identity via closure binding
 	sres := ss.runSweeper(ctx, configPts, pass)
 	if err := pass.firstError(); err != nil {
-		return 0, fmt.Errorf("outer fold %d sealed sweep: %w", i, err)
+		return 0, err
 	}
 	// Guard (metis#19/#23 I1): the parsimony select rule needs a measured complexity for every
 	// swept family — same guard the flat path runs before trusting its winner. Without it, a
@@ -516,9 +517,9 @@ func (ss *shapeSweep) runOuterFold(ctx sampler.Ctx, configPts []shape.Point, k i
 	var shipScore float64
 	for _, fam := range sortedFamilies(sres.PerFamily) {
 		w := sres.PerFamily[fam]
-		score, scoreID, status, ferr := ss.scoreOnOuterFold(w.Point, i, k, stratify, outerPart)
+		score, scoreID, status, ferr := ss.scoreOnOuterFold(w.Point, i, k, stratify, outerPart, fam)
 		if ferr != nil {
-			return 0, fmt.Errorf("outer fold %d family %s score: %w", i, fam, ferr)
+			return 0, ferr
 		}
 		rows = append(rows, pointRun{
 			RunID:      scoreID,
@@ -542,7 +543,7 @@ func (ss *shapeSweep) runOuterFold(ctx sampler.Ctx, configPts []shape.Point, k i
 // scoreOnOuterFold refit-and-scores one config's winner on the held outer-assessment fold i (a
 // full-data fold run at outer-k; post-selection, so unconfined). Returns the held-out fold_score,
 // the run id (→ its record.json carries the namespaced metric the ledger reads), and its status.
-func (ss *shapeSweep) scoreOnOuterFold(point shape.Point, i, k int, stratify bool, outerPart sampler.PartitionRef) (float64, string, string, error) {
+func (ss *shapeSweep) scoreOnOuterFold(point shape.Point, i, k int, stratify bool, outerPart sampler.PartitionRef, fam string) (float64, string, string, error) {
 	scoreExp := ss.buildFoldExperiment(point, sampler.FoldPoint{Idx: i}, nil, k, stratify, outerPart)
 	scoreID, err := pointAddressOf(scoreExp, ss.shapeBlobHash)
 	if err != nil {
@@ -551,9 +552,10 @@ func (ss *shapeSweep) scoreOnOuterFold(point shape.Point, i, k int, stratify boo
 	scoreOpts := ss.o
 	scoreOpts.inSweep = true
 	scoreOpts.readRoot = "" // the outer-assessment eval reads full data legitimately
+	scoreOpts.runLabel = fmt.Sprintf("outer fold %d family %s score (%s)", i, fam, scoreID)
 	run, err := runResolvedExperiment(scoreExp, scoreOpts, scoreID, ss.now, ss.out)
 	if err != nil {
-		return 0, "", "", fmt.Errorf("%s: %w", scoreID, err)
+		return 0, "", "", err
 	}
 	return run.Metrics[foldMetric], scoreID, run.Status, nil
 }
@@ -608,12 +610,13 @@ func (p *sweepPass) runPipelineFold(c shape.Point, f sampler.FoldPoint) sampler.
 	pointOpts := ss.o
 	pointOpts.inSweep = true        // metis#14: the sweep captures once (captureSweepCode), not per point
 	pointOpts.readRoot = p.readRoot // metis#23: confine a sealed outer-fold pass to its analysis root
+	pointOpts.runLabel = fmt.Sprintf("config %s fold %d (%s)", freeParamStr(c), f.Idx, runID)
 	run, runErr := runResolvedExperiment(exp, pointOpts, runID, ss.now, ss.out)
 	// A failing fold is FATAL to the sweep, unlike a v1 flat point: a config scored over a
 	// PARTIAL fold set is not an honest (mean, SE) estimate. Any error (a step failure, a
 	// validation never-start, a persistence error) aborts — surfaced, never a half-scored config.
 	if runErr != nil {
-		p.setErr(fmt.Errorf("config %s fold %d (%s): %w", freeParamStr(c), f.Idx, runID, runErr))
+		p.setErr(runErr)
 		return sampler.FoldOutcome{}
 	}
 	p.addPoint(pointRun{

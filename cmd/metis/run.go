@@ -82,6 +82,8 @@ type runOpts struct {
 	readRoot    string        // metis#23: when set, the production execStep confines base-dataset reads to this root
 	maxParallel int           // metis#31: >1 ⇒ ParExec batches + a leaf semaphore; sizes leafSem
 	leafSem     chan struct{} // metis#31: the shared global subprocess budget (nil = serial/cache-only)
+	runControl  *runControl   // one per shape run: global abort + optional 2n admission slots
+	runLabel    string        // config/fold/preamble context captured with the first error
 	forkserver  bool          // metis#44: warm fork-server leaf executor (cmdRun default true;
 	//                           zero-value false keeps direct runOpts callers/tests on legacy exec)
 	forkPool *serverPool // metis#44: the per-root warm-server pool, created once per runExperiment
@@ -177,6 +179,9 @@ func runExperiment(o runOpts) (experiment.Run, error) {
 		if err := experiment.ValidateShape(sh); err != nil {
 			return experiment.Run{}, fmt.Errorf("%s: %w", o.expPath, err)
 		}
+		if o.runControl == nil {
+			o.runControl = newRunControl(o.maxParallel)
+		}
 		return experiment.Run{}, runShapeSweep(o, sh, now, out)
 	}
 	return runResolvedExperiment(exp, o, singleRunID(o, exp, now), now, out)
@@ -205,6 +210,15 @@ func singleRunID(o runOpts, exp experiment.Experiment, now func() time.Time) str
 // both the 1-point path and the sweep loop (metis#7) call — so the run/cache/record wiring
 // lives in ONE place (ARCH-DRY).
 func runResolvedExperiment(exp experiment.Experiment, o runOpts, runID string, now func() time.Time, out io.Writer) (experiment.Run, error) {
+	if o.runControl == nil {
+		return runResolvedExperimentAdmitted(exp, o, runID, now, out)
+	}
+	return o.runControl.run(o.runLabel, func() (experiment.Run, error) {
+		return runResolvedExperimentAdmitted(exp, o, runID, now, out)
+	})
+}
+
+func runResolvedExperimentAdmitted(exp experiment.Experiment, o runOpts, runID string, now func() time.Time, out io.Writer) (experiment.Run, error) {
 	baseDir := filepath.Dir(o.expPath)
 	// Absolutize at the runner boundary: execStep injects runDir/stepDir/expDir into
 	// the child's env, and the child's cwd IS the step dir — a relative path would
