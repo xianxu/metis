@@ -122,7 +122,7 @@ is structurally current but provisionally calibrated.
 Durable implementation detail: [workshop/plans/000043-leaf-sched-depth-first-plan.md](../plans/000043-leaf-sched-depth-first-plan.md).
 
 - [x] Chunk 1 — build the race-safe `runControl` admission/failure primitive with deterministic handoff tests.
-- [ ] Chunk 2 — integrate the controller at the concrete-run boundary and linearize every sampler observation/reduction against global failure.
+- [x] Chunk 2 — integrate the controller at the concrete-run boundary and linearize every sampler observation/reduction against global failure.
 - [ ] Chunk 3 — prove early completion, independent nested caps, deterministic records, full race safety, atlas accuracy, and an isolated real-process cold smoke.
 
 ## Log
@@ -161,6 +161,13 @@ Durable implementation detail: [workshop/plans/000043-leaf-sched-depth-first-pla
   effects; all fold, outer-score, and preamble calls now attach complete controller-owned context.
 - Focused race tests plus spec and code-quality review passed. A review-driven cache-enabled mutation
   test proves pre-admission cancellation cannot even initialize `.metis-cache`.
+
+### 2026-07-16 — Chunk 2 global abort integration complete
+- Replaced pass-local and nested error ownership with the sweep controller, linearized every progress,
+  accumulation, scoring, persistence, and report consumer, and preserved the first contextual cause.
+- Extended the boundary through the live board: ticker refreshes are gated, joined before cleanup,
+  and an error erases and forgets the frame before deferred close. Controlled pre/post-failure tick
+  tests and the focused `-race -count=20` suite passed, followed by full spec and quality approval.
 
 ## Revisions
 

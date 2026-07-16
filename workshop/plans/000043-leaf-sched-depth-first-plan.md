@@ -438,7 +438,7 @@ git commit -m "#43: admit sweep runs at the concrete boundary" -m "Acquire befor
 - Test: `cmd/metis/runcontrol_test.go`
 - Test: `cmd/metis/parallel_test.go`
 
-- [ ] **Step 1: Write a failing nested-sibling cancellation test**
+- [x] **Step 1: Write a failing nested-sibling cancellation test**
 
 Add a `failureBarrierExec` for `foldShapeCVMD("[a, b, c]")` with `maxParallel=2` (admission capacity four). The fake records each distinct inner `runDir` on its first step. Once four inner runs have entered, it lets exactly one `train` return `errors.New("injected train failure")`; the other admitted trains wait on `failurePublished`, which the controller's winning-publication hook closes while admission is still held. Every wait is bounded, and the top-level `runExperiment` executes in a goroutine observed through `recvWithin`.
 
@@ -515,7 +515,7 @@ Run: `go test ./cmd/metis -run '^TestNestedCV_FirstFailureStopsQueuedSiblingPass
 
 Expected: FAIL because the current per-pass and outer error latches do not stop sibling passes.
 
-- [ ] **Step 2: Replace pass-local and outer-local error ownership with `runControl`**
+- [x] **Step 2: Replace pass-local and outer-local error ownership with `runControl`**
 
 Give `shapeSweep` helpers:
 
@@ -529,7 +529,7 @@ func (ss *shapeSweep) whileHealthy(fn func()) bool { return ss.o.runControl.whil
 
 Make `sweepPass.setErr` delegate to `ss.fail`; make `sweepPass.firstError` delegate to `ss.firstError`; remove `sweepPass.err`; retain its mutex only for `configs` and `points`. Delete `runNestedCV`'s separate `errMu` / `firstErr` closures and use the shape-wide helpers for orchestration errors.
 
-- [ ] **Step 3: Add an atomic healthy-observation operation**
+- [x] **Step 3: Add an atomic healthy-observation operation**
 
 Add the following controller method and a unit test that holds the observation callback open, starts `fail` concurrently, proves `fail` cannot return until the observation exits, then proves a later observation is rejected:
 
@@ -576,7 +576,7 @@ func TestRunControlObservationLinearizesWithFailure(t *testing.T) {
 }
 ```
 
-- [ ] **Step 4: Gate sampler callbacks and accumulators without changing batch shape**
+- [x] **Step 4: Gate sampler callbacks and accumulators without changing batch shape**
 
 In `runSweeper`, wrap hooks explicitly:
 
@@ -591,7 +591,7 @@ configHook := func(ev sampler.ProgressEvent[shape.Point, sampler.MeanSE]) {
 
 Implement `addConfigScore`, `addPoint`, and `addManPoints` as `whileHealthy` callbacks that acquire their existing mutex only after `control.mu`. Never acquire a pass/progress/manifest mutex and then call the controller. This fixed order makes each append linearize entirely before failure or not occur at all. Zero values may still occupy cancelled batch indices, but no observable sink consumes them.
 
-- [ ] **Step 5: Gate every transition to further work or persistence**
+- [x] **Step 5: Gate every transition to further work or persistence**
 
 Add first-error checks:
 
@@ -640,7 +640,7 @@ Never call the controller while holding `sp.mu` or `bw.mu`; ticker gating acquir
 chosen. This cleanup applies to every error return after board wiring, including non-sampler
 orchestration failures.
 
-- [ ] **Step 6: Prove the TUI cannot repaint stale progress after publication**
+- [x] **Step 6: Prove the TUI cannot repaint stale progress after publication**
 
 First add a direct `boardWriter` unit test: paint a frame containing `folds/min` and `ETA`, call
 `discardFrame`, then call `close`. Assert the suffix beginning at discard contains the erase and
@@ -664,11 +664,11 @@ score, estimate, or stored board row. ANSI erase/synchronized-output/cursor-rest
 pending ordinary error output are permitted. Keep all waits bounded with `recvWithin`; run under
 `-race` so writer snapshots, abort, tick rejection, and close are checked concurrently.
 
-- [ ] **Step 7: Prove orchestration never holds admission while awaiting a child**
+- [x] **Step 7: Prove orchestration never holds admission while awaiting a child**
 
 Extend the nested test with a two-second top-level timeout and `maxParallel=2`. A nested shape has more than four children, so completion proves outer/config sampler closures remain outside `runControl.run`; if any parent acquired before synchronously awaiting a child, the test would exhaust all four slots and time out.
 
-- [ ] **Step 8: Run cancellation, board-abort, and nested tests repeatedly under race**
+- [x] **Step 8: Run cancellation, board-abort, and nested tests repeatedly under race**
 
 Run: `go test ./cmd/metis -run 'TestRunControlObservation|TestBoardWriter_DiscardFrame|TestNestedCV_FirstFailure|TestNestedCV_PeakConcurrency|TestSweep_ProbeFailure' -race -count=20`
 
@@ -678,7 +678,7 @@ This is Chunk 2's focused integration proof; Chunk 3 adds the cold early-complet
 serial/parallel artifact and run-record comparisons, the full `go test ./... -race`, and the
 disposable real-process smoke before close.
 
-- [ ] **Step 9: Commit global abort integration**
+- [x] **Step 9: Commit global abort integration**
 
 ```bash
 git add cmd/metis/run.go cmd/metis/runcontrol.go cmd/metis/runcontrol_test.go cmd/metis/sweep.go cmd/metis/progress.go cmd/metis/board.go cmd/metis/board_test.go cmd/metis/parallel_test.go
