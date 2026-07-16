@@ -205,8 +205,8 @@ type boardState struct {
 
 // sweepProgress is the mutex'd sink shared by every pass of one shape-run. Events
 // arrive concurrently (ParExec goroutines across sibling outer folds, each holding
-// its own Run's event mutex); lock order is strictly Run-mu → sink-mu → the
-// syncWriter under `out` — acyclic. Emit policy: fold/config events are throttled
+// its own Run's event mutex); health-gated paths use the strict order runControl.mu
+// → sink.mu → boardWriter.mu (never the reverse). Emit policy: fold/config events are throttled
 // to one line per second (injected clock — tests script it, never sleep); a
 // driver-level (outer fold) completion ALWAYS emits; finish() emits the terminal
 // line. A nil *sweepProgress is a no-op everywhere (the non-sweep path is silent).
@@ -353,6 +353,17 @@ func (sp *sweepProgress) tick() {
 	bw := sp.bw
 	sp.mu.Unlock()
 	bw.forceFlush() // metis#46: the tick is what re-pins the board after a burst window
+}
+
+// abort removes the stored live frame after a sweep failure. Lock order remains
+// progress -> board; the controller is never called while either lock is held.
+func (sp *sweepProgress) abort() {
+	if sp == nil || sp.bw == nil {
+		return
+	}
+	sp.mu.Lock()
+	defer sp.mu.Unlock()
+	sp.bw.discardFrame()
 }
 
 // maybeEmit writes the line if forced (driver/finish) or the throttle elapsed —

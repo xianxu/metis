@@ -411,3 +411,45 @@ func TestRunControlDiscardsLateSuccessAfterSiblingFailure(t *testing.T) {
 		t.Fatalf("late success exposed sibling cause instead of abort sentinel: %v", success.err)
 	}
 }
+
+func TestRunControlObservationLinearizesBeforeFailure(t *testing.T) {
+	control := newRunControl(2)
+	observationEntered := make(chan struct{})
+	releaseObservation := make(chan struct{})
+	failureReachedLock := make(chan struct{})
+	failureReturned := make(chan error, 1)
+
+	control.beforeFailureLock = func() { close(failureReachedLock) }
+	observationReturned := make(chan bool, 1)
+	go func() {
+		observationReturned <- control.whileHealthy(func() {
+			close(observationEntered)
+			<-releaseObservation
+		})
+	}()
+	awaitRunControl(t, observationEntered, "observation callback to hold the controller")
+
+	go func() { failureReturned <- control.fail("fold", errors.New("boom")) }()
+	awaitRunControl(t, failureReachedLock, "failure to reach the controller mutex")
+	select {
+	case err := <-failureReturned:
+		t.Fatalf("failure returned while an earlier observation held the controller: %v", err)
+	default:
+	}
+
+	close(releaseObservation)
+	if ok := awaitRunControl(t, observationReturned, "observation to finish"); !ok {
+		t.Fatal("observation admitted before failure was unexpectedly rejected")
+	}
+	if err := awaitRunControl(t, failureReturned, "failure to publish"); err == nil || err.Error() != "fold: boom" {
+		t.Fatalf("failure = %v, want fold: boom", err)
+	}
+
+	called := false
+	if ok := control.whileHealthy(func() { called = true }); ok {
+		t.Fatal("observation after failure publication was admitted")
+	}
+	if called {
+		t.Fatal("rejected observation callback ran")
+	}
+}

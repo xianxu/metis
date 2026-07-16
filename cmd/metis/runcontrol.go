@@ -37,6 +37,20 @@ func (c *runControl) firstError() error {
 	return c.err
 }
 
+// whileHealthy linearizes an observable transition against first-failure
+// publication. The callback runs while c.mu is held and therefore must not call
+// back into runControl. Downstream locks are acquired only inside fn, preserving
+// the global control -> progress/pass/manifest order.
+func (c *runControl) whileHealthy(fn func()) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.err != nil {
+		return false
+	}
+	fn()
+	return true
+}
+
 func (c *runControl) fail(label string, err error) error {
 	if err == nil {
 		return nil

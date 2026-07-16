@@ -90,9 +90,12 @@ type runOpts struct {
 	//                      when forkserver is set; threaded through nested runOpts copies.
 	tui bool // metis#38: stdout is a TTY and --no-tui wasn't passed — a SWEEP pins the live board
 	//          (a plain experiment ignores it; non-TTY/piped runs stay on the #30 plain lines)
-	board     *boardWriter      // metis#38: the pin-bottom compositor (set by runExperiment in board mode)
-	leafGauge func() (int, int) // metis#38: (busy, capacity) over leafSem — the board's leaves line
-	leafPins  []string          // metis#48: default leaf BLAS pins, computed ONCE per top-level run in
+	board           *boardWriter      // metis#38: the pin-bottom compositor (set by runExperiment in board mode)
+	boardTick       <-chan time.Time  // test seam: nil uses the production 500ms ticker
+	beforeBoardTick func()            // test seam: after tick selection, before health observation
+	afterBoardTick  func()            // test seam: after the health observation returns
+	leafGauge       func() (int, int) // metis#38: (busy, capacity) over leafSem — the board's leaves line
+	leafPins        []string          // metis#48: default leaf BLAS pins, computed ONCE per top-level run in
 	//                             runExperiment (nil = not yet computed; non-nil rides nested runOpts
 	//                             copies like forkPool — an all-suppressed result is empty, not nil)
 }

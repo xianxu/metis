@@ -209,6 +209,19 @@ func (b *boardWriter) forceFlush() {
 	b.flushLocked(b.now())
 }
 
+// discardFrame atomically erases the live board and forgets it. Pending complete
+// ordinary lines still flush, but neither this update nor the later deferred close
+// can redraw stale progress after a sweep failure.
+func (b *boardWriter) discardFrame() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.closed {
+		return
+	}
+	b.frame = nil
+	b.flushLocked(b.now())
+}
+
 // flushLocked is the ONE atomic terminal update: erase the painted board, dump the
 // complete pending lines, redraw the stored frame — bracketed in DEC 2026 synchronized
 // output (metis#47: supporting terminals apply it atomically, killing the erase→redraw

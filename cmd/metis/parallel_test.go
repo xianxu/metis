@@ -2,11 +2,14 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -97,7 +100,7 @@ func (p peakExec) Execute(step experiment.Step, runDir string) (experiment.StepR
 // the run must complete (no deadlock). The fake leaf acquires the SAME sem the
 // production execStep would.
 func TestNestedCV_PeakConcurrencyWithinCap(t *testing.T) {
-	const cap = 3
+	const cap = 2 // runControl admits 2n=4 concrete runs; the nested fan-out has >4 children
 	ws := t.TempDir()
 	// 3 configs → nested (outer folds = sweeper.cv.k = 2) × 2 inner folds → deep nesting, ~many leaf calls.
 	expPath := writeShapeFile(t, ws, foldShapeCVMD("[a, b, c]"))
@@ -105,16 +108,21 @@ func TestNestedCV_PeakConcurrencyWithinCap(t *testing.T) {
 	var mu sync.Mutex
 	var cur, peak int
 	pe := peakExec{sem: sem, mu: &mu, cur: &cur, peak: &peak, in: foldFakeExec{}}
-	_, err := runExperiment(runOpts{
-		expPath:     expPath,
-		now:         fixedNow(),
-		git:         fakeGitProbe{name: "metis", sha: "sha"},
-		cache:       false, // every step runs → maximum fan-out against the cap
-		exec:        pe,
-		out:         io.Discard,
-		maxParallel: cap,
-		leafSem:     sem, // runExperiment reuses my sem (maxParallel>1 & non-nil)
-	})
+	result := make(chan error, 1)
+	go func() {
+		_, err := runExperiment(runOpts{
+			expPath:     expPath,
+			now:         fixedNow(),
+			git:         fakeGitProbe{name: "metis", sha: "sha"},
+			cache:       false, // every step runs → maximum fan-out against the cap
+			exec:        pe,
+			out:         io.Discard,
+			maxParallel: cap,
+			leafSem:     sem, // runExperiment reuses my sem (maxParallel>1 & non-nil)
+		})
+		result <- err
+	}()
+	err := awaitRunControl(t, result, "nested run with more children than admission capacity")
 	if err != nil {
 		t.Fatalf("driver:cv run must complete (no deadlock), got: %v", err)
 	}
@@ -135,6 +143,133 @@ func TestNestedCV_PeakConcurrencyWithinCap(t *testing.T) {
 type sleepExec struct {
 	in foldFakeExec
 	d  time.Duration
+}
+
+type concurrentBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (b *concurrentBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.b.Write(p)
+}
+
+func (b *concurrentBuffer) snapshot() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.b.String()
+}
+
+func (b *concurrentBuffer) len() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.b.Len()
+}
+
+// failureBarrierExec holds the first four admitted inner folds at their train
+// step. Exactly one returns the concrete injected failure; its admitted siblings
+// wait for controller publication and then return the cancellation sentinel.
+type failureBarrierExec struct {
+	in               foldFakeExec
+	mu               sync.Mutex
+	innerDirs        map[string]struct{}
+	innerEntered     chan string
+	fourEntered      chan struct{}
+	releaseFailure   chan struct{}
+	failurePublished chan struct{}
+	winner           atomic.Bool
+}
+
+func newFailureBarrierExec() *failureBarrierExec {
+	return &failureBarrierExec{
+		innerDirs:        make(map[string]struct{}),
+		innerEntered:     make(chan string, 8),
+		fourEntered:      make(chan struct{}),
+		releaseFailure:   make(chan struct{}),
+		failurePublished: make(chan struct{}),
+	}
+}
+
+func (f *failureBarrierExec) Execute(step experiment.Step, runDir string) (experiment.StepResult, error) {
+	if step.ID == partitionStepID {
+		f.mu.Lock()
+		if _, seen := f.innerDirs[runDir]; !seen {
+			f.innerDirs[runDir] = struct{}{}
+			f.innerEntered <- runDir
+			if len(f.innerDirs) == 4 {
+				close(f.fourEntered)
+			}
+		}
+		f.mu.Unlock()
+		<-f.fourEntered
+	}
+	if step.ID == "train" {
+		if f.winner.CompareAndSwap(false, true) {
+			<-f.releaseFailure
+			return experiment.StepResult{}, errors.New("injected train failure")
+		}
+		<-f.failurePublished
+		return experiment.StepResult{}, errRunAborted
+	}
+	return f.in.Execute(step, runDir)
+}
+
+func (f *failureBarrierExec) dirCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.innerDirs)
+}
+
+func TestNestedCV_FirstFailureStopsAllObservableWork(t *testing.T) {
+	ws := t.TempDir()
+	expPath := writeShapeFile(t, ws, foldShapeCVMD("[a, b, c]"))
+	control := newRunControl(2)
+	exec := newFailureBarrierExec()
+	out := &concurrentBuffer{}
+	publishedOffset := make(chan int, 1)
+	control.beforeFailureUnlock = func() {
+		publishedOffset <- out.len()
+		close(exec.failurePublished)
+	}
+	result := make(chan error, 1)
+	go func() {
+		_, err := runExperiment(runOpts{
+			expPath: expPath, now: fixedNow(),
+			git: fakeGitProbe{name: "metis", sha: "sha"}, exec: exec, out: out,
+			maxParallel: 2, runControl: control,
+		})
+		result <- err
+	}()
+
+	for i := 0; i < 4; i++ {
+		awaitRunControl(t, exec.innerEntered, "four admitted inner run directories")
+	}
+	close(exec.releaseFailure)
+	offset := awaitRunControl(t, publishedOffset, "first failure publication")
+	err := awaitRunControl(t, result, "nested failure to return without parent/child admission deadlock")
+	if err == nil || !strings.Contains(err.Error(), "config ") || !strings.Contains(err.Error(), "injected train failure") {
+		t.Fatalf("error = %v, want contextual concrete config/fold failure", err)
+	}
+	if errors.Is(err, errRunAborted) || strings.Contains(err.Error(), errRunAborted.Error()) {
+		t.Fatalf("top-level error exposed cancellation sentinel instead of cause: %v", err)
+	}
+	if got := exec.dirCount(); got != 4 {
+		t.Fatalf("inner run dirs = %d, want exactly four admitted dirs and no fifth start", got)
+	}
+	suffix := out.snapshot()[offset:]
+	for _, forbidden := range []string{"metis: progress", "folds/min", "ETA", "score ", "estimate", "mean "} {
+		if strings.Contains(suffix, forbidden) {
+			t.Errorf("post-failure output contains %q:\n%s", forbidden, suffix)
+		}
+	}
+	if matches, _ := filepath.Glob(filepath.Join(ws, "sweeps", "*", "manifest.json")); len(matches) != 0 {
+		t.Fatalf("failure persisted %d manifest(s), want none", len(matches))
+	}
+	if _, statErr := os.Stat(filepath.Join(ws, "shape.ledger.csv")); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("failure persisted a ledger: %v", statErr)
+	}
 }
 
 func (s sleepExec) Execute(step experiment.Step, runDir string) (experiment.StepResult, error) {
