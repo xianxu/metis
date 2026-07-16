@@ -5,7 +5,7 @@ deps: []
 github_issue:
 created: 2026-07-16
 updated: 2026-07-16
-estimate_hours: 0.55
+estimate_hours: 0.54
 started: 2026-07-16T08:14:43-07:00
 ---
 
@@ -49,6 +49,20 @@ metis: done in 42m10s — 2,160 rows → titanic-sweep.ledger.csv (cohort 18e6e0
   line (asserted on captured output; scripted clock gives a deterministic duration).
 - Degraded/absent fingerprint degrades the block gracefully (no lying pin).
 - A real smoke run shows the block with a sane elapsed.
+
+## Estimate
+
+```estimate
+model: estimate-logic-v3.1
+familiarity: 1.0
+item: smaller-go-module   design=0.05 impl=0.35
+item: atlas-docs          design=0.02 impl=0.10
+design-buffer: 0.30
+total: 0.54
+```
+
+One helper + start-time capture + captureSweepCode return-value change (2 call sites) +
+fixture assertions; docs row = RUNBOOK/atlas touch + smoke evidence.
 
 ## Plan
 
