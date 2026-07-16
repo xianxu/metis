@@ -38,6 +38,9 @@ type execStep struct {
 	pool *serverPool // metis#44: when non-nil, convention-conforming wrappers route through the
 	//                  warm fork-server (one per project root) instead of a fresh uv/python spawn;
 	//                  non-conforming wrappers + broken servers fall back to the legacy path below.
+	pins []string // metis#48: default leaf BLAS pins (computed once per run by runExperiment;
+	//              ambient-set names already excluded there) — appended to the legacy child env.
+	//              The fork-server path carries them on the SERVER env instead (children inherit).
 }
 
 // stepEnv builds the per-step METIS_* contract vars — the ONE definition both executors
@@ -125,6 +128,9 @@ func (e execStep) Execute(step experiment.Step, runDir string) (experiment.StepR
 			base = append(base, kv)
 		}
 	}
+	// metis#48: default leaf BLAS pins (operator-exported values already won in blasPins,
+	// so no duplicate names reach the child).
+	base = append(base, e.pins...)
 	for _, k := range sortedKeys(env) {
 		base = append(base, k+"="+env[k])
 	}

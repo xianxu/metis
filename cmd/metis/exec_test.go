@@ -231,3 +231,28 @@ func TestCollectArtifacts_RecursiveExcludesReserved(t *testing.T) {
 		t.Errorf("artifacts = %v; want %v", arts, want)
 	}
 }
+
+// TestExecStep_InjectsBlasPins (metis#48): the pins field reaches the child env at the
+// legacy spawn seam. The ambient-wins RULE lives in blasPins (unit-tested); this pins
+// the PLUMBING — whatever pins the wiring computed are in the subprocess env.
+func TestExecStep_InjectsBlasPins(t *testing.T) {
+	root := repoRoot(t)
+	runDir := t.TempDir()
+	e := execStep{
+		stepPath: []string{filepath.Join(root, "testdata", "steps")},
+		out:      io.Discard,
+		pins:     []string{"OMP_NUM_THREADS=1", "MKL_NUM_THREADS=1"},
+	}
+	if _, err := e.Execute(experiment.Step{ID: "e", Uses: "test/env-dump"}, runDir); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	b, err := os.ReadFile(filepath.Join(runDir, "e", "env.txt"))
+	if err != nil {
+		t.Fatalf("read env.txt: %v", err)
+	}
+	for _, want := range []string{"OMP_NUM_THREADS=1", "MKL_NUM_THREADS=1"} {
+		if !strings.Contains(string(b), want) {
+			t.Errorf("child env missing %q; got:\n%s", want, b)
+		}
+	}
+}
