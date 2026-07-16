@@ -20,6 +20,17 @@ type Ctx struct {
 	Partition PartitionRef
 }
 
+// SizeKind classifies a Sampler's SizeHint total (metis#30): exact (a static
+// point-set), budget (an upper bound, e.g. maxEvals), or unknown (open-ended
+// adaptive). The renderer shows k/n, k/≤n, k/? respectively.
+type SizeKind int
+
+const (
+	SizeExact SizeKind = iota
+	SizeBudget
+	SizeUnknown
+)
+
 // Sampler is the ask/tell fold node, generic over its accumulator (S), the Point
 // it proposes (P), the Output a run yields (O), and its terminal Result (R):
 //
@@ -27,6 +38,9 @@ type Ctx struct {
 //	Ask(S)      → ([]P, done) propose the next scatter (may be empty); done = stop
 //	Tell(S,P,O) → S           fold one completed Point's output into the accumulator
 //	Done(S)     → R           terminal reduce (the gather): (mean,SE) | winner
+//	SizeHint(S) → (n, kind)   the level's total point count (metis#30) — the ONLY
+//	                          per-sampler progress bit; Run reads it once on the
+//	                          initial accumulator and stamps it on every event.
 //
 // The levels compose by type: the sweeper's runPoint is Run(resample,…) whose
 // R=(mean,SE) is the sweeper's O; the driver's runPoint is Run(sweeper,…) whose
@@ -36,4 +50,5 @@ type Sampler[S, P, O, R any] interface {
 	Ask(s S) (batch []P, done bool)
 	Tell(s S, p P, out O) S
 	Done(s S) R
+	SizeHint(s S) (total int, kind SizeKind)
 }

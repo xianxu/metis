@@ -65,4 +65,7 @@ func (f FixedKFolds) Tell(s foldState, p FoldPoint, out FoldOutcome) foldState {
 // Done reduces the told fold scores → (mean, SE, complexity), keyed on the sorted told-set.
 func (f FixedKFolds) Done(s foldState) MeanSE { return Aggregate(s.scores) }
 
+// SizeHint is the fixed fold count k (metis#30).
+func (f FixedKFolds) SizeHint(s foldState) (int, SizeKind) { return len(s.points), SizeExact }
+
 var _ Sampler[foldState, FoldPoint, FoldOutcome, MeanSE] = FixedKFolds{}

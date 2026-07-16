@@ -7,16 +7,28 @@ import (
 	"github.com/xianxu/metis/pkg/shape"
 )
 
-// countSampler is a trivial Sampler (Init=plan[1,2,3], Ask emits once, Tell=+out,
+// countSampler is a trivial Sampler (Init=plan[1..n], Ask emits once, Tell=+out,
 // Done=sum) that also counts its method calls — the T6 driver-loop proof.
-type countSampler struct{ asks, tells, dones int }
+// n=0 defaults to 3 (the original hardcoded [1,2,3]); metis#30's progress tests
+// size it up for parallel-event coverage.
+type countSampler struct{ n, asks, tells, dones int }
 
 type countState struct {
 	pts       []int
 	sum, told int
 }
 
-func (c *countSampler) Init(Ctx) countState { return countState{pts: []int{1, 2, 3}} }
+func (c *countSampler) Init(Ctx) countState {
+	n := c.n
+	if n == 0 {
+		n = 3
+	}
+	pts := make([]int, n)
+	for i := range pts {
+		pts[i] = i + 1
+	}
+	return countState{pts: pts}
+}
 func (c *countSampler) Ask(s countState) ([]int, bool) {
 	c.asks++
 	if s.told >= len(s.pts) {
@@ -31,15 +43,19 @@ func (c *countSampler) Tell(s countState, _ int, out int) countState {
 	return s
 }
 func (c *countSampler) Done(s countState) int { c.dones++; return s.sum }
+func (c *countSampler) SizeHint(s countState) (int, SizeKind) {
+	return len(s.pts), SizeExact
+}
 
 // stuckSampler violates the progress contract: Ask never reports done and never
 // proposes a point — Run must fail loud, not hang.
 type stuckSampler struct{}
 
-func (stuckSampler) Init(Ctx) int             { return 0 }
-func (stuckSampler) Ask(int) ([]int, bool)    { return nil, false } // empty batch, not done
-func (stuckSampler) Tell(s int, _, o int) int { return s + o }
-func (stuckSampler) Done(s int) int           { return s }
+func (stuckSampler) Init(Ctx) int                 { return 0 }
+func (stuckSampler) Ask(int) ([]int, bool)        { return nil, false } // empty batch, not done
+func (stuckSampler) Tell(s int, _, o int) int     { return s + o }
+func (stuckSampler) Done(s int) int               { return s }
+func (stuckSampler) SizeHint(int) (int, SizeKind) { return 0, SizeUnknown }
 
 func TestRun_PanicsOnNonProgressingAsk(t *testing.T) {
 	defer func() {

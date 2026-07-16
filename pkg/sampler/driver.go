@@ -39,6 +39,9 @@ func (SingleDriver) Tell(s driverState, _ SinglePoint, r SweepResult) driverStat
 // (no honest estimate; that's driver:cv, metis#23).
 func (SingleDriver) Done(s driverState) SweepResult { return s.result }
 
+// SizeHint: the single driver proposes exactly one all-data point (metis#30).
+func (SingleDriver) SizeHint(driverState) (int, SizeKind) { return 1, SizeExact }
+
 var _ Sampler[driverState, SinglePoint, SweepResult, SweepResult] = SingleDriver{}
 
 // OuterFoldPoint is one outer resample fold (metis#23 nested-CV): the driver hands the
@@ -94,5 +97,8 @@ func (d CVDriver) Tell(s cvDriverState, p OuterFoldPoint, out float64) cvDriverS
 // Done aggregates the k outer scores → the honest procedure estimate (mean ± SE),
 // reusing the SAME reducer as the resample level (sampler.Aggregate).
 func (d CVDriver) Done(s cvDriverState) MeanSE { return Aggregate(s.scores) }
+
+// SizeHint is the outer fold count (metis#30).
+func (d CVDriver) SizeHint(s cvDriverState) (int, SizeKind) { return len(s.points), SizeExact }
 
 var _ Sampler[cvDriverState, OuterFoldPoint, float64, MeanSE] = CVDriver{}
