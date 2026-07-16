@@ -1,11 +1,12 @@
 ---
 id: 000047
-status: open
+status: working
 deps: []
 github_issue:
 created: 2026-07-16
 updated: 2026-07-16
 estimate_hours: 0.35
+started: 2026-07-16T00:10:45-07:00
 ---
 
 # board flashes on repaint — wrap flushes in DEC 2026 synchronized output
