@@ -108,7 +108,7 @@ Add to the `Sampler` interface: `SizeHint(s S) (total int, kind SizeKind)` (doc:
 
 ### Task 2: `Run` fires progress at point completion
 
-**Files:** Modify `pkg/sampler/run.go` (+ the 16 call sites: `cmd/metis/sweep.go` ×4, sampler tests ×12). Test: extend `pkg/sampler/run_test.go`.
+**Files:** Modify `pkg/sampler/run.go` (+ the 19 call sites: `cmd/metis/sweep.go` ×4, sampler tests ×15). Test: extend `pkg/sampler/run_test.go`.
 
 - [ ] **Step 1: failing tests** — in `run_test.go` (uses the existing `countSampler`, whose points are ints):
 
@@ -189,7 +189,7 @@ In `Run`: after `s := smp.Init(ctx)`, capture `total, kind := smp.SizeHint(s)`; 
 	}
 ```
 
-(Wrapping BEFORE the loop; the callback runs on exec goroutines, serialized by the mutex — document: keep it fast, it holds completions.) Update all 16 call sites (`, nil` in tests; the 4 `cmd/metis/sweep.go` sites take real closures in Task 3 — pass `nil` in this commit to keep it compiling).
+(Wrapping BEFORE the loop; the callback runs on exec goroutines, serialized by the mutex — document: keep it fast, it holds completions.) Update all 19 call sites (`, nil` in tests; the 4 `cmd/metis/sweep.go` sites take real closures in Task 3 — pass `nil` in this commit to keep it compiling).
 
 - [ ] **Step 4: verify PASS** — `go test ./pkg/sampler/ ./cmd/metis/` (whole module compiles; behavior unchanged with nil).
 - [ ] **Step 5: commit** — `#30: Run fires ProgressEvent[P,O] at point completion (live under ParExec)`.
