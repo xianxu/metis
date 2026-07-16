@@ -5,7 +5,7 @@ deps: []
 github_issue:
 created: 2026-07-16
 updated: 2026-07-16
-estimate_hours: 0.35
+estimate_hours: 0.28
 started: 2026-07-16T00:10:45-07:00
 ---
 
@@ -31,6 +31,18 @@ today's behavior, not corruption).
 - Every flushed update (Write-inline, paint, forceFlush, close) is bracketed by BSU/ESU in
   the byte stream (unit-asserted; balanced pairs, nothing outside close unbracketed).
 - Live pty run shows the bracketing; existing board tests keep passing.
+
+## Estimate
+
+```estimate
+model: estimate-logic-v3.1
+familiarity: 1.0
+item: smaller-go-module   design=0.02 impl=0.25
+design-buffer: 0.30
+total: 0.28
+```
+
+One seam (flushLocked/close bracketing) + bracket-balance test + live pty check.
 
 ## Plan
 
