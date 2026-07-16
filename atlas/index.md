@@ -81,6 +81,17 @@ identical on a non-Kaggle platform?* — if yes, it lives here.
   scores → `mean±SE`, the **honest procedure estimate** (`runNestedCV`/`runOuterFold`, `cmd/metis/sweep.go`).
   metis#32: `metis run` now DERIVES the mode by config-count + **records** inner+outer ledger rows +
   **measures only** (ship via `metis select --promote`, not an auto-ship). Costs ~outerK×.
+  **metis#30 (live progress):** `SizeHint(s) (total, SizeKind)` on the Sampler interface (the per-sampler
+  n: exact|budget|unknown — all four production samplers are exact) + `Run` gains an injected
+  `progress func(ProgressEvent[P,O])` fired **at point completion** (not Tell — under #31's batch exec
+  every Tell lands at batch end), mutex-serialized so k arrives monotone even under ParExec; nil = the
+  unwrapped loop. `cmd/metis/progress.go` is the sink: ONE throttled aggregated line
+  (`metis: progress outer 1/3 · configs 84/216 · folds 421/1080 · est 0.8283 ± 0.0140`; flat 1-config →
+  `folds 3/5 · score …`), totals **seeded at wiring** from direct SizeHint calls, 1s throttle on the
+  injected clock, always-emit on outer completions + finish, plain lines (no escape codes — non-TTY-safe).
+  **Outer-fold identity rides the per-pass closure binding** (`prog.forPass(i)` → `passHooks`), never an
+  event payload field — metis#38's TTY board extends the sink behind those hooks with zero pkg/sampler
+  change. (`FoldPoint.Partition` looks like a discriminator but is byte-identical across outer folds.)
   racing/Bayesian = feedback-driven `Ask`. **metis#23 M1** is the outer-fold **sealing spine** the
   driver builds on: `outer-split` materializes k `analysis_i/` **subset dataset dirs** (L1 structural — assessment
   rows physically absent from selection; test frame carried through — analysis_i shape-identical to the base, metis#35) + a `METIS_READ_ROOT` confinement asserted at `metis/io.py:exp_path`

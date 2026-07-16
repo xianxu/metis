@@ -78,11 +78,11 @@ folded: Task-4 e2e premises corrected to fixture pins + real evidence at close, 
 refactor stated, 19 call sites grep-verified, totals seeded at wiring time, per-pass hooks carry
 outer-fold identity for #38). Single-pass close, no milestones.
 
-- [ ] Task 1: `SizeKind` + `SizeHint` on `Sampler` + 6 impls (TDD)
-- [ ] Task 2: `Run` fires `ProgressEvent[P,O]` at point completion; 19 call sites; Seq/Par tests
-- [ ] Task 3: `cmd/metis` sink (per-pass hooks, seeded totals, 1s-throttled line) + wiring
-- [ ] Task 4: fixture-sweep output pins (nested + flat)
-- [ ] Task 5: docs (atlas/RUNBOOK/Revisions) + real smoke-sweep evidence + close
+- [x] Task 1: `SizeKind` + `SizeHint` on `Sampler` + 6 impls (TDD)
+- [x] Task 2: `Run` fires `ProgressEvent[P,O]` at point completion; 19 call sites; Seq/Par tests
+- [x] Task 3: `cmd/metis` sink (per-pass hooks, seeded totals, 1s-throttled line) + wiring
+- [x] Task 4: fixture-sweep output pins (nested + flat)
+- [x] Task 5: docs (atlas/RUNBOOK/Revisions) + real smoke-sweep evidence + close
 
 ## Log
 
@@ -110,3 +110,30 @@ outer-fold identity for #38). Single-pass close, no milestones.
   totals additionally SEEDED at wiring from direct SizeHint calls (stream-learned totals arrive
   with a level's first completion — too late). #38's outer-fold identity rides per-pass closure
   binding (`forPass(i)`), NOT a payload field (ARCH-PURE: pkg/sampler stays coordinate-free).
+
+## Revisions
+
+### 2026-07-15 (at change-code, implemented same-day)
+1. **Per-`Tell` → per-COMPLETION firing.** The Spec's premise ("Run fires a Tell per completed
+   point") predates metis#31: exec is now batch-scoped (Tell happens after the whole batch
+   returns) and all four production samplers are one-batch static — per-Tell events would all
+   land at batch end, dead as live progress. `Run` instead wraps `runPoint` and fires
+   mutex-serialized events at point completion. Count contract unchanged (exactly one event per
+   point); the event carries the completed `(Point, Out)` pair, not accumulator state.
+2. **Flat-format example corrected.** The Spec's `47/99 · best 0.834` flat example is the
+   pre-#32 world; since metis#32 the flat path runs iff exactly ONE config, so the flat line is
+   `folds k/n · score <running mean>` (nothing to be "best" of). The Spec's nested example is
+   unchanged in spirit: `outer j/k · configs a/b · folds x/y · est mean±SE`.
+
+## Log (continued)
+
+### 2026-07-15 (implementation)
+- Tasks 1–4 done TDD (each red→green): `SizeHint` + 6 impls · `ProgressEvent[P,O]` completion-fired
+  in `Run` (19 call sites, monotone-k ParExec test) · `cmd/metis/progress.go` sink (per-pass
+  `forPass(i)` hooks = the #38 identity seam; totals seeded at wiring; 1s throttle on injected
+  clock; error-gated driver events) · fixture pins in the nested + flat sweep tests. Full module
+  green with `-race` on the touched packages; `go vet` clean.
+- **Real-run evidence (done-when 3):** `metis run --parallel 8 titanic-sweep-smoke.md` (real
+  uv/Python leaves, BLAS pinned, stdout redirected): 6 progress lines, live mid-run updates
+  (`folds 1/36 → 21/36` while outer 0/3), est evolving `0.7980 → 0.8064 ± 0.0084 → 0.8103 ±
+  0.0062`, final `outer 3/3 · configs 12/12 · folds 36/36`; zero escape codes in the captured file.
