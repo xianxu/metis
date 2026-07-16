@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -128,8 +129,11 @@ func TestFmtETA(t *testing.T) {
 // the flush budget elapsed, preserving the pre-#46 inline-flush semantics in tests
 // that assert immediate rendering.
 func steppingClock(step time.Duration) func() time.Time {
+	var mu sync.Mutex // runOpts.now is called from concurrent ParExec goroutines
 	t := at(0)
 	return func() time.Time {
+		mu.Lock()
+		defer mu.Unlock()
 		t = t.Add(step)
 		return t
 	}
@@ -313,7 +317,7 @@ func TestServerPool_NoticeRoutesThroughBoard(t *testing.T) {
 	if erase := strings.Index(s, "\x1b[J"); erase < 0 || erase > notice {
 		t.Errorf("the notice must be preceded by the board erase: %q", s)
 	}
-	if !strings.HasSuffix(s, "BOARD\n") {
+	if !strings.HasSuffix(s, "BOARD\n\x1b[?2026l") { // frame last, then the sync-end (metis#47)
 		t.Errorf("the board must be repainted below the notice: %q", s)
 	}
 }
@@ -395,7 +399,7 @@ func TestBoardWriter_PendingSizeCap(t *testing.T) {
 func TestBoardWriter_ForceFlushDrainsPending(t *testing.T) {
 	var term strings.Builder
 	bw := newBoardWriter(&term, func() time.Time { return at(0) }) // frozen: budget never elapses
-	bw.paint([]string{"BOARD"}) // first flush (zero lastFlush) paints; budget now frozen shut
+	bw.paint([]string{"BOARD"})                                    // first flush (zero lastFlush) paints; budget now frozen shut
 	pre := term.Len()
 	bw.Write([]byte("mid-budget line\n"))
 	if strings.Contains(term.String()[pre:], "mid-budget") {
@@ -406,7 +410,7 @@ func TestBoardWriter_ForceFlushDrainsPending(t *testing.T) {
 	if !strings.Contains(s, "mid-budget line\n") {
 		t.Errorf("forceFlush must drain the pending line: %q", s)
 	}
-	if !strings.HasSuffix(term.String(), "BOARD\n") {
+	if !strings.HasSuffix(term.String(), "BOARD\n\x1b[?2026l") { // metis#47 sync-end trails
 		t.Errorf("forceFlush must re-pin the board below the drained output: %q", s)
 	}
 	// And through the sink: tick() stores a fresh frame then force-flushes.
@@ -418,5 +422,50 @@ func TestBoardWriter_ForceFlushDrainsPending(t *testing.T) {
 	prog.tick()
 	if !strings.Contains(term2.String(), "outer 0/1") {
 		t.Errorf("tick must render + force-paint the current frame: %q", term2.String())
+	}
+}
+
+// metis#47: every flushed update is bracketed in DEC 2026 synchronized output
+// (\x1b[?2026h … \x1b[?2026l) so supporting terminals (ghostty, iTerm2, kitty) apply
+// the erase+redraw atomically — no flash; others ignore the private mode (safe no-op).
+func TestBoardWriter_SynchronizedOutputBrackets(t *testing.T) {
+	var term strings.Builder
+	bw := newBoardWriter(&term, steppingClock(300*time.Millisecond))
+	bw.paint([]string{"AGG", "fold 0 ▸"})
+	bw.Write([]byte("⚡ step x\n"))
+	bw.forceFlush()
+	bw.close()
+	s := term.String()
+	bsu, esu := strings.Count(s, "\x1b[?2026h"), strings.Count(s, "\x1b[?2026l")
+	if bsu == 0 || bsu != esu {
+		t.Fatalf("flushes must be BSU/ESU-bracketed and balanced: h=%d l=%d\n%q", bsu, esu, s)
+	}
+	// Balanced nesting: never two opens without a close between them.
+	depth := 0
+	for i := 0; i+8 <= len(s); i++ {
+		switch s[i : i+8] {
+		case "\x1b[?2026h":
+			depth++
+			if depth > 1 {
+				t.Fatal("nested BSU without ESU")
+			}
+		case "\x1b[?2026l":
+			depth--
+			if depth < 0 {
+				t.Fatal("ESU without BSU")
+			}
+		}
+	}
+	// Every erase cycle happens INSIDE a bracket (no unsynchronized erase remains).
+	for i := strings.Index(s, "\x1b[J"); i >= 0; {
+		before := s[:i]
+		if strings.Count(before, "\x1b[?2026h") <= strings.Count(before, "\x1b[?2026l") {
+			t.Fatalf("an erase at byte %d is outside a synchronized bracket", i)
+		}
+		j := strings.Index(s[i+1:], "\x1b[J")
+		if j < 0 {
+			break
+		}
+		i += 1 + j
 	}
 }

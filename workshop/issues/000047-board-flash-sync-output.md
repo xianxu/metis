@@ -46,10 +46,15 @@ One seam (flushLocked/close bracketing) + bracket-balance test + live pty check.
 
 ## Plan
 
-- [ ] TDD: bracket assertions in board_test.go → emit in flushLocked + close.
+- [x] TDD: bracket assertions in board_test.go → emit in flushLocked + close.
 
 ## Log
 
 ### 2026-07-16
 - Filed from the operator's UX pass (issue 1 of 3: flashes / startup delay / 3h ETA). BSU/ESU
   is the standard flicker cure for erase+redraw compositors; private-mode no-op elsewhere.
+- Implemented TDD (bracket-balance + every-erase-inside-bracket assertions red→green); flushLocked
+  + close both bracket. Side-fix caught by -race: the #46 steppingClock test helper raced
+  (runOpts.now is called from concurrent ParExec goroutines for record timestamps) — mutexed; the
+  race had also produced a pathological 169s test run, now 2.6s. Live pty: BSU=23/ESU=23 balanced,
+  every erase inside a bracket. Full suite green.
