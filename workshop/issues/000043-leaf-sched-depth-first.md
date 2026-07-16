@@ -5,7 +5,7 @@ deps: []
 github_issue:
 created: 2026-07-14
 updated: 2026-07-16
-estimate_hours:
+estimate_hours: 4.74
 started: 2026-07-16T12:57:07-07:00
 ---
 
@@ -79,16 +79,51 @@ semaphore:
 - A first run failure prevents queued-not-admitted runs anywhere in the experiment from creating
   state or executing steps, publishes the contextual error before admission release, and surfaces
   that original error without bogus rows, counters, throughput, score, or estimate.
+- In TUI mode, failure stops ticker-driven progress observations and atomically erases the pinned
+  board without retaining a frame that deferred close could redraw; only pending ordinary output
+  and terminal cleanup escapes after publication.
 - Nested execution completes without deadlock. Serial versus admitted-parallel runs persist
   byte-identical deterministic manifests and ledger rows; timing-bearing run records are
   semantically equal apart from their expected timestamps/durations.
 - Full `go test ./... -race` and a disposable cold real-sweep smoke show early inner-run progress and
   sane throughput.
 
+## Estimate
+
+```estimate
+model: estimate-logic-v3.1
+familiarity: 1.5
+item: issue-spec design=0.80 impl=0.12
+item: greenfield-go-module design=0.30 impl=0.32
+item: cross-cutting-refactor design=0.20 impl=0.20
+item: cross-cutting-refactor design=0.20 impl=0.20
+item: smaller-go-module design=0.06 impl=0.20
+item: smaller-go-module design=0.06 impl=0.20
+item: tui-screen design=0.10 impl=0.20
+item: atlas-docs design=0.06 impl=0.08
+item: milestone-review design=0.10 impl=0.20
+design-buffer: 0.15
+total: 4.74
+```
+
+Produced via `brain/data/life/42shots/velocity/estimate-logic-v3.1.md` against
+`baseline-v3.1.md`. Method A only. The `issue-spec` row includes the paired #43/#49
+design and fresh-eyes convergence already performed after claim. The controller is a greenfield
+bounded-concurrency concern; the two refactor rows separately cover the concrete-run boundary and
+the nested reduction/progress shell; the two smaller-module rows cover deterministic concurrency
+regressions and the isolated real-process smoke. Implementation values use v3.1's 40%-of-v2
+AI-paired scale, multiplied by 1.5 for novel-but-bounded concurrency. The thorough reviewed plan
+earns the 15% design buffer.
+The calibration source is currently marked stale by `sdlc estimate-source`, so this derivation
+is structurally current but provisionally calibrated.
+
 ## Plan
 
-- [ ] Implement the approved run-admission design through a durable TDD plan.
-- [ ] Verify nested cap, early completion, abort behavior, determinism, race safety, and real cold smoke.
+Durable implementation detail: [workshop/plans/000043-leaf-sched-depth-first-plan.md](../plans/000043-leaf-sched-depth-first-plan.md).
+
+- [ ] Chunk 1 — build the race-safe `runControl` admission/failure primitive with deterministic handoff tests.
+- [ ] Chunk 2 — integrate the controller at the concrete-run boundary and linearize every sampler observation/reduction against global failure.
+- [ ] Chunk 3 — prove early completion, independent nested caps, deterministic records, full race safety, atlas accuracy, and an isolated real-process cold smoke.
 
 ## Log
 
@@ -99,9 +134,40 @@ semaphore:
   gate or priority leaf queue. Co-designed with #49 so the board reports the earlier completions
   truthfully; implementation/review boundaries remain separate (#43 merges first).
 
+### 2026-07-16 — implementation plan approved
+- Wrote and independently reviewed all three chunks of the durable #43 plan: controller primitive,
+  concrete-run/sampler integration, and scheduling/determinism/real-process verification. Estimate
+  derives from the provisional v3.1 calibration; delivery remains one atomic close boundary.
+
+### 2026-07-16 — change-code estimate correction
+- The gate's plan-quality judge found the original 1.94h derivation materially under-decomposed the
+  concurrency integration and verification surface. Re-derived 4.33h from eight explicit Method A
+  work units with a 1.5 novel-but-bounded familiarity multiplier; no scope or architecture changed.
+
+### 2026-07-16 — change-code TUI consumer correction
+- The second implementation-entry review found two post-failure display consumers outside the
+  sampler reductions: the board ticker and deferred `boardWriter.close`. Added an explicit board
+  abort path, controlled-tick race proof, and a ninth Method A unit; the estimate is now 4.74h.
+
 ## Revisions
 
 ### 2026-07-16 — fresh-eyes spec review
 - Made cancellation experiment-wide, required failure publication before admission release, and
   defined how typed aborted slots are excluded from every observable/reduction seam. Narrowed the
   determinism claim for timing-bearing run records and added a barrier-testable failure handoff.
+
+### 2026-07-16 — durable plan review
+- Replaced the generic two-line implementation sketch with the reviewed three-chunk plan and added
+  the reconciled estimate. Review tightened controller hook semantics, atomically linearized
+  observations against failure, and made cold-order/throughput/isolation proof executable.
+
+### 2026-07-16 — estimate-gate revision
+- Raised the estimate from 1.94h to 4.33h after the implementation-entry judge identified missing
+  primitive decomposition for the controller, two cross-cutting integrations, deterministic race
+  suite, and real-process smoke. The approved behavior and one-boundary delivery plan are unchanged.
+
+### 2026-07-16 — TUI failure-path revision
+- Extended the plan's global-abort boundary through the live progress board: ticker observations
+  linearize through `runControl`, an error return discards and erases the stored frame before the
+  top-level close, and a publication-barrier test drives a post-failure tick deterministically.
+- Raised the estimate from 4.33h to 4.74h for the added TUI integration and race-test surface.
