@@ -525,3 +525,20 @@ func loadLedgerOrFatal(t *testing.T, expPath string) ledger.Ledger {
 	}
 	return led
 }
+
+// metis#50: a degraded capture (no fingerprint) degrades the summary honestly —
+// `cohort ?` and NO lying `--fingerprint` pin (a single-cohort ledger needs none).
+func TestPrintRunSummary_DegradedCohort(t *testing.T) {
+	var out strings.Builder
+	printRunSummary(&out, "s.md", 90*time.Second, 42, "")
+	s := out.String()
+	if !strings.Contains(s, "(cohort ?)") {
+		t.Errorf("degraded capture must render cohort ?: %s", s)
+	}
+	if strings.Contains(s, "--fingerprint") {
+		t.Errorf("degraded capture must not emit a lying pin: %s", s)
+	}
+	if !strings.Contains(s, "done in 1m30s") || !strings.Contains(s, "42 rows") || !strings.Contains(s, "metis select s.md") {
+		t.Errorf("summary basics: %s", s)
+	}
+}

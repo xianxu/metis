@@ -1,12 +1,13 @@
 ---
 id: 000050
-status: working
+status: codecomplete
 deps: []
 github_issue:
 created: 2026-07-16
 updated: 2026-07-16
 estimate_hours: 0.54
 started: 2026-07-16T08:14:43-07:00
+actual_hours: 0.25
 ---
 
 # run-end summary — elapsed time, fingerprint, rows, and paste-ready next commands
@@ -72,6 +73,7 @@ fixture assertions; docs row = RUNBOOK/atlas touch + smoke evidence.
 ## Log
 
 ### 2026-07-16
+- 2026-07-16: closed — Judgment actual 0.25h (gate found no measurable window). Presentation-only addition at existing sweep-exit seams. TDD red-green nested+flat; real smoke: done in 2s - 42 rows -> ledger (cohort 01bb9bf0) + three paste-ready commands. Full suite green, vet clean.; review verdict: FIX-THEN-SHIP
 - Filed from operator request ("print at the end: actual time took, fingerprint, and any
   other information needed for further commands"). Completes the #39 fingerprint-visibility
   loop: run prints its cohort at record time AND hands the operator the paste-ready select
@@ -81,3 +83,6 @@ fixture assertions; docs row = RUNBOOK/atlas touch + smoke evidence.
   cohort (one mint site, ARCH-DRY — 3 test call sites updated). Real smoke:
   "done in 2s — 42 rows → titanic-sweep-smoke.ledger.csv (cohort 01bb9bf0)" + the three
   paste-ready commands with the fingerprint pre-filled. Full suite green + vet clean.
+- Close review FIX-THEN-SHIP (no Critical): fixed pre-commit — atlas/experiment.md gains the
+  run-end-summary sentence in the run/select flow section; the degraded `(cohort ?)` branch
+  pinned by a pure unit test (no lying --fingerprint pin). Full suite re-run green.
