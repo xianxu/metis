@@ -1,12 +1,13 @@
 ---
 id: 000047
-status: working
+status: codecomplete
 deps: []
 github_issue:
 created: 2026-07-16
 updated: 2026-07-16
 estimate_hours: 0.28
 started: 2026-07-16T00:10:45-07:00
+actual_hours: 0.24
 ---
 
 # board flashes on repaint — wrap flushes in DEC 2026 synchronized output
@@ -51,6 +52,7 @@ One seam (flushLocked/close bracketing) + bracket-balance test + live pty check.
 ## Log
 
 ### 2026-07-16
+- 2026-07-16: closed — Pure presentation bugfix, no new architectural surface (BSU/ESU bracketing inside the existing flushLocked/close seams — the atlas compositor paragraph already describes flush semantics; bracketing is an implementation detail of atomic apply). TDD red-green (bracket balance + every-erase-bracketed); live pty: BSU=23/ESU=23 balanced; full suite green + race-clean (steppingClock test-helper race found and fixed — 169s pathological run now 2.6s).; review verdict: SHIP
 - Filed from the operator's UX pass (issue 1 of 3: flashes / startup delay / 3h ETA). BSU/ESU
   is the standard flicker cure for erase+redraw compositors; private-mode no-op elsewhere.
 - Implemented TDD (bracket-balance + every-erase-inside-bracket assertions red→green); flushLocked
