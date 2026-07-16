@@ -89,6 +89,9 @@ type runOpts struct {
 	//          (a plain experiment ignores it; non-TTY/piped runs stay on the #30 plain lines)
 	board     *boardWriter      // metis#38: the pin-bottom compositor (set by runExperiment in board mode)
 	leafGauge func() (int, int) // metis#38: (busy, capacity) over leafSem — the board's leaves line
+	leafPins  []string          // metis#48: default leaf BLAS pins, computed ONCE per top-level run in
+	//                             runExperiment (nil = not yet computed; non-nil rides nested runOpts
+	//                             copies like forkPool — an all-suppressed result is empty, not nil)
 }
 
 // runExperiment reads the experiment at o.expPath and dispatches: a `type:
@@ -149,7 +152,7 @@ func runExperiment(o runOpts) (experiment.Run, error) {
 	// run ends. Only the production executor uses it (an injected test exec bypasses execStep).
 	// Constructed AFTER the writer wrap — its fallback notices must route through the board.
 	if o.forkserver && o.exec == nil && o.forkPool == nil {
-		o.forkPool = newServerPool(out)
+		o.forkPool = newServerPool(out, o.leafPins)
 		defer o.forkPool.shutdown()
 	}
 	if exp.Type == "experiment-shape" {

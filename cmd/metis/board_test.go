@@ -304,7 +304,7 @@ func TestServerPool_NoticeRoutesThroughBoard(t *testing.T) {
 	var term strings.Builder
 	bw := newBoardWriter(&term, steppingClock(300*time.Millisecond))
 	bw.paint([]string{"BOARD"})
-	pool := newServerPool(bw) // what runExperiment does post-reorder: pool captures the compositor
+	pool := newServerPool(bw, nil) // what runExperiment does post-reorder: pool captures the compositor
 	pool.noticeOnce("k", "server died; falling back to legacy exec")
 	s := term.String()
 	notice := strings.Index(s, "metis: forkserver: server died")

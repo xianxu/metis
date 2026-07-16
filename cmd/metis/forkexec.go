@@ -108,11 +108,14 @@ type forkReq struct {
 }
 
 // startForkServer launches `uv run --project <root> python -m metis.forkserver` and wires
-// the reader goroutines. The server inherits the ambient env (the operator's BLAS pins
-// apply to every child); per-step METIS_* vars travel in requests, never here.
-func startForkServer(root string) (*forkServer, error) {
+// the reader goroutines. The server env = ambient + the default single-thread BLAS pins
+// (metis#48; names the operator exported are already excluded by blasPins — an explicit
+// choice wins). Forked step children inherit this env; per-step METIS_* vars travel in
+// requests, never here.
+func startForkServer(root string, pins []string) (*forkServer, error) {
 	cmd := exec.Command("uv", "run", "--project", root, "python", "-m", "metis.forkserver")
 	cmd.Dir = root
+	cmd.Env = append(os.Environ(), pins...)
 	// Own process GROUP: `uv run` spawns python as a child (no exec), and the server forks
 	// step children — group-kill is the only way to reap the whole tree on a hung shutdown
 	// (and a test's mid-flight kill). Normal shutdown stays graceful (stdin EOF → drain);
@@ -273,14 +276,16 @@ type serverPool struct {
 	warned  map[string]bool
 	out     io.Writer
 	outMu   sync.Mutex
+	pins    []string // metis#48: default leaf BLAS pins, applied to every server's spawn env
 }
 
-func newServerPool(out io.Writer) *serverPool {
+func newServerPool(out io.Writer, pins []string) *serverPool {
 	return &serverPool{
 		servers: map[string]*forkServer{},
 		broken:  map[string]bool{},
 		warned:  map[string]bool{},
 		out:     out,
+		pins:    pins,
 	}
 }
 
@@ -310,7 +315,7 @@ func (p *serverPool) execute(spec wrapperSpec, cwd string, env map[string]string
 	s := p.servers[spec.root]
 	if s == nil {
 		var err error
-		s, err = startForkServer(spec.root)
+		s, err = startForkServer(spec.root, p.pins)
 		if err != nil {
 			p.broken[spec.root] = true
 			p.mu.Unlock()
