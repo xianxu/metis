@@ -1,11 +1,12 @@
 ---
 id: 000052
-status: open
+status: working
 deps: []
 github_issue:
 created: 2026-07-16
 updated: 2026-07-16
 estimate_hours: 0.50
+started: 2026-07-16T08:32:33-07:00
 ---
 
 # select surface ergonomics — --cohort listing + point handles on every concrete config line
