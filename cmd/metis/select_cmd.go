@@ -32,12 +32,18 @@ func cmdSelect(args []string) error {
 	promote := fs.Bool("promote", false, "materialize the selected config(s): reconstruct from the ledger + run on ALL data → runs/best-{family}-{hash}/submission.csv; prints the run id(s)")
 	fingerprint := fs.String("fingerprint", "", "restrict to one code-fingerprint (metis#27)")
 	point := fs.String("point", "", "metis#41: publish an OPERATOR-CHOSEN config by ledger row — a point_addr (git-style prefix ok); ships as point-{family}-{hash}. Mutually exclusive with --best/--best-per-model-class")
+	cohort := fs.Bool("cohort", false, "metis#52: list the ledger's code-fingerprint cohorts and exit (the `metis ledger fingerprints` table, on select's surface)")
 	shapePath, flags, err := hoistShapePath(args)
 	if err != nil {
 		return fmt.Errorf("select: %w (usage: metis select <shape.md> [--best | --best-per-model-class | --point ADDR] [--promote] [--fingerprint HASH])", err)
 	}
 	if err := fs.Parse(flags); err != nil {
 		return err
+	}
+	if *cohort {
+		// metis#52: a listing door where the operator's hands already are — pure
+		// delegation to the #39 core (one implementation, two CLI surfaces).
+		return showFingerprints(shapePath, os.Stdout)
 	}
 	if *point == "" && !*best && !*perClass {
 		*best = true // default view = the single ship recommendation
@@ -146,6 +152,12 @@ func runSelect(o selectOpts) error {
 	}
 
 	sort.Slice(picks, func(i, j int) bool { return picks[i].family < picks[j].family })
+	// metis#52: attach each pick's --point handle (the first cohort-filtered ledger row of
+	// that config — any fold row is a valid handle by #41's resolver). Good practice made
+	// mechanical: a concrete "best" config is always shown WITH its override handle.
+	for i := range picks {
+		picks[i].handle = pointHandleFor(led, picks[i].winner.Point)
+	}
 	printSelect(o.out, sh, est, picks, o.perClass)
 
 	if o.promote {
@@ -161,6 +173,7 @@ type familyPick struct {
 	est    sampler.MeanSE
 	hasEst bool
 	caveat string
+	handle string // metis#52: a representative ledger-row point_addr — the --point override handle
 }
 
 // perFamilyConfigWinners runs the shape's metis#19 select rule over the INNER rows (Level != "outer":
@@ -233,11 +246,26 @@ func printSelect(out io.Writer, sh experiment.Shape, est map[string]sampler.Mean
 	}
 	fmt.Fprintf(out, "  %s:\n", head)
 	for _, p := range picks {
-		fmt.Fprintf(out, "    %-24s %s\n", famLabel(p.family), freeParamStrFromParams(p.winner.Point.FreeParams))
+		h := ""
+		if p.handle != "" {
+			h = " · point " + short(p.handle) // metis#52: the --point override handle
+		}
+		fmt.Fprintf(out, "    %-24s %s%s\n", famLabel(p.family), freeParamStrFromParams(p.winner.Point.FreeParams), h)
 		if p.caveat != "" {
 			fmt.Fprintf(out, "      caveat: %s\n", p.caveat)
 		}
 	}
+}
+
+// pointHandleFor finds a representative ledger-row point_addr for a config (first match
+// in append order) — "" when the config has no rows (then no handle is shown; never lie).
+func pointHandleFor(led ledger.Ledger, p shape.Point) string {
+	for _, r := range led.Rows {
+		if freeParamsEqual(p, r.FreeParams) {
+			return r.PointAddr
+		}
+	}
+	return ""
 }
 
 func famLabel(f string) string {

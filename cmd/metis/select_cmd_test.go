@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -526,5 +528,60 @@ func TestSelect_CohortGuardNamesInspectCommand(t *testing.T) {
 	// The inline summary: one line per cohort with its row count (renderCohorts shape).
 	if !strings.Contains(err.Error(), "cf1aaaaa") || !strings.Contains(err.Error(), "rows") {
 		t.Errorf("guard must inline the per-cohort summary, got: %v", err)
+	}
+}
+
+// metis#52: `metis select <shape> --cohort` lists the fingerprint cohorts — the same
+// table as `metis ledger fingerprints` (one core, a second door on select's surface).
+func TestSelect_CohortFlag(t *testing.T) {
+	shapePath := writeFingerprintFixture(t, t.TempDir())
+	r, w, _ := os.Pipe()
+	orig := os.Stdout
+	os.Stdout = w
+	err := run([]string{"select", shapePath, "--cohort"})
+	_ = w.Close()
+	os.Stdout = orig
+	var buf bytes.Buffer
+	_, _ = io.Copy(&buf, r)
+	if err != nil {
+		t.Fatalf("select --cohort: %v", err)
+	}
+	out := buf.String()
+	for _, want := range []string{"code-fingerprint cohort(s)", "aaaa1111", "bbbb2222", "(legacy)"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("--cohort output missing %q:\n%s", want, out)
+		}
+	}
+}
+
+// metis#52: every concrete config shown as best carries its point handle — and the
+// printed handle round-trips through `select --point`.
+func TestSelect_PickCarriesPointHandle(t *testing.T) {
+	dir := t.TempDir()
+	shapePath := writeSelectLedger(t, dir, taggedShapeForSelect, true)
+	var out strings.Builder
+	if err := runSelect(selectOpts{shapePath: shapePath, best: true, out: &out}); err != nil {
+		t.Fatalf("select: %v", err)
+	}
+	s := out.String()
+	// The logreg winner's handle = the first ledger row of that config (i-lr1-0).
+	if !strings.Contains(s, "point i-lr1-0") {
+		t.Errorf("the ship recommendation must carry its --point handle; got:\n%s", s)
+	}
+	// Round-trip: the printed handle IS a valid --point selector on the same ledger.
+	var out2 strings.Builder
+	if err := runSelect(selectOpts{shapePath: shapePath, point: "i-lr1-0", out: &out2}); err != nil {
+		t.Fatalf("printed handle must round-trip through --point: %v", err)
+	}
+	if !strings.Contains(out2.String(), "train.model=logreg") {
+		t.Errorf("--point round-trip should land on the same config:\n%s", out2.String())
+	}
+	// --best-per-model-class carries handles too.
+	var out3 strings.Builder
+	if err := runSelect(selectOpts{shapePath: shapePath, perClass: true, out: &out3}); err != nil {
+		t.Fatalf("per-class: %v", err)
+	}
+	if got := strings.Count(out3.String(), "point i-"); got < 2 {
+		t.Errorf("per-class winners must each carry a handle, got %d:\n%s", got, out3.String())
 	}
 }
