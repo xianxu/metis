@@ -163,11 +163,11 @@ func (ss *shapeSweep) runSweeper(ctx sampler.Ctx, configPts []shape.Point, pass 
 		func(c shape.Point) sampler.MeanSE {
 			ms := sampler.Run(ctx, sampler.FixedKFolds{K: pass.splitK},
 				func(f sampler.FoldPoint) sampler.FoldOutcome { return pass.runPipelineFold(c, f) },
-				sampler.ExecFor[sampler.FoldPoint, sampler.FoldOutcome](ss.parallel))
+				sampler.ExecFor[sampler.FoldPoint, sampler.FoldOutcome](ss.parallel), nil)
 			pass.addConfigScore(configScore{point: c, meanSE: ms})
 			return ms
 		},
-		sampler.ExecFor[shape.Point, sampler.MeanSE](ss.parallel))
+		sampler.ExecFor[shape.Point, sampler.MeanSE](ss.parallel), nil)
 }
 
 // runShapeSweep drives the metis#18 nested Sampler loop: the sweeper (GridConfigs over the
@@ -262,7 +262,7 @@ func runShapeSweep(o runOpts, sh experiment.Shape, now func() time.Time, out io.
 	pass := &sweepPass{ss: ss, splitK: k, stratify: stratify, partRef: ss.partRef}
 	res := sampler.Run(ctx, sampler.SingleDriver{}, func(sampler.SinglePoint) sampler.SweepResult {
 		return ss.runSweeper(ctx, configPts, pass)
-	}, sampler.ExecFor[sampler.SinglePoint, sampler.SweepResult](ss.parallel))
+	}, sampler.ExecFor[sampler.SinglePoint, sampler.SweepResult](ss.parallel), nil)
 	// metis#31: sort the fan-out's completion-order bookkeeping to a stable content key
 	// BEFORE persisting, so manifest.json + the ledger are byte-deterministic across
 	// serial/parallel runs (the winner/estimate are already deterministic; this makes
@@ -374,7 +374,7 @@ func (ss *shapeSweep) runNestedCV(ctx sampler.Ctx, configPts []shape.Point, k, r
 			}
 			return score
 		},
-		sampler.ExecFor[sampler.OuterFoldPoint, float64](ss.parallel))
+		sampler.ExecFor[sampler.OuterFoldPoint, float64](ss.parallel), nil)
 	if err := getFirst(); err != nil {
 		return err
 	}
