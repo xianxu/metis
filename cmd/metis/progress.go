@@ -135,6 +135,67 @@ func seededTotals(ctx sampler.Ctx, nested bool, runFolds int, configPts []shape.
 	}
 }
 
+// movingRate is metis#38's throughput window: a ring of the last 64 fold-completion
+// instants. rate(now) = n / (now − oldest) — `now` in the denominator means a STALL
+// decays the rate live (the k10-probe BLAS-thrash signature: throughput → 0 while the
+// process looks alive). Moving-average by construction (the operator's requirement:
+// per-leaf times vary by config, rf500 ≫ logreg). Pure over passed-in instants.
+type movingRate struct {
+	times [64]time.Time
+	n     int // total adds (ring index = n % len)
+}
+
+func (m *movingRate) add(t time.Time) {
+	m.times[m.n%len(m.times)] = t
+	m.n++
+}
+
+// rate returns completions/minute over the kept window; ok=false until 2 completions.
+func (m *movingRate) rate(now time.Time) (perMin float64, ok bool) {
+	if m.n < 2 {
+		return 0, false
+	}
+	kept := m.n
+	if kept > len(m.times) {
+		kept = len(m.times)
+	}
+	oldest := m.times[(m.n-kept)%len(m.times)]
+	mins := now.Sub(oldest).Minutes()
+	if mins <= 0 {
+		return 0, false
+	}
+	return float64(kept) / mins, true
+}
+
+// eta = remaining / rate; ok=false when the rate is unavailable or zero.
+func (m *movingRate) eta(now time.Time, remaining int) (time.Duration, bool) {
+	r, ok := m.rate(now)
+	if !ok || r <= 0 || remaining <= 0 {
+		return 0, false
+	}
+	return time.Duration(float64(remaining) / r * float64(time.Minute)), true
+}
+
+// passRow is one outer fold's live board row (metis#38): in-flight counters + the
+// pass's incumbent best (display-only — NOT the 1-SE select rule), collapsing to its
+// held-out score when the driver reports the fold done.
+type passRow struct {
+	configK, foldK int
+	best           float64
+	hasBest        bool
+	done           bool
+	heldOut        float64
+}
+
+// boardState is the pure render input for metis#38's board: the #30 aggregate state
+// plus the per-pass rows and the throughput ring (a mutex'd snapshot — renderers never
+// touch the live sink).
+type boardState struct {
+	st   progressState
+	rows []passRow
+	rate movingRate
+}
+
 // sweepProgress is the mutex'd sink shared by every pass of one shape-run. Events
 // arrive concurrently (ParExec goroutines across sibling outer folds, each holding
 // its own Run's event mutex); lock order is strictly Run-mu → sink-mu → the
@@ -143,19 +204,24 @@ func seededTotals(ctx sampler.Ctx, nested bool, runFolds int, configPts []shape.
 // driver-level (outer fold) completion ALWAYS emits; finish() emits the terminal
 // line. A nil *sweepProgress is a no-op everywhere (the non-sweep path is silent).
 type sweepProgress struct {
-	mu       sync.Mutex
-	out      io.Writer
-	now      func() time.Time
-	st       progressState
-	lastEmit time.Time
-	started  bool
+	mu        sync.Mutex
+	out       io.Writer
+	now       func() time.Time
+	direction string // the objective direction — orients each pass's display-best (#38)
+	st        progressState
+	rows      []passRow  // metis#38: one row per outer fold (nil on the flat path)
+	rate      movingRate // metis#38: fold-completion throughput window
+	lastEmit  time.Time
+	started   bool
 }
 
-// (No objective-direction param: #30's line shows running means, which need no
-// direction; #38 reintroduces it when the board renders per-fold incumbents.)
-func newSweepProgress(out io.Writer, now func() time.Time, totals progressTotals) *sweepProgress {
+func newSweepProgress(out io.Writer, now func() time.Time, direction string, totals progressTotals) *sweepProgress {
+	var rows []passRow
+	if totals.nested && totals.outer > 0 {
+		rows = make([]passRow, totals.outer)
+	}
 	return &sweepProgress{
-		out: out, now: now,
+		out: out, now: now, direction: direction, rows: rows,
 		st: progressState{
 			nested:     totals.nested,
 			outerTotal: totals.outer, outerKind: totals.outerKind,
@@ -163,6 +229,16 @@ func newSweepProgress(out io.Writer, now func() time.Time, totals progressTotals
 			foldTotal: totals.folds, foldKind: totals.foldKind,
 		},
 	}
+}
+
+// boardState snapshots the sink for a renderer (rows copied — the caller may hold
+// the snapshot without racing the live fold-in).
+func (sp *sweepProgress) boardState() boardState {
+	sp.mu.Lock()
+	defer sp.mu.Unlock()
+	rows := make([]passRow, len(sp.rows))
+	copy(rows, sp.rows)
+	return boardState{st: sp.st, rows: rows, rate: sp.rate}
 }
 
 // passHooks are one pass's typed event targets, closure-bound to its outer-fold
@@ -182,24 +258,42 @@ func (sp *sweepProgress) forPass(outer int) passHooks {
 			fold:   func(sampler.ProgressEvent[sampler.FoldPoint, sampler.FoldOutcome]) {},
 		}
 	}
-	_ = outer // #30 aggregates; #38 keys per-fold rows off this binding
 	return passHooks{
 		config: func(ev sampler.ProgressEvent[shape.Point, sampler.MeanSE]) {
 			sp.mu.Lock()
 			defer sp.mu.Unlock()
 			sp.st.configK++
+			if outer >= 0 && outer < len(sp.rows) { // #38: this pass's row
+				r := &sp.rows[outer]
+				r.configK++
+				if !r.hasBest || better(sp.direction, ev.Out.Mean, r.best) {
+					r.best, r.hasBest = ev.Out.Mean, true
+				}
+			}
 			sp.maybeEmit(false)
 		},
 		fold: func(ev sampler.ProgressEvent[sampler.FoldPoint, sampler.FoldOutcome]) {
 			sp.mu.Lock()
 			defer sp.mu.Unlock()
 			sp.st.foldK++
+			sp.rate.add(sp.now()) // #38: throughput window feeds off every leaf completion
 			if !sp.st.nested {
 				sp.st.flatScores = append(sp.st.flatScores, ev.Out.Score)
+			}
+			if outer >= 0 && outer < len(sp.rows) {
+				sp.rows[outer].foldK++
 			}
 			sp.maybeEmit(false)
 		},
 	}
+}
+
+// better orients a display-best comparison by the objective direction.
+func better(direction string, candidate, incumbent float64) bool {
+	if direction == "minimize" {
+		return candidate < incumbent
+	}
+	return candidate > incumbent
 }
 
 // driverEvent folds a completed OUTER fold in — always emits (the coarse level is
@@ -212,6 +306,10 @@ func (sp *sweepProgress) driverEvent(ev sampler.ProgressEvent[sampler.OuterFoldP
 	defer sp.mu.Unlock()
 	sp.st.outerK++
 	sp.st.outerScores = append(sp.st.outerScores, ev.Out)
+	if i := ev.Point.Idx; i >= 0 && i < len(sp.rows) { // #38: collapse this fold's row
+		sp.rows[i].done = true
+		sp.rows[i].heldOut = ev.Out
+	}
 	sp.maybeEmit(true)
 }
 

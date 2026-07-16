@@ -88,7 +88,7 @@ func TestSweepProgress_ThrottleAndAlwaysEmit(t *testing.T) {
 		times = append(times, at(i*200))
 	}
 	times = append(times, at(2100), at(2200)) // driver event, finish
-	prog := newSweepProgress(&out, scriptedClock(times...),
+	prog := newSweepProgress(&out, scriptedClock(times...), "maximize",
 		progressTotals{nested: true, outer: 2, outerKind: sampler.SizeExact,
 			configs: 4, configKind: sampler.SizeExact, folds: 20, foldKind: sampler.SizeExact})
 	hooks := prog.forPass(0)
@@ -135,7 +135,7 @@ func TestSweepProgress_ConcurrentCounts(t *testing.T) {
 	var out strings.Builder
 	var mu sync.Mutex
 	safeOut := writerFunc(func(p []byte) (int, error) { mu.Lock(); defer mu.Unlock(); return out.Write(p) })
-	prog := newSweepProgress(safeOut, func() time.Time { return at(0) },
+	prog := newSweepProgress(safeOut, func() time.Time { return at(0) }, "maximize",
 		progressTotals{nested: true, folds: 64, foldKind: sampler.SizeExact})
 	var wg sync.WaitGroup
 	for g := 0; g < 8; g++ {
@@ -159,3 +159,96 @@ func TestSweepProgress_ConcurrentCounts(t *testing.T) {
 type writerFunc func([]byte) (int, error)
 
 func (f writerFunc) Write(p []byte) (int, error) { return f(p) }
+
+// movingRate: rate = n/(now-oldest) over a ring of the last 64 completions — `now` in
+// the denominator makes a stall DECAY the rate live (the BLAS-thrash signature).
+func TestMovingRate(t *testing.T) {
+	var r movingRate
+	if _, ok := r.rate(at(0)); ok {
+		t.Error("n=0 must be not-ok")
+	}
+	r.add(at(0))
+	if _, ok := r.rate(at(1000)); ok {
+		t.Error("n=1 must be not-ok (no interval yet)")
+	}
+	for i := 1; i <= 4; i++ {
+		r.add(at(i * 1000)) // 5 completions total, 1s apart (t=0..4s)
+	}
+	if got, ok := r.rate(at(4000)); !ok || got < 74.9 || got > 75.1 {
+		t.Errorf("5 in 4s at now=4s → 75/min, got %v ok=%v", got, ok)
+	}
+	// A 60s stall decays the same 5 completions: 5/64s ≈ 4.7/min.
+	if got, ok := r.rate(at(64000)); !ok || got > 5 {
+		t.Errorf("stall must decay the rate (now in denominator), got %v ok=%v", got, ok)
+	}
+	// Ring wraps at 64: 65 completions 1s apart keeps the newest 64.
+	var r2 movingRate
+	for i := 0; i < 65; i++ {
+		r2.add(at(i * 1000))
+	}
+	// oldest kept = t=1s; at now=64s: 64/(63s) ≈ 60.95/min (not 65/64s ≈ 60.9... distinguish by n)
+	if got, _ := r2.rate(at(64000)); got < 60.5 || got > 61.5 {
+		t.Errorf("ring wrap: want ~60.95/min over the kept 64, got %v", got)
+	}
+	// ETA: remaining/rate.
+	if eta, ok := r.eta(at(4000), 75); !ok || eta != time.Minute {
+		t.Errorf("eta 75 remaining at 75/min → 1m, got %v ok=%v", eta, ok)
+	}
+}
+
+// Per-pass rows: each forPass(i) hook folds into ITS row (closure-bound identity);
+// driverEvent's Point.Idx collapses the right row to its held-out score.
+func TestSweepProgress_PerPassRows(t *testing.T) {
+	var out strings.Builder
+	prog := newSweepProgress(&out, func() time.Time { return at(0) }, "maximize",
+		progressTotals{nested: true, outer: 2, outerKind: sampler.SizeExact,
+			configs: 4, configKind: sampler.SizeExact, folds: 12, foldKind: sampler.SizeExact})
+	h0, h1 := prog.forPass(0), prog.forPass(1)
+	fev := func(score float64) sampler.ProgressEvent[sampler.FoldPoint, sampler.FoldOutcome] {
+		return sampler.ProgressEvent[sampler.FoldPoint, sampler.FoldOutcome]{Out: sampler.FoldOutcome{Score: score}}
+	}
+	cev := func(mean float64) sampler.ProgressEvent[shape.Point, sampler.MeanSE] {
+		return sampler.ProgressEvent[shape.Point, sampler.MeanSE]{Out: sampler.MeanSE{Mean: mean}}
+	}
+	h0.fold(fev(0.7))
+	h0.fold(fev(0.7))
+	h1.fold(fev(0.8))
+	h0.config(cev(0.70))
+	h0.config(cev(0.75)) // pass 0's best (maximize)
+	h1.config(cev(0.85))
+	h1.config(cev(0.80))
+	st := prog.boardState()
+	if len(st.rows) != 2 {
+		t.Fatalf("want 2 pass rows, got %+v", st.rows)
+	}
+	if r := st.rows[0]; r.foldK != 2 || r.configK != 2 || !r.hasBest || r.best != 0.75 || r.done {
+		t.Errorf("row 0: %+v", r)
+	}
+	if r := st.rows[1]; r.foldK != 1 || r.configK != 2 || r.best != 0.85 || r.done {
+		t.Errorf("row 1 (maximize keeps 0.85): %+v", r)
+	}
+	// Minimize direction flips the incumbent.
+	prog2 := newSweepProgress(&out, func() time.Time { return at(0) }, "minimize",
+		progressTotals{nested: true, outer: 1})
+	h := prog2.forPass(0)
+	h.config(cev(0.5))
+	h.config(cev(0.3))
+	h.config(cev(0.4))
+	if r := prog2.boardState().rows[0]; r.best != 0.3 {
+		t.Errorf("minimize keeps 0.3: %+v", r)
+	}
+	// driverEvent collapses row 1 by its Point.Idx; row 0 stays in-flight.
+	prog.driverEvent(sampler.ProgressEvent[sampler.OuterFoldPoint, float64]{
+		K: 1, Total: 2, Kind: sampler.SizeExact, Point: sampler.OuterFoldPoint{Idx: 1}, Out: 0.83})
+	st = prog.boardState()
+	if r := st.rows[1]; !r.done || r.heldOut != 0.83 {
+		t.Errorf("row 1 must collapse to held-out 0.83: %+v", r)
+	}
+	if st.rows[0].done {
+		t.Errorf("row 0 must stay in-flight: %+v", st.rows[0])
+	}
+	// The fold events fed the rate ring (3 adds at the frozen clock — n≥2 → ok).
+	if _, ok := st.rate.rate(at(1000)); !ok {
+		t.Error("fold completions must feed the rate ring")
+	}
+}
