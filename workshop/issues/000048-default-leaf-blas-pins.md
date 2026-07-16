@@ -74,12 +74,12 @@ git state — env is in none of them, so injection perturbs nothing (documented 
 Durable plan: `workshop/plans/000048-default-leaf-blas-pins-plan.md` (single pass, no Mx —
 one close boundary).
 
-- [ ] blasPins pure core (ambient-wins rule) + unit tests
-- [ ] legacy execStep seam: pins field → child env, env-dump seam test
-- [ ] fork-server seam: pins on server env at spawn (children inherit), real-uv test
-- [ ] runExperiment once-per-run wiring + loud note + full-chain e2e (note + passthrough)
-- [ ] docs: RUNBOOK §1 simplification (kbench), atlas, stale-pin grep-sweep
-- [ ] bare real-sweep smoke — rate-line evidence in the close
+- [x] blasPins pure core (ambient-wins rule) + unit tests
+- [x] legacy execStep seam: pins field → child env, env-dump seam test
+- [x] fork-server seam: pins on server env at spawn (children inherit), real-uv test
+- [x] runExperiment once-per-run wiring + loud note + full-chain e2e (note + passthrough)
+- [x] docs: RUNBOOK §1 simplification (kbench), atlas + main.go --parallel help + lessons rule, stale-pin grep-sweep (Go+md+py)
+- [x] bare real-sweep smoke — rate-line evidence in the Log below
 
 ## Log
 
@@ -88,3 +88,30 @@ one close boundary).
   ETA ~3h = the #42 thrash signature at default NumCPU without pins. Workaround today:
   the RUNBOOK §1 pinned invocation (`--sample 3 --parallel 8` + env pins) — the full 7,200-fold
   grid bare is the worst case. This issue makes the safe thing the default thing.
+
+### 2026-07-16 (built + smoke)
+- Full SDLC single pass: plan fresh-eyes-reviewed (3 Important + hidden-trap sweep — the
+  select-path bypass made an explicit decision, env-dump fixture gap promoted to a step, fixture
+  syntax corrected against the real frontmatter convention; all folded), change-code judges
+  plan-quality CLEAN / estimate-quality INFO. TDD red-green per task; full `go test ./... -race`
+  green.
+- **Cache-identity confirmed in code** (not just reasoned): `Kpre` = {step_id, uses, with, seed,
+  upstream}; validation re-hashes read-set D; fingerprint is git state — env in none of them.
+  Documented in blaspins.go.
+- **`select --promote` deliberately unpinned** (serial single all-data fit — multi-threaded BLAS
+  wanted; one leaf can't oversubscribe): decision comments at both select_cmd.go sites (plan
+  review finding).
+- **Bare real-sweep smoke (Done-when evidence):** disposable kbench workspace copy (kbench#10
+  pattern: rsync minus .metis-cache/runs/.git, .venv symlink + UV_NO_SYNC=1, sibling symlinks for
+  the metis#16 deps walk), COLD cache, real 891-row data, `metis run --fast titanic-sweep.md`
+  BARE (no env pins, default --parallel, fork-server on) — the operator's exact footgun
+  invocation: **`done in 1m23s — 722 rows → ledger (cohort e901889f)`, 720/720 inner folds ≈
+  520 folds/min** (pinned reference ~107 trains/min; the pre-#48 bare run was a ~3h-ETA thrash
+  with throughput ≈ 0). Exactly ONE note line: `metis: leaf BLAS pinned single-thread
+  (MKL... OMP... OPENBLAS... VECLIB...) — the parallelism budget is --parallel; export a value
+  yourself to override`. Smoke scale per the estimate-judge advisory: `--fast` (1 outer fold),
+  not the full grid — sufficient to exercise both seams under real BLAS load.
+- Smoke setup dead ends worth keeping: the deps-chain walk needs the ../kaggle → ../metis
+  SIBLINGS present next to a workspace copy (symlinks suffice); a first attempt filtered the
+  run's output through `grep -E "...error..."` and swallowed the real failure line ("no
+  step-type executable") — capture full logs, filter at read time.
