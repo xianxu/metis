@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"reflect"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -133,6 +134,52 @@ func TestRunControlPublishesFailureBeforeAdmissionRelease(t *testing.T) {
 	}
 }
 
+func TestRunControlAcquiresAdmissionBeforeCheckingFailure(t *testing.T) {
+	control := &runControl{slots: make(chan struct{}, 1)}
+	control.slots <- struct{}{}
+	prior := errors.New("prior failure")
+	var callbackCalled atomic.Bool
+	result := make(chan runControlResult, 1)
+
+	control.mu.Lock()
+	go func() {
+		run, err := control.run("later", func() (experiment.Run, error) {
+			callbackCalled.Store(true)
+			return experiment.Run{ID: "must-not-run"}, nil
+		})
+		result <- runControlResult{run: run, err: err}
+	}()
+
+	// Make one admission slot available while firstError remains blocked on mu.
+	// A correctly ordered run refills the slot before attempting the error check.
+	<-control.slots
+	timer := time.NewTimer(runControlTestTimeout)
+	defer timer.Stop()
+	for len(control.slots) != 1 {
+		select {
+		case <-timer.C:
+			control.err = prior
+			control.mu.Unlock()
+			t.Fatal("run did not acquire admission before attempting the failure check")
+		default:
+			runtime.Gosched()
+		}
+	}
+	control.err = prior
+	control.mu.Unlock()
+
+	got := awaitRunControl(t, result, "admitted run to observe prior failure")
+	if !isZeroRun(got.run) || !errors.Is(got.err, errRunAborted) {
+		t.Fatalf("run result = (%+v, %v), want zero Run and errRunAborted", got.run, got.err)
+	}
+	if callbackCalled.Load() {
+		t.Fatal("callback executed despite failure installed before the post-admission check")
+	}
+	if got := len(control.slots); got != 0 {
+		t.Fatalf("slots after aborted run = %d, want released", got)
+	}
+}
+
 func TestRunControlSerialStillLatchesFailure(t *testing.T) {
 	control := newRunControl(1)
 	if control.slots != nil {
@@ -215,6 +262,85 @@ func TestRunControlConcurrentFailuresKeepOneContextualCause(t *testing.T) {
 	}
 	if got := control.firstError(); got == nil || got.Error() != first.err.Error() {
 		t.Fatalf("stored first error = %v, want %v", got, first.err)
+	}
+}
+
+func TestRunControlWinnerHookRunsOnceInsideFailureMutex(t *testing.T) {
+	control := newRunControl(2)
+	callbacksEntered := make(chan struct{}, 2)
+	releaseLeft := make(chan struct{})
+	releaseRight := make(chan struct{})
+	hookEntered := make(chan struct{}, 1)
+	releaseWinner := make(chan struct{})
+	results := make(chan runControlResult, 2)
+	var hookCalls atomic.Int32
+	control.beforeFailureUnlock = func() {
+		hookCalls.Add(1)
+		hookEntered <- struct{}{}
+		<-releaseWinner
+	}
+
+	for _, failure := range []struct {
+		label   string
+		release <-chan struct{}
+	}{{label: "left", release: releaseLeft}, {label: "right", release: releaseRight}} {
+		failure := failure
+		go func() {
+			run, err := control.run(failure.label, func() (experiment.Run, error) {
+				callbacksEntered <- struct{}{}
+				<-failure.release
+				return experiment.Run{}, errors.New("failed")
+			})
+			results <- runControlResult{run: run, err: err}
+		}()
+	}
+	awaitRunControl(t, callbacksEntered, "first failing callback")
+	awaitRunControl(t, callbacksEntered, "second failing callback")
+	close(releaseLeft)
+	awaitRunControl(t, hookEntered, "winner failure hook")
+
+	hookHeldMutex := !control.mu.TryLock()
+	if !hookHeldMutex {
+		control.mu.Unlock()
+	}
+	lookupStarted := make(chan struct{})
+	lookupResult := make(chan error, 1)
+	go func() {
+		close(lookupStarted)
+		lookupResult <- control.firstError()
+	}()
+	awaitRunControl(t, lookupStarted, "firstError lookup to start")
+	runtime.Gosched()
+	lookupReturnedEarly := false
+	var stored error
+	select {
+	case stored = <-lookupResult:
+		lookupReturnedEarly = true
+	default:
+	}
+
+	close(releaseRight)
+	close(releaseWinner)
+	first := awaitRunControl(t, results, "first concurrent failure result")
+	second := awaitRunControl(t, results, "second concurrent failure result")
+	if !lookupReturnedEarly {
+		stored = awaitRunControl(t, lookupResult, "blocked firstError lookup")
+	}
+
+	if !hookHeldMutex {
+		t.Fatal("winner hook ran outside the failure mutex")
+	}
+	if lookupReturnedEarly {
+		t.Fatal("firstError returned while winner hook was blocked")
+	}
+	if got := hookCalls.Load(); got != 1 {
+		t.Fatalf("winner hook calls = %d, want exactly 1", got)
+	}
+	if first.err == nil || second.err == nil || first.err.Error() != second.err.Error() {
+		t.Fatalf("concurrent failures = (%v, %v), want one authoritative error", first.err, second.err)
+	}
+	if stored == nil || stored.Error() != first.err.Error() {
+		t.Fatalf("stored first error = %v, want %v", stored, first.err)
 	}
 }
 
