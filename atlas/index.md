@@ -98,7 +98,13 @@ identical on a non-Kaggle platform?* — if yes, it lives here.
   `len/cap(leafSem)`; rate = a 64-completion ring with `now` in the denominator so a stall DECAYS it live
   — the BLAS-thrash signature). Hand-rolled ANSI pin-bottom, NO TUI lib (output-only board; 2-dep module).
   Split: `renderBoard` is pure (plain lines, zero ANSI) / `boardWriter` is the paint-only compositor
-  (erase-count bookkeeping; holds unterminated passthrough tails; idempotent deferred close). **Writer
+  (erase-count bookkeeping; holds unterminated passthrough tails; idempotent deferred close).
+  **metis#46: the compositor is DOUBLE-BUFFERED with a 250ms flush budget** — passthrough coalesces
+  into a pending buffer and the terminal sees one atomic erase→dump→repaint per budget window (~4Hz);
+  quiet writes flush inline (cold runs feel live); the 500ms tick force-flushes (re-pins after bursts,
+  keeps ETA/rate moving); a 64KB pending cap bounds frozen-budget floods. Rationale: per-write repaint
+  strobed at ~500Hz under warm-cache bursts and real terminals/mux layers (ghostty-in-cmux) tear
+  mid-sequence — the fix targets sequence VOLUME, not correctness. **Writer
   identity is temporal:** `runExperiment` parses FIRST, then wraps exactly one writer (boardWriter XOR
   syncWriter) before the fork-server pool or anything else captures `out` — all output routes through the
   compositor. Lock order everywhere: `sink.mu → bw.mu` (the 500ms ticker enters via the sink's `tick()`).
