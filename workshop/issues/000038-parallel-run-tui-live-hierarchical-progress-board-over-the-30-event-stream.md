@@ -1,11 +1,12 @@
 ---
 id: 000038
-status: open
+status: working
 deps: [metis#30]
 github_issue:
 created: 2026-07-14
-updated: 2026-07-14
+updated: 2026-07-15
 estimate_hours:
+started: 2026-07-15T17:24:43-07:00
 ---
 
 # parallel-run TUI — live hierarchical progress board over the #30 event stream
