@@ -278,3 +278,29 @@ func TestCmdRun_NoTUIFlagParses(t *testing.T) {
 		t.Fatalf("--no-tui must parse: %v", err)
 	}
 }
+
+// The fork-server pool's fallback notice is the OTHER construction-time-capture bypass
+// route the plan review named: after the runExperiment reorder the pool is built with
+// the compositor, so a mid-sweep noticeOnce must land ABOVE the board (close-review
+// Important — the route is guarded by construction order; this pins it directly).
+func TestServerPool_NoticeRoutesThroughBoard(t *testing.T) {
+	var term strings.Builder
+	bw := newBoardWriter(&term)
+	bw.paint([]string{"BOARD"})
+	pool := newServerPool(bw) // what runExperiment does post-reorder: pool captures the compositor
+	pool.noticeOnce("k", "server died; falling back to legacy exec")
+	s := term.String()
+	notice := strings.Index(s, "metis: forkserver: server died")
+	if notice < 0 {
+		t.Fatalf("notice missing: %q", s)
+	}
+	// The compositor's passthrough shape: an erase precedes the notice (the old board
+	// is cleared first) and the frame is repainted BELOW it — a bypassing write would
+	// instead land after the final frame with no repaint following.
+	if erase := strings.Index(s, "\x1b[J"); erase < 0 || erase > notice {
+		t.Errorf("the notice must be preceded by the board erase: %q", s)
+	}
+	if !strings.HasSuffix(s, "BOARD\n") {
+		t.Errorf("the board must be repainted below the notice: %q", s)
+	}
+}

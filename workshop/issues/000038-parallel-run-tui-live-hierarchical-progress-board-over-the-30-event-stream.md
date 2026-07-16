@@ -1,12 +1,13 @@
 ---
 id: 000038
-status: working
+status: codecomplete
 deps: [metis#30]
 github_issue:
 created: 2026-07-14
 updated: 2026-07-15
 estimate_hours: 2.19
 started: 2026-07-15T17:24:43-07:00
+actual_hours: 1.50
 ---
 
 # parallel-run TUI — live hierarchical progress board over the #30 event stream
@@ -101,6 +102,7 @@ ticker routed through the sink; $COLUMNS/80 width source named). Single-pass clo
   per-leaf times vary by config (rf500 ≫ logreg).
 
 ### 2026-07-15
+- 2026-07-15: closed — TDD per task; full module green, -race on touched pkgs, vet clean. Real pty evidence (script -q around a real COLD smoke sweep, comment-edit methodology, reverted): 246 repaints, cursor hide/restore exactly once, leaves gauge live 0/8-8/8, moving rate 664-1890 folds/min, in-flight rows with per-fold incumbents, final frame outer 3/3 + 3 held-out rows + est 0.8103±0.0062. Redirected contrast (same binary): 0 escape bytes, the 6 plain #30 lines. The plan-review Critical (writer-identity-is-temporal) fixed structurally (parse-first reorder) + the o.out bypass route pinned by test. pkg/sampler untouched (diff is cmd/metis only). (Re-run: first review died on an API stream idle timeout — sidecar held zero content.); review verdict: FIX-THEN-SHIP
 - Unblocked (metis#30 merged — PR #27 — with this issue's seam designed in: per-pass `forPass(i)`
   hooks carry outer-fold identity via closure binding; totals seeded; clock injected). Claimed +
   start-plan; durable plan authored + fresh-eyes reviewed (1 Critical + 2 Important, all folded —
@@ -144,3 +146,11 @@ ticker routed through the sink; $COLUMNS/80 width source named). Single-pass clo
   `outer 3/3 … est 0.8103 ± 0.0062` + 3 ✓ rows. Redirected contrast (same binary, no pty):
   0 escape bytes, the 6 plain #30 lines. leaves shows 0/8 on a warm-cache run (no leaf ever
   held) — expected, not a bug.
+- Close review (re-run after a transport-failed first attempt — the sidecar held only an API
+  stream-timeout, zero review content; announced loudly): **FIX-THEN-SHIP**, no Critical.
+  Fixed pre-commit: the fork-server-notice bypass route pinned directly
+  (TestServerPool_NoticeRoutesThroughBoard); progressCore extracted (no TrimPrefix coupling);
+  snapshotLocked dedupe; plan table corrected via ## Revisions; height-clamp limitation
+  documented beside the width note. Important #2 (kbench RUNBOOK unverifiable from this repo):
+  confirmed landed — kbench commit c7b2766. Reviewer's Bash was broken (static review); full
+  suite + -race re-run green here post-fixes.

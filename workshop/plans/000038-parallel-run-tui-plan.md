@@ -119,3 +119,15 @@ Single-pass close (one cohesive renderer feature; plain checkboxes, §3).
 | non-TTY/`--no-tui` = exactly #30's plain rendering, no escape codes | existing #30 pins + Task 4(a) + Task 5's redirected run |
 | no `pkg/sampler` API change beyond #30's | structural: the diff touches `cmd/metis` only (review-checkable); per-fold identity via `forPass` closure binding |
 | (Log) moving-average runs/sec + ETA vs computable total | Task 1 `movingRate` tests (incl. stall decay — the BLAS-thrash signature) + the board line in Task 2/5 |
+
+## Revisions
+
+*2026-07-15 — boundary review (metis#38 close, FIX-THEN-SHIP):* Core-concepts table correction:
+`boardState` landed in `cmd/metis/progress.go` (beside the sink state it snapshots), not
+`board.go` as the table said. Review fixes applied in-code before the close commit: (1) the
+fork-server-notice bypass route now has a direct test (`TestServerPool_NoticeRoutesThroughBoard` —
+pool built on the compositor, notice lands between erase and repaint); (2) `progressCore` extracted
+(the board's row 1 shared the plain line's core instead of TrimPrefix string-coupling); (3)
+`snapshotLocked` dedupes the two rows-copy sites. Deferred as noted (minor): overflow prefers
+low-indexed rows; short-terminal height clamp (comment added beside the width note); `$COLUMNS`
+usually unset → 80 (accepted trade).

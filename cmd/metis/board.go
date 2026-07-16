@@ -34,8 +34,9 @@ const maxFoldRows = 12
 // break the compositor's erase-count bookkeeping).
 func renderBoard(bs boardState, env boardEnv) []string {
 	var lines []string
-	// Row 1: the aggregate — progressLine's content without the "metis: progress " prefix.
-	lines = append(lines, strings.TrimPrefix(progressLine(bs.st), "metis: progress "))
+	// Row 1: the aggregate — the same core the plain line prints (one source, no
+	// prefix stripping).
+	lines = append(lines, progressCore(bs.st))
 
 	// Per-fold rows (nested only; flat runs have no rows).
 	shown := len(bs.rows)
@@ -102,6 +103,10 @@ func fmtETA(d time.Duration) string {
 	}
 	return fmt.Sprintf("%dh%dm", int(d.Hours()), int(d.Minutes())%60)
 }
+
+// (Height analog of the width limitation: a terminal SHORTER than the board clamps
+// cursor-up at the screen top and desyncs the erase count — the board caps at ~15
+// lines; terminals that small are out of scope, same accepted trade as resize.)
 
 // clampLine truncates to width runes with a trailing … (a wrapped physical line
 // would desync the compositor's cursor-up erase count — width is load-bearing).

@@ -56,6 +56,13 @@ type progressState struct {
 // config): `folds 3/5 · score 0.8400` (the running fold mean — nothing to be
 // "best" of). Kinds render k/n (exact), k/≤n (budget), k/? (unknown). Pure.
 func progressLine(st progressState) string {
+	return "metis: progress " + progressCore(st)
+}
+
+// progressCore is the un-prefixed aggregate segment — shared by the plain line and
+// the board's first row (extracted so the board never string-strips the prefix;
+// a TrimPrefix coupling would silently no-op if the prefix changed — close review).
+func progressCore(st progressState) string {
 	frac := func(k, total int, kind sampler.SizeKind) string {
 		switch kind {
 		case sampler.SizeExact:
@@ -86,7 +93,7 @@ func progressLine(st progressState) string {
 			parts = append(parts, fmt.Sprintf("score %.4f", mean))
 		}
 	}
-	return "metis: progress " + strings.Join(parts, " · ")
+	return strings.Join(parts, " · ")
 }
 
 // meanSE is the display-only mean ± standard-error reduce over completed scores.
@@ -242,6 +249,12 @@ func newSweepProgress(out io.Writer, now func() time.Time, direction string, tot
 func (sp *sweepProgress) boardState() boardState {
 	sp.mu.Lock()
 	defer sp.mu.Unlock()
+	return sp.snapshotLocked()
+}
+
+// snapshotLocked builds the render snapshot; caller holds sp.mu (shared by
+// boardState() and the board-mode emit — one copy site, close-review DRY note).
+func (sp *sweepProgress) snapshotLocked() boardState {
 	rows := make([]passRow, len(sp.rows))
 	copy(rows, sp.rows)
 	return boardState{st: sp.st, rows: rows, rate: sp.rate}
@@ -362,14 +375,11 @@ func (sp *sweepProgress) maybeEmit(force bool) {
 // plain mode prints the #30 aggregated line. Caller holds sp.mu.
 func (sp *sweepProgress) emit() {
 	if sp.bw != nil {
-		rows := make([]passRow, len(sp.rows))
-		copy(rows, sp.rows)
 		busy, capacity := 0, 0
 		if sp.gauge != nil {
 			busy, capacity = sp.gauge()
 		}
-		sp.bw.paint(renderBoard(
-			boardState{st: sp.st, rows: rows, rate: sp.rate},
+		sp.bw.paint(renderBoard(sp.snapshotLocked(),
 			boardEnv{width: sp.width, now: sp.now(), busy: busy, capacity: capacity}))
 		return
 	}
