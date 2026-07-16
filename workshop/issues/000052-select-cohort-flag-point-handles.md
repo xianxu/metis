@@ -57,7 +57,7 @@ Flag + delegation + handle lookup + two tests; docs row = RUNBOOK/atlas touch.
 
 ## Plan
 
-- [ ] TDD: --cohort CLI test + point-handle assertions (incl. round-trip) → implement.
+- [x] TDD: --cohort CLI test + point-handle assertions (incl. round-trip) → implement.
 
 ## Log
 
@@ -65,3 +65,9 @@ Flag + delegation + handle lookup + two tests; docs row = RUNBOOK/atlas touch.
 - Filed from operator requests verbatim. The --cohort door delegates to showFingerprints
   (single mechanism, two triggers — the feedback_minimum_mechanism posture); the handle is a
   ledger-row addr (NOT a fresh mint — #41's resolver accepts any row of the config).
+- Implemented TDD (both red→green): --cohort delegates to showFingerprints (CLI test through
+  the real entrypoint); every pick line carries `· point <short>` via pointHandleFor (first
+  cohort-filtered row of the config; "" → no handle, never lie), round-trip pinned
+  (printed handle → select --point → same config). Live smoke on the real ledger: --cohort
+  lists the 5 cohorts; the ee3d36bf ship rec now reads `… n_estimators=200 · point 0185a816`.
+  Full suite green + vet clean.
