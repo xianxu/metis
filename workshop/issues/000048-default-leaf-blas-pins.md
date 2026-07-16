@@ -1,12 +1,13 @@
 ---
 id: 000048
-status: working
+status: codecomplete
 deps: []
 github_issue:
 created: 2026-07-16
 updated: 2026-07-16
 estimate_hours: 0.96
 started: 2026-07-16T11:10:34-07:00
+actual_hours: 0.71
 ---
 
 # pin leaf BLAS threads by default — the parallelism budget belongs to the orchestrator
@@ -84,12 +85,19 @@ one close boundary).
 ## Log
 
 ### 2026-07-16
+- 2026-07-16: closed — go test ./... -race green; bare cold-cache real-data metis run --fast completed 720/720 folds in 1m23s with exactly one default-pin note, with operator override plus legacy and fork-server seams covered by tests; review verdict: FIX-THEN-SHIP
 - Filed from the operator's UX pass (issue 3 of 3): bare `metis run titanic-sweep.md` → board
   ETA ~3h = the #42 thrash signature at default NumCPU without pins. Workaround today:
   the RUNBOOK §1 pinned invocation (`--sample 3 --parallel 8` + env pins) — the full 7,200-fold
   grid bare is the worst case. This issue makes the safe thing the default thing.
 
 ### 2026-07-16 (built + smoke)
+- **Peer RUNBOOK migration verified after close review:** kbench commit
+  `bf57c5cd86f920ca9bf2827b2f1926a1e0ffee7d` changes
+  `competition/titanic/pipelines/RUNBOOK-sweep.md` from four hand-typed BLAS env prefixes to bare
+  `metis run`, documents all four metis#48 defaults + the operator override, and makes `--parallel`
+  the one operator-facing parallelism knob. This closes the review's sole Important traceability
+  finding; the peer diff is outside metis's review window by construction.
 - Full SDLC single pass: plan fresh-eyes-reviewed (3 Important + hidden-trap sweep — the
   select-path bypass made an explicit decision, env-dump fixture gap promoted to a step, fixture
   syntax corrected against the real frontmatter convention; all folded), change-code judges
