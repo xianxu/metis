@@ -1,11 +1,12 @@
 ---
 id: 000049
-status: open
+status: working
 deps: []
 github_issue:
 created: 2026-07-16
 updated: 2026-07-16
 estimate_hours:
+started: 2026-07-16T12:57:08-07:00
 ---
 
 # board readability — label semantics, cold-phase "no progress" confusion, jumpy leaves, wild early ETA
