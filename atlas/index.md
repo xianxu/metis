@@ -44,7 +44,7 @@ identical on a non-Kaggle platform?* — if yes, it lives here.
   command (record IO on inspect/error paths only); each `metis run` prints
   `recording under code_fingerprint <hash> (commit <sha>, clean|dirty)` at capture time.
   **metis#32 retired `metis ledger select` + `metis promote`** — selection
-  moved to **`metis select <shape> [--best | --best-per-model-class] [--promote]`** (see the run/select
+  moved to **`metis select <shape> [--best | --best-per-model-class | --point ADDR | --cohort] [--promote]`** (see the run/select
   command model below): it reads the nested-CV ledger, picks the FAMILY on the honest OUTER estimate + the
   CONFIG on the inner CV, and `--promote` reconstructs the winner (the pure `promotedExperiment` —
   re-expands the shape + matches by free-params, reusing `shapeConfigToExperiment`: `data ++

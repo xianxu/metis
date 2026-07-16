@@ -1,12 +1,13 @@
 ---
 id: 000052
-status: working
+status: codecomplete
 deps: []
 github_issue:
 created: 2026-07-16
 updated: 2026-07-16
 estimate_hours: 0.50
 started: 2026-07-16T08:32:33-07:00
+actual_hours: 0.3
 ---
 
 # select surface ergonomics — --cohort listing + point handles on every concrete config line
@@ -40,7 +41,7 @@ Two operator requests (2026-07-16, post-#50 live session):
   per-cohort table as `metis ledger fingerprints`.
 - `--best` and `--best-per-model-class` outputs carry `point <addr>` per pick; a fixture
   round-trips the printed handle through `select --point` successfully.
-- RUNBOOK §2 mentions both.
+- Docs: atlas select-surface enumerations updated (this repo); kbench RUNBOOK §2 mentions both (peer-repo commit — the RUNBOOK lives in kbench, corrected from the original wording).
 
 ## Estimate
 
@@ -62,6 +63,7 @@ Flag + delegation + handle lookup + two tests; docs row = RUNBOOK/atlas touch.
 ## Log
 
 ### 2026-07-16
+- 2026-07-16: closed — Presentation additions at existing select seams (delegation + handle lookup), no new architectural surface. TDD red-green incl. round-trip (printed handle -> --point -> same config); live smoke: --cohort lists 5 cohorts, ship rec carries point 0185a816. Full suite green, vet clean. Judgment actual 0.3h.; review verdict: FIX-THEN-SHIP
 - Filed from operator requests verbatim. The --cohort door delegates to showFingerprints
   (single mechanism, two triggers — the feedback_minimum_mechanism posture); the handle is a
   ledger-row addr (NOT a fresh mint — #41's resolver accepts any row of the config).
@@ -71,3 +73,6 @@ Flag + delegation + handle lookup + two tests; docs row = RUNBOOK/atlas touch.
   (printed handle → select --point → same config). Live smoke on the real ledger: --cohort
   lists the 5 cohorts; the ee3d36bf ship rec now reads `… n_estimators=200 · point 0185a816`.
   Full suite green + vet clean.
+- Close review FIX-THEN-SHIP (no Critical): atlas select enumerations updated (experiment.md
+  + index.md now carry --cohort + the point handle); Done-when corrected — the RUNBOOK is a
+  kbench artifact (peer commit, same as #39/#50 precedent). Minor deferred: none blocking.

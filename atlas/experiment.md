@@ -166,7 +166,10 @@ wrapped by **thin step-executables** honoring the contract above. Hermetic via *
   `Aggregate` → **mean±SE**, the honest procedure estimate (`reportEstimate`). **metis#32:** the run now
   **records** per-`(outer-fold, config)` inner rows + per-`(outer-fold, family)` outer rows to the ledger
   (`Level`-keyed) — the signal `metis select` reduces to pick the family. `metis run` **measures only,
-  never ships** (shipping moved to `metis select --promote`). **metis#50:** a sweep ends with the
+  never ships** (shipping moved to `metis select --promote`). **metis#52:** `select --cohort` lists the
+  fingerprint cohorts (delegates to the #39 core), and every pick line carries its
+  `· point <addr>` override handle (a representative ledger-row addr; round-trips through
+  `--point`). **metis#50:** a sweep ends with the
   run-end summary — elapsed wall-clock, rows→ledger, the cohort fingerprint, and the paste-ready
   `metis select … --fingerprint <fp>` follow-ups (completing #39's visibility loop: the operator
   never scrapes scrollback to assemble the next command; degraded capture degrades to `cohort ?`
