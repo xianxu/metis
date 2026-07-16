@@ -111,9 +111,9 @@ func TestRenderBoard(t *testing.T) {
 // fmtETA is compact and human: seconds under a minute, m+s under an hour.
 func TestFmtETA(t *testing.T) {
 	cases := map[time.Duration]string{
-		34 * time.Second:                 "34s",
-		190 * time.Second:                "3m10s",
-		2*time.Hour + 5*time.Minute:      "2h5m",
+		34 * time.Second:                            "34s",
+		190 * time.Second:                           "3m10s",
+		2*time.Hour + 5*time.Minute:                 "2h5m",
 		2*time.Hour + 5*time.Minute + 9*time.Second: "2h5m",
 	}
 	for d, want := range cases {
@@ -201,5 +201,80 @@ func TestBoardWriter_CloseFlushesPending(t *testing.T) {
 	bw.close()
 	if !strings.Contains(term.String(), "tail-no-newline\n") {
 		t.Errorf("held tail must flush at close: %q", term.String())
+	}
+}
+
+// Board mode end-to-end over the fixture sweep: frames paint (cursor hide, fold rows),
+// the #30 plain lines are REPLACED (not duplicated), the final frame carries the
+// completed counts, and a capture warning — the plan-review bypass route (o.out) —
+// lands ABOVE the board through the compositor, never after the last erase.
+func TestRunExperiment_BoardMode(t *testing.T) {
+	ws := t.TempDir()
+	expPath := writeShapeFile(t, ws, foldShapeCVMD("[a, b]"))
+	var term strings.Builder
+	_, err := runExperiment(runOpts{
+		expPath: expPath,
+		now:     fixedNow(),
+		git:     fakeGitProbe{name: "metis", sha: "sha", dirty: false},
+		exec:    foldFakeExec{},
+		tui:     true, // board mode: runExperiment wraps out in the compositor
+		out:     &term,
+	})
+	if err != nil {
+		t.Fatalf("board-mode nested run: %v", err)
+	}
+	s := term.String()
+	if !strings.Contains(s, "\x1b[?25l") || !strings.Contains(s, "\x1b[J") {
+		t.Errorf("board mode must paint (cursor hide + erase sequences):\n%q", s[:min(len(s), 400)])
+	}
+	if !strings.HasSuffix(s, "\x1b[?25h") {
+		t.Errorf("the deferred close must restore the cursor LAST: %q", s[len(s)-40:])
+	}
+	if strings.Contains(s, "metis: progress") {
+		t.Errorf("the board REPLACES the plain progress lines")
+	}
+	if !strings.Contains(s, "outer 2/2") || !strings.Contains(s, "fold 0 ✓") || !strings.Contains(s, "fold 1 ✓") {
+		t.Errorf("the final frame must show completed folds:\n%s", s)
+	}
+	// The bypass route: the fake-exec fixture has no traced closure → captureSweepCode
+	// notes "no first-party code closure" via o.out — which after the runExperiment
+	// reorder IS the compositor, so the text must appear before the final erase, never
+	// as a bare trailing write (the plan-review o.out bypass, pinned).
+	warnIdx := strings.Index(s, "no first-party code closure")
+	if warnIdx < 0 {
+		t.Fatalf("expected the uncaptured-code note in a fake-exec fixture:\n%s", s)
+	}
+	if lastErase := strings.LastIndex(s, "\x1b[J"); warnIdx > lastErase {
+		t.Errorf("the capture warning bypassed the compositor (after the last erase)")
+	}
+
+	// Contrast: tui=false on the same fixture — byte-clean plain lines, no board.
+	var plain strings.Builder
+	ws2 := t.TempDir()
+	if _, err := runExperiment(runOpts{
+		expPath: writeShapeFile(t, ws2, foldShapeCVMD("[a, b]")),
+		now:     fixedNow(), git: fakeGitProbe{name: "metis", sha: "sha"},
+		exec: foldFakeExec{}, out: &plain,
+	}); err != nil {
+		t.Fatalf("plain run: %v", err)
+	}
+	if strings.Contains(plain.String(), "\x1b") {
+		t.Error("tui=false must emit zero escape codes")
+	}
+	if !strings.Contains(plain.String(), "metis: progress") {
+		t.Error("tui=false keeps the #30 plain lines")
+	}
+}
+
+// --no-tui and non-TTY stdout both force tui=false through the real CLI parse; a
+// dry run never boards. (isCharDevice on a test's non-terminal stdout is false, so
+// the flag path is what we can pin here; the char-device branch is covered by the
+// close-evidence pty run.)
+func TestCmdRun_NoTUIFlagParses(t *testing.T) {
+	ws := t.TempDir()
+	expPath := writeShapeFile(t, ws, foldShapeCVMD("[a]"))
+	// The real entrypoint with the documented order; --dry-run avoids running steps.
+	if err := run([]string{"run", "--no-tui", "--dry-run", expPath}); err != nil {
+		t.Fatalf("--no-tui must parse: %v", err)
 	}
 }

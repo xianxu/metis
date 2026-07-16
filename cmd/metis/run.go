@@ -85,6 +85,10 @@ type runOpts struct {
 	//                           zero-value false keeps direct runOpts callers/tests on legacy exec)
 	forkPool *serverPool // metis#44: the per-root warm-server pool, created once per runExperiment
 	//                      when forkserver is set; threaded through nested runOpts copies.
+	tui bool // metis#38: stdout is a TTY and --no-tui wasn't passed — a SWEEP pins the live board
+	//          (a plain experiment ignores it; non-TTY/piped runs stay on the #30 plain lines)
+	board     *boardWriter      // metis#38: the pin-bottom compositor (set by runExperiment in board mode)
+	leafGauge func() (int, int) // metis#38: (busy, capacity) over leafSem — the board's leaves line
 }
 
 // runExperiment reads the experiment at o.expPath and dispatches: a `type:
@@ -103,24 +107,11 @@ func runExperiment(o runOpts) (experiment.Run, error) {
 	if out == nil {
 		out = io.Discard
 	}
-	// metis#31: establish the parallel invariant in ONE home — maxParallel>1 ⇒ a
-	// non-nil SHARED leaf semaphore AND a synchronized writer. Doing it here (not in
-	// cmdRun) means no direct-runOpts caller (the tests) can enable maxParallel>1 yet
-	// forget the sem or race the fan-out's progress writes on a bare buffer.
-	if o.maxParallel > 1 {
-		if o.leafSem == nil {
-			o.leafSem = make(chan struct{}, o.maxParallel)
-		}
-		out = &syncWriter{w: out}
-		o.out = out
-	}
-	// metis#44: one warm fork-server pool per top-level run, shut down (EOF-drain) when the
-	// run ends. Only the production executor uses it (an injected test exec bypasses execStep).
-	if o.forkserver && o.exec == nil && o.forkPool == nil {
-		o.forkPool = newServerPool(out)
-		defer o.forkPool.shutdown()
-	}
 
+	// metis#38: PARSE FIRST (parsing writes nothing) — the board decision needs the file
+	// type, and writer identity is TEMPORAL: everything constructed below (fork-server
+	// pool, execs, sink, capture warnings) captures whatever `out` is at ITS construction,
+	// so the one compositor must exist before any of them or its writes bypass the board.
 	raw, err := os.ReadFile(o.expPath)
 	if err != nil {
 		return experiment.Run{}, err
@@ -131,6 +122,35 @@ func runExperiment(o runOpts) (experiment.Run, error) {
 	exp, err := experiment.Parse(string(raw))
 	if err != nil {
 		return experiment.Run{}, fmt.Errorf("%s: %w", o.expPath, err)
+	}
+
+	// metis#31: establish the parallel invariant in ONE home — maxParallel>1 ⇒ a
+	// non-nil SHARED leaf semaphore AND a serialized writer. Doing it here (not in
+	// cmdRun) means no direct-runOpts caller (the tests) can enable maxParallel>1 yet
+	// forget the sem or race the fan-out's progress writes on a bare buffer.
+	if o.maxParallel > 1 && o.leafSem == nil {
+		o.leafSem = make(chan struct{}, o.maxParallel)
+	}
+	if sem := o.leafSem; sem != nil && o.leafGauge == nil {
+		o.leafGauge = func() (int, int) { return len(sem), cap(sem) } // metis#38: occupancy IS the semaphore
+	}
+	// Exactly ONE writer wrap (metis#38): board mode → the pin-bottom compositor (it
+	// serializes internally — no syncWriter stacking); else parallel → syncWriter.
+	if o.tui && exp.Type == "experiment-shape" && !o.dryRun {
+		o.board = newBoardWriter(out)
+		out = o.board
+		o.out = out
+		defer o.board.close() // idempotent — an error return must not leak a hidden cursor
+	} else if o.maxParallel > 1 {
+		out = &syncWriter{w: out}
+		o.out = out
+	}
+	// metis#44: one warm fork-server pool per top-level run, shut down (EOF-drain) when the
+	// run ends. Only the production executor uses it (an injected test exec bypasses execStep).
+	// Constructed AFTER the writer wrap — its fallback notices must route through the board.
+	if o.forkserver && o.exec == nil && o.forkPool == nil {
+		o.forkPool = newServerPool(out)
+		defer o.forkPool.shutdown()
 	}
 	if exp.Type == "experiment-shape" {
 		sh, err := experiment.ParseShape(string(raw))

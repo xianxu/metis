@@ -213,6 +213,12 @@ type sweepProgress struct {
 	rate      movingRate // metis#38: fold-completion throughput window
 	lastEmit  time.Time
 	started   bool
+	// metis#38 board mode (all nil/zero in plain mode): emits paint the rendered frame
+	// to bw instead of printing plain lines. Lock order: sink.mu → bw.mu, ALWAYS — the
+	// ticker enters via tick() (a sink method), never a boardWriter-first path.
+	bw    *boardWriter
+	width int               // terminal width ($COLUMNS | 80), read once at wiring
+	gauge func() (int, int) // (busy, capacity) leaf occupancy; nil = no leaves segment
 }
 
 func newSweepProgress(out io.Writer, now func() time.Time, direction string, totals progressTotals) *sweepProgress {
@@ -323,11 +329,27 @@ func (sp *sweepProgress) finish() {
 	sp.emit()
 }
 
-// maybeEmit writes the line if forced (driver/finish) or the 1s throttle elapsed.
-// Caller holds sp.mu.
+// tick is the board ticker's entry point (metis#38): repaint with a fresh `now` so
+// the rate decay + ETA move even between events. Sink-first (sp.mu → bw.mu).
+func (sp *sweepProgress) tick() {
+	if sp == nil || sp.bw == nil {
+		return
+	}
+	sp.mu.Lock()
+	defer sp.mu.Unlock()
+	sp.emit()
+}
+
+// maybeEmit writes the line if forced (driver/finish) or the throttle elapsed —
+// 1s for plain lines (a log is a record), 100ms for board repaints (a board is a
+// display; the 500ms ticker guarantees freshness anyway). Caller holds sp.mu.
 func (sp *sweepProgress) maybeEmit(force bool) {
 	now := sp.now()
-	if !force && sp.started && now.Sub(sp.lastEmit) < time.Second {
+	throttle := time.Second
+	if sp.bw != nil {
+		throttle = 100 * time.Millisecond
+	}
+	if !force && sp.started && now.Sub(sp.lastEmit) < throttle {
 		return
 	}
 	sp.started = true
@@ -335,6 +357,21 @@ func (sp *sweepProgress) maybeEmit(force bool) {
 	sp.emit()
 }
 
+// emit renders the current state: board mode paints the frame (under the fixed
+// sink.mu → bw.mu order; the snapshot is built inline — boardState() would re-lock);
+// plain mode prints the #30 aggregated line. Caller holds sp.mu.
 func (sp *sweepProgress) emit() {
+	if sp.bw != nil {
+		rows := make([]passRow, len(sp.rows))
+		copy(rows, sp.rows)
+		busy, capacity := 0, 0
+		if sp.gauge != nil {
+			busy, capacity = sp.gauge()
+		}
+		sp.bw.paint(renderBoard(
+			boardState{st: sp.st, rows: rows, rate: sp.rate},
+			boardEnv{width: sp.width, now: sp.now(), busy: busy, capacity: capacity}))
+		return
+	}
 	fmt.Fprintln(sp.out, progressLine(sp.st))
 }
