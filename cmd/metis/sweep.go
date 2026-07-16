@@ -85,8 +85,9 @@ type shapeSweep struct {
 	partRef       sampler.PartitionRef
 	man           sweepManifest
 	configs       []configScore
-	parallel      bool       // metis#31: >1 max-parallel ⇒ the sweeper/resample/driver batches run via ParExec
-	manMu         sync.Mutex // metis#32: guards man.Points — concurrent outer folds (ParExec) each record rows
+	parallel      bool           // metis#31: >1 max-parallel ⇒ the sweeper/resample/driver batches run via ParExec
+	manMu         sync.Mutex     // metis#32: guards man.Points — concurrent outer folds (ParExec) each record rows
+	prog          *sweepProgress // metis#30: the live-progress sink (nil = silent)
 }
 
 // addManPoints appends a batch of manifest rows under the manifest lock (metis#32: the
@@ -111,6 +112,7 @@ type sweepPass struct {
 	splitK   int                  // the cv-split / FixedKFolds fold count for this pass
 	stratify bool                 // the cv-split stratify flag for this pass
 	partRef  sampler.PartitionRef // this pass's partition identity (fed into each point's address)
+	hooks    passHooks            // metis#30: this pass's progress hooks, closure-bound to its outer fold
 	// metis#31: under ParExec the sweeper fans out over configs and each config's
 	// resample fans out over folds — all appending to this ONE pass. `mu` guards the
 	// orchestration bookkeeping (configs/points/err); the honest reduce stays in the
@@ -163,11 +165,11 @@ func (ss *shapeSweep) runSweeper(ctx sampler.Ctx, configPts []shape.Point, pass 
 		func(c shape.Point) sampler.MeanSE {
 			ms := sampler.Run(ctx, sampler.FixedKFolds{K: pass.splitK},
 				func(f sampler.FoldPoint) sampler.FoldOutcome { return pass.runPipelineFold(c, f) },
-				sampler.ExecFor[sampler.FoldPoint, sampler.FoldOutcome](ss.parallel))
+				sampler.ExecFor[sampler.FoldPoint, sampler.FoldOutcome](ss.parallel), pass.hooks.fold)
 			pass.addConfigScore(configScore{point: c, meanSE: ms})
 			return ms
 		},
-		sampler.ExecFor[shape.Point, sampler.MeanSE](ss.parallel))
+		sampler.ExecFor[shape.Point, sampler.MeanSE](ss.parallel), pass.hooks.config)
 }
 
 // runShapeSweep drives the metis#18 nested Sampler loop: the sweeper (GridConfigs over the
@@ -247,6 +249,10 @@ func runShapeSweep(o runOpts, sh experiment.Shape, now func() time.Time, out io.
 		parallel: o.maxParallel > 1, // metis#31: fan out the sweeper/resample/driver batches
 	}
 	ctx := sampler.Ctx{Seed: sh.Seed, Partition: ss.partRef}
+	// metis#30: seed the sink's denominators AT WIRING TIME from the same SizeHint the
+	// levels report (stream-learned totals would arrive only with each level's first
+	// completion — for the driver level that's the first COMPLETED outer fold, too late).
+	ss.prog = newSweepProgress(out, now, seededTotals(ctx, nested, runFolds, configPts, k))
 
 	// metis#32: >1 config → nested CV (records inner + per-family outer rows; the honest measure).
 	if nested {
@@ -259,10 +265,12 @@ func runShapeSweep(o runOpts, sh experiment.Shape, now func() time.Time, out io.
 	// deleted shape `driver:`) runs the sweeper once on all data → the sweeper's inner k-fold CV
 	// scores the one config → (mean, SE, complexity) recorded to the ledger. metis#32: it MEASURES
 	// ONLY — no `shipWinner` (shipping is `metis select --promote`).
-	pass := &sweepPass{ss: ss, splitK: k, stratify: stratify, partRef: ss.partRef}
+	pass := &sweepPass{ss: ss, splitK: k, stratify: stratify, partRef: ss.partRef,
+		hooks: ss.prog.forPass(-1)} // metis#30: the flat path's single pass
 	res := sampler.Run(ctx, sampler.SingleDriver{}, func(sampler.SinglePoint) sampler.SweepResult {
 		return ss.runSweeper(ctx, configPts, pass)
-	}, sampler.ExecFor[sampler.SinglePoint, sampler.SweepResult](ss.parallel))
+	}, sampler.ExecFor[sampler.SinglePoint, sampler.SweepResult](ss.parallel), nil)
+	ss.prog.finish() // metis#30: the terminal progress line, before the report
 	// metis#31: sort the fan-out's completion-order bookkeeping to a stable content key
 	// BEFORE persisting, so manifest.json + the ledger are byte-deterministic across
 	// serial/parallel runs (the winner/estimate are already deterministic; this makes
@@ -374,10 +382,19 @@ func (ss *shapeSweep) runNestedCV(ctx sampler.Ctx, configPts []shape.Point, k, r
 			}
 			return score
 		},
-		sampler.ExecFor[sampler.OuterFoldPoint, float64](ss.parallel))
+		sampler.ExecFor[sampler.OuterFoldPoint, float64](ss.parallel),
+		// metis#30: outer-fold completions always emit. Error-gated: once firstErr
+		// latches, remaining closures return sentinel zeros — don't fold those into
+		// the displayed est (the run is aborting; a fake 0 would tank the line).
+		func(ev sampler.ProgressEvent[sampler.OuterFoldPoint, float64]) {
+			if getFirst() == nil {
+				ss.prog.driverEvent(ev)
+			}
+		})
 	if err := getFirst(); err != nil {
 		return err
 	}
+	ss.prog.finish() // metis#30: the terminal progress line, before the estimate report
 
 	// metis#32: the nested run now RECORDS (unlike metis#23's estimation-only path) — persist the
 	// inner + per-family outer rows accumulated in ss.man.Points so `metis select` can reduce them
@@ -416,8 +433,8 @@ func (ss *shapeSweep) materializeOuterAnalysis(outerK int, stratify bool) ([]str
 		return nil, fmt.Errorf("nested-CV preamble: %w", err)
 	}
 	preOpts := ss.o
-	preOpts.inSweep = true  // one preamble run; skip the per-run capture noise
-	preOpts.readRoot = ""   // outer-split legitimately reads the full dataset
+	preOpts.inSweep = true // one preamble run; skip the per-run capture noise
+	preOpts.readRoot = ""  // outer-split legitimately reads the full dataset
 	if _, err := runResolvedExperiment(exp, preOpts, preID, ss.now, ss.out); err != nil {
 		return nil, fmt.Errorf("nested-CV preamble (%s): %w", preID, err)
 	}
@@ -439,7 +456,8 @@ func (ss *shapeSweep) runOuterFold(ctx sampler.Ctx, configPts []shape.Point, k i
 	}
 	// (a) sealed selection: the sweeper's inner-CV runs entirely within analysis_i (inner k/stratify).
 	pass := &sweepPass{ss: ss, baseRef: analysisRef, readRoot: analysisAbs, splitK: k,
-		stratify: stratify, partRef: ss.partRef}
+		stratify: stratify, partRef: ss.partRef,
+		hooks: ss.prog.forPass(i)} // metis#30/#38: outer-fold identity via closure binding
 	sres := ss.runSweeper(ctx, configPts, pass)
 	if err := pass.firstError(); err != nil {
 		return 0, fmt.Errorf("outer fold %d sealed sweep: %w", i, err)
@@ -561,7 +579,7 @@ func (p *sweepPass) runPipelineFold(c shape.Point, f sampler.FoldPoint) sampler.
 		return sampler.FoldOutcome{}
 	}
 	pointOpts := ss.o
-	pointOpts.inSweep = true      // metis#14: the sweep captures once (captureSweepCode), not per point
+	pointOpts.inSweep = true        // metis#14: the sweep captures once (captureSweepCode), not per point
 	pointOpts.readRoot = p.readRoot // metis#23: confine a sealed outer-fold pass to its analysis root
 	run, runErr := runResolvedExperiment(exp, pointOpts, runID, ss.now, ss.out)
 	// A failing fold is FATAL to the sweep, unlike a v1 flat point: a config scored over a

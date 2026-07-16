@@ -32,6 +32,9 @@ type configState struct {
 
 func (g GridConfigs) Init(ctx Ctx) configState { return configState{points: g.Points, seed: ctx.Seed} }
 
+// SizeHint is the grid's exact config count (metis#30).
+func (g GridConfigs) SizeHint(s configState) (int, SizeKind) { return len(s.points), SizeExact }
+
 // Ask proposes the not-yet-told config-points as one batch; done once all told.
 func (g GridConfigs) Ask(s configState) ([]shape.Point, bool) {
 	if len(s.results) >= len(s.points) {

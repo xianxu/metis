@@ -26,11 +26,11 @@ import (
 //   - output: an optional metrics.json (flat {name: number}) + any artifact files
 //     the step writes into its dir, which execStep reads back.
 type execStep struct {
-	stepPath []string  // dirs searched for <layer>/<steptype>
-	expDir   string    // absolute experiment dir; anchor for exp-relative step inputs
-	seed     int       // the experiment's seed, exposed to every step for reproducibility
-	readRoot string    // metis#23: outer-fold analysis root; when set, confines base-dataset reads (empty = unconfined)
-	out      io.Writer // plain streaming progress
+	stepPath []string      // dirs searched for <layer>/<steptype>
+	expDir   string        // absolute experiment dir; anchor for exp-relative step inputs
+	seed     int           // the experiment's seed, exposed to every step for reproducibility
+	readRoot string        // metis#23: outer-fold analysis root; when set, confines base-dataset reads (empty = unconfined)
+	out      io.Writer     // plain streaming progress
 	sem      chan struct{} // metis#31: the GLOBAL leaf budget — acquired around the subprocess
 	//                        spawn ONLY (a cache HIT never reaches here). One shared channel across
 	//                        all nesting levels ⇒ ≤ cap(sem) concurrent step subprocesses no matter

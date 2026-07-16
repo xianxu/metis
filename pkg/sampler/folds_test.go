@@ -38,7 +38,7 @@ func TestFixedKFolds_DoneReducesToMeanSE(t *testing.T) {
 	// run through the generic loop; runPoint scores fold i as 0.80 + 0.01*i.
 	got := Run(Ctx{Partition: "P"}, FixedKFolds{K: 5}, func(fp FoldPoint) FoldOutcome {
 		return FoldOutcome{Score: 0.80 + 0.01*float64(fp.Idx)}
-	}, SeqExec[FoldPoint, FoldOutcome])
+	}, SeqExec[FoldPoint, FoldOutcome], nil)
 	// scores 0.80..0.84 → mean 0.82.
 	if math.Abs(got.Mean-0.82) > 1e-12 {
 		t.Errorf("mean = %v, want 0.82", got.Mean)

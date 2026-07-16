@@ -46,12 +46,12 @@ func toyPipelineE2E(t *testing.T, forkserver bool) {
 		filepath.Join(ws, "dataset", "toy"))
 
 	run, err := runExperiment(runOpts{
-		expPath:  filepath.Join(expDir, "toy-pipeline.md"),
-		runID:    "run-e2e",
-		stepPath: []string{filepath.Join(root, "steps")}, // the real metis/* step-types
-		now:      func() time.Time { return time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC) },
-		git:      fakeGitProbe{name: "metis", sha: "toysha", dirty: false}, // workspace is a bare TempDir, not a git repo
-		out:      io.Discard,
+		expPath:    filepath.Join(expDir, "toy-pipeline.md"),
+		runID:      "run-e2e",
+		stepPath:   []string{filepath.Join(root, "steps")}, // the real metis/* step-types
+		now:        func() time.Time { return time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC) },
+		git:        fakeGitProbe{name: "metis", sha: "toysha", dirty: false}, // workspace is a bare TempDir, not a git repo
+		out:        io.Discard,
 		forkserver: forkserver, // metis#44: exercised by the _ForkServer variant
 	})
 	if err != nil {

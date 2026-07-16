@@ -1,22 +1,35 @@
 package sampler
 
 import (
+	"sync"
 	"testing"
 
 	"github.com/xianxu/metis/pkg/experiment"
 	"github.com/xianxu/metis/pkg/shape"
 )
 
-// countSampler is a trivial Sampler (Init=plan[1,2,3], Ask emits once, Tell=+out,
+// countSampler is a trivial Sampler (Init=plan[1..n], Ask emits once, Tell=+out,
 // Done=sum) that also counts its method calls — the T6 driver-loop proof.
-type countSampler struct{ asks, tells, dones int }
+// n=0 defaults to 3 (the original hardcoded [1,2,3]); metis#30's progress tests
+// size it up for parallel-event coverage.
+type countSampler struct{ n, asks, tells, dones int }
 
 type countState struct {
 	pts       []int
 	sum, told int
 }
 
-func (c *countSampler) Init(Ctx) countState { return countState{pts: []int{1, 2, 3}} }
+func (c *countSampler) Init(Ctx) countState {
+	n := c.n
+	if n == 0 {
+		n = 3
+	}
+	pts := make([]int, n)
+	for i := range pts {
+		pts[i] = i + 1
+	}
+	return countState{pts: pts}
+}
 func (c *countSampler) Ask(s countState) ([]int, bool) {
 	c.asks++
 	if s.told >= len(s.pts) {
@@ -31,15 +44,19 @@ func (c *countSampler) Tell(s countState, _ int, out int) countState {
 	return s
 }
 func (c *countSampler) Done(s countState) int { c.dones++; return s.sum }
+func (c *countSampler) SizeHint(s countState) (int, SizeKind) {
+	return len(s.pts), SizeExact
+}
 
 // stuckSampler violates the progress contract: Ask never reports done and never
 // proposes a point — Run must fail loud, not hang.
 type stuckSampler struct{}
 
-func (stuckSampler) Init(Ctx) int             { return 0 }
-func (stuckSampler) Ask(int) ([]int, bool)    { return nil, false } // empty batch, not done
-func (stuckSampler) Tell(s int, _, o int) int { return s + o }
-func (stuckSampler) Done(s int) int           { return s }
+func (stuckSampler) Init(Ctx) int                 { return 0 }
+func (stuckSampler) Ask(int) ([]int, bool)        { return nil, false } // empty batch, not done
+func (stuckSampler) Tell(s int, _, o int) int     { return s + o }
+func (stuckSampler) Done(s int) int               { return s }
+func (stuckSampler) SizeHint(int) (int, SizeKind) { return 0, SizeUnknown }
 
 func TestRun_PanicsOnNonProgressingAsk(t *testing.T) {
 	defer func() {
@@ -47,12 +64,12 @@ func TestRun_PanicsOnNonProgressingAsk(t *testing.T) {
 			t.Fatal("Run did not panic on an empty-batch/not-done Ask (would hang forever)")
 		}
 	}()
-	Run(Ctx{}, stuckSampler{}, func(p int) int { return p }, SeqExec[int, int])
+	Run(Ctx{}, stuckSampler{}, func(p int) int { return p }, SeqExec[int, int], nil)
 }
 
 func TestRun_DrivesAskTellDone(t *testing.T) {
 	c := &countSampler{}
-	got := Run(Ctx{}, c, func(p int) int { return p }, SeqExec[int, int]) // runPoint = identity
+	got := Run(Ctx{}, c, func(p int) int { return p }, SeqExec[int, int], nil) // runPoint = identity
 	if got != 6 {
 		t.Fatalf("Run sum = %d, want 6", got)
 	}
@@ -94,12 +111,12 @@ func TestRun_NestedComposition(t *testing.T) {
 	}
 	// sweeper's runPoint = run the inner resample for this config.
 	sweeperRun := func(p shape.Point) MeanSE {
-		return Run(ctx, FixedKFolds{K: 3}, func(FoldPoint) FoldOutcome { return FoldOutcome{Score: scoreOf(p)} }, SeqExec[FoldPoint, FoldOutcome])
+		return Run(ctx, FixedKFolds{K: 3}, func(FoldPoint) FoldOutcome { return FoldOutcome{Score: scoreOf(p)} }, SeqExec[FoldPoint, FoldOutcome], nil)
 	}
 	// driver's runPoint = run the whole sweeper (R = SweepResult).
-	driverRun := func(SinglePoint) SweepResult { return Run(ctx, sweeper, sweeperRun, SeqExec[shape.Point, MeanSE]) }
+	driverRun := func(SinglePoint) SweepResult { return Run(ctx, sweeper, sweeperRun, SeqExec[shape.Point, MeanSE], nil) }
 
-	res := Run(ctx, SingleDriver{}, driverRun, SeqExec[SinglePoint, SweepResult])
+	res := Run(ctx, SingleDriver{}, driverRun, SeqExec[SinglePoint, SweepResult], nil)
 	winner := res.Ship // the cross-family ship pick: rf (0.85) beats logreg (0.75)
 
 	if got := winner.Point.FreeParams[0].Value; got != "rf" {
@@ -124,6 +141,45 @@ func TestRun_NestedComposition(t *testing.T) {
 	for i, k := range wantKeys {
 		if winner.FoldKeys[i] != k {
 			t.Errorf("FoldKeys[%d] = %q, want %q", i, winner.FoldKeys[i], k)
+		}
+	}
+}
+
+// Run fires progress ONCE PER COMPLETED POINT (live — not per Tell, which under
+// ParExec + one-batch static samplers happens only at batch end; metis#30 revision),
+// with monotone 1-based k and the SizeHint total/kind stamped on every event.
+func TestRunProgress_SeqOrdered(t *testing.T) {
+	var evs []ProgressEvent[int, int]
+	smp := &countSampler{n: 3}
+	Run[countState, int, int, int](Ctx{}, smp, func(p int) int { return p * 10 },
+		SeqExec[int, int], func(ev ProgressEvent[int, int]) { evs = append(evs, ev) })
+	if len(evs) != 3 {
+		t.Fatalf("want 3 events, got %d", len(evs))
+	}
+	for i, ev := range evs {
+		if ev.K != i+1 || ev.Total != 3 || ev.Kind != SizeExact {
+			t.Errorf("event %d: %+v", i, ev)
+		}
+		if ev.Out != ev.Point*10 {
+			t.Errorf("event %d: (Point,Out) must be the completed pair: %+v", i, ev)
+		}
+	}
+}
+
+// Under ParExec the events arrive from concurrent goroutines — Run's mutex
+// serializes increment+fire, so arrival order IS k order (1..n, each exactly once).
+func TestRunProgress_ParallelMonotoneComplete(t *testing.T) {
+	var mu sync.Mutex
+	var ks []int
+	smp := &countSampler{n: 32}
+	Run[countState, int, int, int](Ctx{}, smp, func(p int) int { return p },
+		ParExec[int, int], func(ev ProgressEvent[int, int]) { mu.Lock(); ks = append(ks, ev.K); mu.Unlock() })
+	if len(ks) != 32 {
+		t.Fatalf("want 32 events, got %d", len(ks))
+	}
+	for i, k := range ks {
+		if k != i+1 {
+			t.Fatalf("k must arrive monotone 1..n, got %v", ks)
 		}
 	}
 }

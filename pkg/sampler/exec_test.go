@@ -105,8 +105,8 @@ func TestRun_ParExecEqualsSeqExec(t *testing.T) {
 		}
 	}
 	g := GridConfigs{Points: pts, Direction: "maximize", Select: argmax()}
-	seq := Run(Ctx{Seed: 1}, g, plain, SeqExec[shape.Point, MeanSE])
-	par := Run(Ctx{Seed: 1}, g, barrier(), ParExec[shape.Point, MeanSE])
+	seq := Run(Ctx{Seed: 1}, g, plain, SeqExec[shape.Point, MeanSE], nil)
+	par := Run(Ctx{Seed: 1}, g, barrier(), ParExec[shape.Point, MeanSE], nil)
 
 	if seq.Ship.Point.FreeParams[0].Value != par.Ship.Point.FreeParams[0].Value {
 		t.Fatalf("ship config differs: seq=%v par=%v", seq.Ship.Point.FreeParams, par.Ship.Point.FreeParams)

@@ -29,7 +29,7 @@ func TestGridConfigs_SelectsArgmaxMean(t *testing.T) {
 	}
 	res := Run(Ctx{Seed: 42}, g, func(p shape.Point) MeanSE {
 		return scores[p.FreeParams[0].Value.(string)]
-	}, SeqExec[shape.Point, MeanSE])
+	}, SeqExec[shape.Point, MeanSE], nil)
 	w := res.Ship
 	if w.Point.FreeParams[0].Value != "rf" {
 		t.Fatalf("winner = %v, want rf (argmax-mean)", w.Point.FreeParams[0].Value)
@@ -62,7 +62,7 @@ func TestGridConfigs_WinnerCarriesResolvedPoint(t *testing.T) {
 		FreeParams: []shape.FreeParam{{Path: "train.model", Value: "rf"}},
 	}
 	g := GridConfigs{Points: []shape.Point{cfg}, Direction: "maximize", Select: argmax()}
-	res := Run(Ctx{Seed: 7}, g, func(shape.Point) MeanSE { return meanSE(0.9, "k0") }, SeqExec[shape.Point, MeanSE])
+	res := Run(Ctx{Seed: 7}, g, func(shape.Point) MeanSE { return meanSE(0.9, "k0") }, SeqExec[shape.Point, MeanSE], nil)
 	w := res.Ship
 	if w.Point.With["train"]["model"] == nil || w.Point.With["features"] == nil {
 		t.Errorf("winner Point.With must carry the FULL resolved config for direct rebuild; got %v", w.Point.With)
@@ -76,7 +76,7 @@ func TestGridConfigs_MinimizeDirection(t *testing.T) {
 	cfgA, cfgB := configPoint("a"), configPoint("b")
 	g := GridConfigs{Points: []shape.Point{cfgA, cfgB}, Direction: "minimize", Select: argmax()}
 	scores := map[string]MeanSE{"a": meanSE(0.30), "b": meanSE(0.20)}
-	res := Run(Ctx{}, g, func(p shape.Point) MeanSE { return scores[p.FreeParams[0].Value.(string)] }, SeqExec[shape.Point, MeanSE])
+	res := Run(Ctx{}, g, func(p shape.Point) MeanSE { return scores[p.FreeParams[0].Value.(string)] }, SeqExec[shape.Point, MeanSE], nil)
 	if res.Ship.Point.FreeParams[0].Value != "b" {
 		t.Errorf("minimize winner = %v, want b (lowest)", res.Ship.Point.FreeParams[0].Value)
 	}
@@ -87,7 +87,7 @@ func TestGridConfigs_DeterministicTieBreak(t *testing.T) {
 	// tie-break holds through per-family selection + the cross-family argmax).
 	cfgA, cfgB := configPoint("first"), configPoint("second")
 	g := GridConfigs{Points: []shape.Point{cfgA, cfgB}, Direction: "maximize", Select: argmax()}
-	res := Run(Ctx{}, g, func(shape.Point) MeanSE { return meanSE(0.80) }, SeqExec[shape.Point, MeanSE])
+	res := Run(Ctx{}, g, func(shape.Point) MeanSE { return meanSE(0.80) }, SeqExec[shape.Point, MeanSE], nil)
 	if res.Ship.Point.FreeParams[0].Value != "first" {
 		t.Errorf("tie winner = %v, want first (earliest)", res.Ship.Point.FreeParams[0].Value)
 	}
