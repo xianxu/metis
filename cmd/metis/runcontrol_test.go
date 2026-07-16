@@ -122,6 +122,49 @@ func TestRunControlBoundsAdmissionAtTwiceParallelism(t *testing.T) {
 	}
 }
 
+func TestRunControlHookPanicsStillReleaseAdmission(t *testing.T) {
+	panicValue := errors.New("observation hook panic")
+	for _, tc := range []struct {
+		name string
+		set  func(*runControl)
+	}{
+		{
+			name: "after acquire",
+			set: func(control *runControl) {
+				control.afterAcquire = func(string) { panic(panicValue) }
+			},
+		},
+		{
+			name: "before release",
+			set: func(control *runControl) {
+				control.beforeRelease = func(string) { panic(panicValue) }
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			control := &runControl{slots: make(chan struct{}, 1)}
+			tc.set(control)
+			got := recoverRunControlPanic(func() {
+				_, _ = control.run("observed", func() (experiment.Run, error) {
+					return experiment.Run{ID: "ok"}, nil
+				})
+			})
+			if got != panicValue {
+				t.Fatalf("recovered panic = %v, want exact hook panic %v", got, panicValue)
+			}
+			if got := len(control.slots); got != 0 {
+				t.Fatalf("admission slots after recovered hook panic = %d, want 0", got)
+			}
+		})
+	}
+}
+
+func recoverRunControlPanic(fn func()) (recovered any) {
+	defer func() { recovered = recover() }()
+	fn()
+	return nil
+}
+
 func TestRunControlPublishesFailureBeforeAdmissionRelease(t *testing.T) {
 	control := &runControl{slots: make(chan struct{}, 1)}
 	published := make(chan struct{})

@@ -80,15 +80,13 @@ func (c *runControl) fail(label string, err error) error {
 func (c *runControl) run(label string, fn func() (experiment.Run, error)) (experiment.Run, error) {
 	if c.slots != nil {
 		c.slots <- struct{}{}
+		defer func() { <-c.slots }()
 		if c.afterAcquire != nil {
 			c.afterAcquire(label)
 		}
-		defer func() {
-			if c.beforeRelease != nil {
-				c.beforeRelease(label)
-			}
-			<-c.slots
-		}()
+		if c.beforeRelease != nil {
+			defer func() { c.beforeRelease(label) }()
+		}
 	}
 
 	if c.firstError() != nil {

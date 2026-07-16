@@ -78,21 +78,36 @@ func loadPersistedRuns(t *testing.T, root string) map[string]experiment.Run {
 	if err != nil {
 		t.Fatal(err)
 	}
+	got, err := decodePersistedRuns(paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return got
+}
+
+func decodePersistedRuns(paths []string) (map[string]experiment.Run, error) {
 	got := make(map[string]experiment.Run, len(paths))
 	for _, path := range paths {
+		directoryID := filepath.Base(filepath.Dir(path))
+		if _, exists := got[directoryID]; exists {
+			return nil, fmt.Errorf("duplicate run directory identity %q", directoryID)
+		}
 		b, err := os.ReadFile(path)
 		if err != nil {
-			t.Fatal(err)
+			return nil, err
 		}
 		var run experiment.Run
 		if err := json.Unmarshal(b, &run); err != nil {
-			t.Fatalf("parse %s: %v", path, err)
+			return nil, fmt.Errorf("parse %s: %w", path, err)
+		}
+		if run.ID != directoryID {
+			return nil, fmt.Errorf("run payload id %q does not match directory identity %q", run.ID, directoryID)
 		}
 		run.Started = ""
 		run.Finished = ""
-		got[run.ID] = run
+		got[directoryID] = run
 	}
-	return got
+	return got, nil
 }
 
 func loadPersistedRecords(t *testing.T, root string) map[string]record.RunRecord {
@@ -101,21 +116,76 @@ func loadPersistedRecords(t *testing.T, root string) map[string]record.RunRecord
 	if err != nil {
 		t.Fatal(err)
 	}
+	got, err := decodePersistedRecords(paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return got
+}
+
+func decodePersistedRecords(paths []string) (map[string]record.RunRecord, error) {
 	got := make(map[string]record.RunRecord, len(paths))
 	for _, path := range paths {
+		directoryID := filepath.Base(filepath.Dir(path))
+		if _, exists := got[directoryID]; exists {
+			return nil, fmt.Errorf("duplicate record directory identity %q", directoryID)
+		}
 		b, err := os.ReadFile(path)
 		if err != nil {
-			t.Fatal(err)
+			return nil, err
 		}
 		var rec record.RunRecord
 		if err := json.Unmarshal(b, &rec); err != nil {
-			t.Fatalf("parse %s: %v", path, err)
+			return nil, fmt.Errorf("parse %s: %w", path, err)
+		}
+		if rec.RunID != directoryID {
+			return nil, fmt.Errorf("record payload run_id %q does not match directory identity %q", rec.RunID, directoryID)
 		}
 		rec.Started = ""
 		rec.Finished = ""
-		got[rec.RunID] = rec
+		got[directoryID] = rec
 	}
-	return got
+	return got, nil
+}
+
+func TestSemanticArtifactLoadersRejectMismatchedAndDuplicateDirectoryIdentity(t *testing.T) {
+	writeArtifact := func(t *testing.T, path string, value any) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		b, err := json.Marshal(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, b, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	t.Run("run.json", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "runs", "dir-id", "run.json")
+		writeArtifact(t, path, experiment.Run{ID: "payload-id"})
+		if _, err := decodePersistedRuns([]string{path}); err == nil || !strings.Contains(err.Error(), "dir-id") {
+			t.Fatalf("mismatched run identity error = %v, want directory identity diagnostic", err)
+		}
+		writeArtifact(t, path, experiment.Run{ID: "dir-id"})
+		if _, err := decodePersistedRuns([]string{path, path}); err == nil || !strings.Contains(err.Error(), "duplicate") {
+			t.Fatalf("duplicate run directory error = %v, want duplicate diagnostic", err)
+		}
+	})
+
+	t.Run("record.json", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "runs", "dir-id", "record.json")
+		writeArtifact(t, path, record.RunRecord{RunID: "payload-id"})
+		if _, err := decodePersistedRecords([]string{path}); err == nil || !strings.Contains(err.Error(), "dir-id") {
+			t.Fatalf("mismatched record identity error = %v, want directory identity diagnostic", err)
+		}
+		writeArtifact(t, path, record.RunRecord{RunID: "dir-id"})
+		if _, err := decodePersistedRecords([]string{path, path}); err == nil || !strings.Contains(err.Error(), "duplicate") {
+			t.Fatalf("duplicate record directory error = %v, want duplicate diagnostic", err)
+		}
+	})
 }
 
 type scheduleTrace struct {
@@ -288,6 +358,12 @@ func TestNestedCV_PeakConcurrencyWithinCap(t *testing.T) {
 	}
 	if gotPeakRuns > 2*cap {
 		t.Fatalf("peak admitted runs %d exceeded controller cap %d", gotPeakRuns, 2*cap)
+	}
+	if gotPeakRuns == 0 {
+		t.Fatal("injected controller observed no admitted runs")
+	}
+	if gotAcquiredRuns <= 2*cap {
+		t.Fatalf("controller observed %d concrete run attempts, want more than its %d-slot capacity", gotAcquiredRuns, 2*cap)
 	}
 	if gotActiveRuns != 0 {
 		t.Fatalf("active admitted runs after completion = %d, want 0", gotActiveRuns)
