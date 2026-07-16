@@ -1,11 +1,12 @@
 ---
 id: 000050
-status: open
+status: working
 deps: []
 github_issue:
 created: 2026-07-16
 updated: 2026-07-16
 estimate_hours: 0.55
+started: 2026-07-16T08:14:43-07:00
 ---
 
 # run-end summary — elapsed time, fingerprint, rows, and paste-ready next commands
