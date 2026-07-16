@@ -220,7 +220,7 @@ In `Run`: after `s := smp.Init(ctx)`, capture `total, kind := smp.SizeHint(s)`; 
 ### Task 5: docs + close
 
 - [ ] atlas/index.md: the progress seam (SizeHint + completion-fired ProgressEvent + the cmd/metis sink; #38 consumes the same seam for the TTY board).
-- [ ] Issue `## Revisions`: the Tell→completion timing revision (rationale above).
+- [ ] Issue `## Revisions`: BOTH spec deviations — the Tell→completion timing revision (rationale above) AND the flat-format correction (the spec's `47/99 · best` example is pre-#32; flat now runs iff 1 config → `folds k/n · score`), so the issue file doesn't contradict the shipped renderer.
 - [ ] kbench RUNBOOK: one line — sweeps now print `metis: progress …` (babysitting recipe supersession note pointing at #38 for throughput/ETA).
 - [ ] **Real-run evidence**: build the binary and run a real kbench sweep (the smoke shape `titanic-sweep-smoke.md` with BLAS pins — cheap, real uv/Python leaves) redirecting to a file; confirm live progress lines with correct totals + est appear and the output is escape-code-free. This is done-when 3's "real" half.
 - [ ] `sdlc close --issue 30 --verified '<evidence incl. the real smoke-sweep output>'`.
