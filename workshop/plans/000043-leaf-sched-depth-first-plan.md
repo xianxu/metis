@@ -343,7 +343,7 @@ git commit -m "#43: add whole-run admission control" -m "Bound admitted concrete
 - Modify: `cmd/metis/sweep.go:440-570`
 - Test: `cmd/metis/runcontrol_test.go`
 
-- [ ] **Step 1: Add a failing boundary test**
+- [x] **Step 1: Add a failing boundary test**
 
 Install a controller that already holds an error, call `runResolvedExperiment` with a buffer and a temporary experiment directory, and assert no side effect precedes its cancellation check:
 
@@ -371,7 +371,7 @@ Run: `go test ./cmd/metis -run '^TestRunResolvedExperiment_AbortedBeforeSideEffe
 
 Expected: FAIL because `runOpts` and `runResolvedExperiment` do not consult the controller.
 
-- [ ] **Step 2: Thread control and contextual labels through `runOpts`**
+- [x] **Step 2: Thread control and contextual labels through `runOpts`**
 
 Add:
 
@@ -382,7 +382,7 @@ runLabel   string      // config/fold/preamble context captured with the first e
 
 After strict shape validation and before `runShapeSweep`, assign `o.runControl = newRunControl(o.maxParallel)` only when it is nil. The non-nil path is an injected integration-test seam; production creates exactly one controller here. Leave plain one-point experiments unchanged: they have no fan-out and no controller.
 
-- [ ] **Step 3: Split the wrapper from the admitted body**
+- [x] **Step 3: Split the wrapper from the admitted body**
 
 Keep the call-site name and move the current implementation byte-for-byte into `runResolvedExperimentAdmitted`:
 
@@ -399,7 +399,7 @@ func runResolvedExperiment(exp experiment.Experiment, o runOpts, runID string, n
 
 The wrapper executes before `filepath.Abs`, cache-directory creation, the run-start line, or executor construction. Its callback contains one concrete run only and never calls another admitted run, satisfying Chunk 1's non-reentrant contract.
 
-- [ ] **Step 4: Give every concrete sweep call a contextual label**
+- [x] **Step 4: Give every concrete sweep call a contextual label**
 
 Set the label on each copied options value immediately before the call:
 
@@ -411,13 +411,13 @@ preambleOpts.runLabel = fmt.Sprintf("outer-analysis preamble (%s)", preID)
 
 Pass `fam` into `scoreOnOuterFold` so the label is complete at the boundary. Do not wrap a controller-returned error again at a caller; the stored first error is already contextual.
 
-- [ ] **Step 5: Run boundary and existing run tests**
+- [x] **Step 5: Run boundary and existing run tests**
 
 Run: `go test ./cmd/metis -run 'TestRunResolvedExperiment|TestRunExperiment' -race -count=1`
 
 Expected: PASS; the new abort test proves no output or directory creation before admission.
 
-- [ ] **Step 6: Commit the concrete-run boundary**
+- [x] **Step 6: Commit the concrete-run boundary**
 
 ```bash
 git add cmd/metis/run.go cmd/metis/runcontrol_test.go cmd/metis/sweep.go

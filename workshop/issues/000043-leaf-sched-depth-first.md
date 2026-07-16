@@ -156,6 +156,12 @@ Durable implementation detail: [workshop/plans/000043-leaf-sched-depth-first-pla
   suite with mutation-sensitive proofs that admission precedes the first error check and that the
   winner-only publication hook remains inside the controller mutex.
 
+### 2026-07-16 — Task 2 concrete-run boundary complete
+- Wrapped the shared concrete runner before path, cache, directory, output, executor, or record side
+  effects; all fold, outer-score, and preamble calls now attach complete controller-owned context.
+- Focused race tests plus spec and code-quality review passed. A review-driven cache-enabled mutation
+  test proves pre-admission cancellation cannot even initialize `.metis-cache`.
+
 ## Revisions
 
 ### 2026-07-16 — fresh-eyes spec review
