@@ -130,25 +130,45 @@ func clampLine(s string, width int) string {
 // route through this writer once it exists — a bypassing write corrupts the board
 // (see the plan's writer-plumbing note: writer identity is temporal).
 //
-//	Write(p)     passthrough: erase board, write p (newline-completed), repaint
-//	             the stored frame — exempt from throttling (the board must be
-//	             restored after every passthrough; ≤tick-stale is fine).
-//	paint(lines) store + erase + redraw (the sink calls this under its own mutex).
-//	close()      final repaint + newline + cursor restore; idempotent — installed
-//	             as a defer so error returns never leak a hidden cursor.
+// metis#46: DOUBLE-BUFFERED with a bounded flush rate. The original design ran a
+// full erase→write→repaint cycle per passthrough write; a warm-cache sweep emits
+// hundreds of lines/second and real terminals — especially mux layers (the
+// operator's ghostty-in-cmux) — paint asynchronously mid-sequence and tear under
+// that flood. Now passthrough COALESCES into `pending` and the terminal sees one
+// atomic erase→dump→repaint per flushBudget (~4Hz) — quiet writes (a cold run's
+// sparse lines) still flush inline because the budget has long elapsed.
+//
+//	Write(p)     append to pending; flush inline iff the budget elapsed or the
+//	             size cap is hit (bound memory under a frozen-budget flood).
+//	paint(lines) store the frame; flush under the same budget.
+//	tick/close   force-flush (the 500ms tick restores the board after a burst;
+//	             close is idempotent, flushes everything, restores the cursor).
 //
 // It serializes internally (replacing syncWriter in board mode — one wrap, not two).
 type boardWriter struct {
-	mu      sync.Mutex
-	w       io.Writer
-	frame   []string // the stored last frame (repainted after passthrough writes)
-	painted int      // physical lines currently on screen (the erase count)
-	closed  bool
-	pending []byte // an unterminated passthrough tail awaiting its newline
+	mu        sync.Mutex
+	w         io.Writer
+	now       func() time.Time
+	frame     []string // the stored last frame (drawn on each flush)
+	painted   int      // physical lines currently on screen (the erase count)
+	closed    bool
+	pending   []byte // coalesced passthrough awaiting the next flush
+	lastFlush time.Time
+	hidden    bool // cursor-hide emitted (once, at the first flush that paints)
 }
 
-func newBoardWriter(w io.Writer) *boardWriter {
-	return &boardWriter{w: w}
+// flushBudget bounds the erase/repaint rate: under a flood the terminal gets one
+// atomic update per budget window (~4Hz reads calm; per-line strobed at 500Hz).
+const flushBudget = 250 * time.Millisecond
+
+// pendingCap force-flushes a frozen-budget flood so pending can't grow unbounded.
+const pendingCap = 64 << 10
+
+func newBoardWriter(w io.Writer, now func() time.Time) *boardWriter {
+	if now == nil {
+		now = time.Now
+	}
+	return &boardWriter{w: w, now: now}
 }
 
 // Write is the passthrough seam: everything the sweep prints lands above the board.
@@ -158,37 +178,58 @@ func (b *boardWriter) Write(p []byte) (int, error) {
 	if b.closed {
 		return b.w.Write(p)
 	}
-	b.erase()
-	// Hold back an unterminated tail: a partial line fused into the board's first
-	// row would corrupt both; it flushes when its newline arrives (or at close).
 	b.pending = append(b.pending, p...)
-	if i := lastNewline(b.pending); i >= 0 {
-		if _, err := b.w.Write(b.pending[:i+1]); err != nil {
-			return len(p), err
-		}
-		b.pending = b.pending[i+1:]
+	if now := b.now(); now.Sub(b.lastFlush) >= flushBudget || len(b.pending) > pendingCap {
+		b.flushLocked(now)
 	}
-	b.redraw()
 	return len(p), nil
 }
 
-// paint stores + draws a fresh frame (the sink's emit target).
+// paint stores a fresh frame (the sink's emit target) and flushes under the budget.
 func (b *boardWriter) paint(lines []string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.closed {
 		return
 	}
-	if b.painted == 0 && b.frame == nil {
-		fmt.Fprint(b.w, "\x1b[?25l") // first paint hides the cursor
-	}
 	b.frame = lines
-	b.erase()
-	b.redraw()
+	if now := b.now(); now.Sub(b.lastFlush) >= flushBudget {
+		b.flushLocked(now)
+	}
 }
 
-// close flushes any held tail, leaves the final frame, and restores the cursor.
-// Idempotent (deferred at construction — error returns must not leak state).
+// forceFlush is the tick/finish path: draw the freshest state regardless of budget
+// (this is what re-pins the board after a burst window and keeps ETA/rate moving).
+func (b *boardWriter) forceFlush() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.closed {
+		return
+	}
+	b.flushLocked(b.now())
+}
+
+// flushLocked is the ONE atomic terminal update: erase the painted board, dump the
+// complete pending lines, redraw the stored frame. Caller holds b.mu.
+func (b *boardWriter) flushLocked(now time.Time) {
+	if !b.hidden && b.frame != nil {
+		fmt.Fprint(b.w, "\x1b[?25l") // first painting flush hides the cursor
+		b.hidden = true
+	}
+	b.erase()
+	// Hold back an unterminated tail: a partial line fused into the board's first
+	// row would corrupt both; it flushes when its newline arrives (or at close).
+	if i := lastNewline(b.pending); i >= 0 {
+		b.w.Write(b.pending[:i+1])
+		b.pending = b.pending[i+1:]
+	}
+	b.redraw()
+	b.lastFlush = now
+}
+
+// close flushes everything (pending tail newline-completed, final frame) and
+// restores the cursor. Idempotent (deferred at construction — error returns must
+// not leak a hidden cursor).
 func (b *boardWriter) close() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -197,11 +238,16 @@ func (b *boardWriter) close() {
 	}
 	b.erase()
 	if len(b.pending) > 0 {
-		b.w.Write(append(b.pending, '\n'))
+		if b.pending[len(b.pending)-1] != '\n' {
+			b.pending = append(b.pending, '\n')
+		}
+		b.w.Write(b.pending)
 		b.pending = nil
 	}
 	b.redraw()
-	fmt.Fprint(b.w, "\x1b[?25h")
+	if b.hidden {
+		fmt.Fprint(b.w, "\x1b[?25h")
+	}
 	b.closed = true
 }
 

@@ -349,8 +349,10 @@ func (sp *sweepProgress) tick() {
 		return
 	}
 	sp.mu.Lock()
-	defer sp.mu.Unlock()
-	sp.emit()
+	sp.emit() // stores the fresh frame (budget may skip the draw)
+	bw := sp.bw
+	sp.mu.Unlock()
+	bw.forceFlush() // metis#46: the tick is what re-pins the board after a burst window
 }
 
 // maybeEmit writes the line if forced (driver/finish) or the throttle elapsed —

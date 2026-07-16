@@ -70,10 +70,10 @@ live-pty verification and atlas/Log sweep. Calibration doc [stale] (#127) — pr
 
 ## Plan
 
-- [ ] TDD in `cmd/metis/board.go`/`board_test.go`: inject clock; pending-coalesce + budgeted
+- [x] TDD in `cmd/metis/board.go`/`board_test.go`: inject clock; pending-coalesce + budgeted
   `flushLocked` (erase → dump → redraw); paint stores + budget-flush; tick/close force.
   Update the wiring (`newBoardWriter(w, now)`) + existing tests.
-- [ ] Live pty verification (warm smoke): erase count bounded; final frame intact.
+- [x] Live pty verification (warm smoke): erase count bounded; final frame intact.
 
 ## Log
 
@@ -85,3 +85,11 @@ live-pty verification and atlas/Log sweep. Calibration doc [stale] (#127) — pr
   budget; quiet-path inline flush keeps cold runs feeling live. (§7 autonomous bugfix;
   simple work — plan in-issue, no separate plan file. ARCH-PURE: the budget/coalesce logic
   stays in the one compositor; renderer + sink untouched.)
+- Implemented TDD (3 new tests red→green: burst-coalesce ≤5 erases/500ms with order+completeness,
+  quiet-inline-flush, frozen-clock size-cap; pre-#46 tests updated to injected stepping clocks —
+  two assertions had encoded the per-write-repaint semantics). flushLocked takes `now` as an arg
+  (a re-read inside would break scripted clocks). tick() force-flushes after storing the frame —
+  re-pins the board post-burst + keeps ETA/rate moving. Full package green + vet clean.
+- **Live warm pty verification (the operator's exact invocation, 190×50):** wall 2.4s, **7 erase
+  cycles total (pre-#46: ~150+)** — within the 4Hz budget bound; pyte render: 0 fused rows; final
+  frame intact (outer 3/3, 3 ✓ rows, leaves line).
