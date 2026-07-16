@@ -210,12 +210,16 @@ func (b *boardWriter) forceFlush() {
 }
 
 // flushLocked is the ONE atomic terminal update: erase the painted board, dump the
-// complete pending lines, redraw the stored frame. Caller holds b.mu.
+// complete pending lines, redraw the stored frame — bracketed in DEC 2026 synchronized
+// output (metis#47: supporting terminals apply it atomically, killing the erase→redraw
+// flash; others ignore the private mode). Caller holds b.mu.
 func (b *boardWriter) flushLocked(now time.Time) {
 	if !b.hidden && b.frame != nil {
 		fmt.Fprint(b.w, "\x1b[?25l") // first painting flush hides the cursor
 		b.hidden = true
 	}
+	fmt.Fprint(b.w, "\x1b[?2026h")
+	defer fmt.Fprint(b.w, "\x1b[?2026l")
 	b.erase()
 	// Hold back an unterminated tail: a partial line fused into the board's first
 	// row would corrupt both; it flushes when its newline arrives (or at close).
@@ -236,6 +240,7 @@ func (b *boardWriter) close() {
 	if b.closed {
 		return
 	}
+	fmt.Fprint(b.w, "\x1b[?2026h") // metis#47: the final update is atomic too
 	b.erase()
 	if len(b.pending) > 0 {
 		if b.pending[len(b.pending)-1] != '\n' {
@@ -245,6 +250,7 @@ func (b *boardWriter) close() {
 		b.pending = nil
 	}
 	b.redraw()
+	fmt.Fprint(b.w, "\x1b[?2026l")
 	if b.hidden {
 		fmt.Fprint(b.w, "\x1b[?25h")
 	}
