@@ -57,7 +57,7 @@
 - Create: `cmd/metis/runcontrol.go`
 - Create: `cmd/metis/runcontrol_test.go`
 
-- [ ] **Step 1: Write failing tests for capacity, first-error authority, and publication-before-release**
+- [x] **Step 1: Write failing tests for capacity, first-error authority, and publication-before-release**
 
 Define bounded helpers in the test file so a broken controller fails locally instead of waiting for
 Go's global test timeout:
@@ -245,13 +245,13 @@ func TestRunControlLateSuccessBecomesAborted(t *testing.T) {
 
 The shared `controlResult` type and bounded helpers keep every blocking assertion finite.
 
-- [ ] **Step 2: Run the focused tests and verify RED**
+- [x] **Step 2: Run the focused tests and verify RED**
 
 Run: `go test ./cmd/metis -run '^TestRunControl' -count=1`
 
 Expected: FAIL to compile because `runControl`, `newRunControl`, and `errRunAborted` do not exist.
 
-- [ ] **Step 3: Implement the minimal controller**
+- [x] **Step 3: Implement the minimal controller**
 
 Create `cmd/metis/runcontrol.go` with this contract:
 
@@ -319,13 +319,13 @@ on the same controller. Orchestration parents remain outside admission, so they 
 slot while waiting for child runs. Do not use `context.Context`: there is no interruptible
 subprocess contract in scope, and admitted work is allowed to drain.
 
-- [ ] **Step 4: Run unit tests under the race detector and verify GREEN**
+- [x] **Step 4: Run unit tests under the race detector and verify GREEN**
 
 Run: `go test ./cmd/metis -run '^TestRunControl' -race -count=20`
 
 Expected: PASS on all 20 repetitions with no race report or hang.
 
-- [ ] **Step 5: Commit the primitive**
+- [x] **Step 5: Commit the primitive**
 
 ```bash
 git add cmd/metis/runcontrol.go cmd/metis/runcontrol_test.go

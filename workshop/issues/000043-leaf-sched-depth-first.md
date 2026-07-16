@@ -121,7 +121,7 @@ is structurally current but provisionally calibrated.
 
 Durable implementation detail: [workshop/plans/000043-leaf-sched-depth-first-plan.md](../plans/000043-leaf-sched-depth-first-plan.md).
 
-- [ ] Chunk 1 — build the race-safe `runControl` admission/failure primitive with deterministic handoff tests.
+- [x] Chunk 1 — build the race-safe `runControl` admission/failure primitive with deterministic handoff tests.
 - [ ] Chunk 2 — integrate the controller at the concrete-run boundary and linearize every sampler observation/reduction against global failure.
 - [ ] Chunk 3 — prove early completion, independent nested caps, deterministic records, full race safety, atlas accuracy, and an isolated real-process cold smoke.
 
@@ -148,6 +148,13 @@ Durable implementation detail: [workshop/plans/000043-leaf-sched-depth-first-pla
 - The second implementation-entry review found two post-failure display consumers outside the
   sampler reductions: the board ticker and deferred `boardWriter.close`. Added an explicit board
   abort path, controlled-tick race proof, and a ninth Method A unit; the estimate is now 4.74h.
+
+### 2026-07-16 — Chunk 1 controller complete
+- Added the optional `2n` admission gate and set-once first-error latch with deterministic tests for
+  publication-before-release, serial cancellation, concurrent authority, and late-success discard.
+- Focused `-race -count=20`, spec review, and code-quality review passed. Review strengthened the
+  suite with mutation-sensitive proofs that admission precedes the first error check and that the
+  winner-only publication hook remains inside the controller mutex.
 
 ## Revisions
 
