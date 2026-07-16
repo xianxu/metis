@@ -320,9 +320,10 @@ func TestRunExperiment_BoardFailureRejectsPostPublicationTickAndDiscardsFrame(t 
 	tickSelected := make(chan struct{}, 2)
 	tickFinished := make(chan struct{}, 2)
 	publishedOffset := make(chan int, 1)
+	postFailureTickSend := make(chan error, 1)
 	control.beforeFailureUnlock = func() {
 		publishedOffset <- out.len()
-		boardTick <- at(2000)
+		postFailureTickSend <- sendBoardTickWithin(boardTick, at(2000), "post-publication tick receive")
 		close(exec.failurePublished)
 	}
 	result := make(chan error, 1)
@@ -340,7 +341,9 @@ func TestRunExperiment_BoardFailureRejectsPostPublicationTickAndDiscardsFrame(t 
 		awaitRunControl(t, exec.innerEntered, "four board-mode inner run directories")
 	}
 
-	boardTick <- at(1000)
+	if err := sendBoardTickWithin(boardTick, at(1000), "pre-failure tick receive"); err != nil {
+		t.Fatal(err)
+	}
 	awaitRunControl(t, tickSelected, "pre-failure board tick selection")
 	awaitRunControl(t, tickFinished, "pre-failure board tick completion")
 	preFailure := out.snapshot()
@@ -352,6 +355,10 @@ func TestRunExperiment_BoardFailureRejectsPostPublicationTickAndDiscardsFrame(t 
 
 	close(exec.releaseFailure)
 	offset := awaitRunControl(t, publishedOffset, "board failure publication offset")
+	if err := awaitRunControl(t, postFailureTickSend, "post-publication tick send result"); err != nil {
+		awaitRunControl(t, result, "board-mode failure cleanup after tick-send timeout")
+		t.Fatal(err)
+	}
 	awaitRunControl(t, tickSelected, "post-publication board tick selection")
 	awaitRunControl(t, tickFinished, "rejected post-publication board tick")
 	err := awaitRunControl(t, result, "board-mode failure cleanup")
@@ -368,6 +375,17 @@ func TestRunExperiment_BoardFailureRejectsPostPublicationTickAndDiscardsFrame(t 
 	}
 	if !strings.Contains(suffix, "\x1b[J") || !strings.HasSuffix(suffix, "\x1b[?25h") {
 		t.Errorf("failure cleanup must erase the board and restore the cursor: %q", suffix)
+	}
+}
+
+func sendBoardTickWithin(ch chan<- time.Time, tick time.Time, what string) error {
+	timer := time.NewTimer(runControlTestTimeout)
+	defer timer.Stop()
+	select {
+	case ch <- tick:
+		return nil
+	case <-timer.C:
+		return fmt.Errorf("timed out waiting for %s", what)
 	}
 }
 

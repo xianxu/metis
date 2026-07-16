@@ -203,17 +203,36 @@ func (f *failureBarrierExec) Execute(step experiment.Step, runDir string) (exper
 			}
 		}
 		f.mu.Unlock()
-		<-f.fourEntered
+		if err := waitFailureBarrier(f.fourEntered, "four inner runs to enter"); err != nil {
+			return experiment.StepResult{}, err
+		}
 	}
 	if step.ID == "train" {
 		if f.winner.CompareAndSwap(false, true) {
-			<-f.releaseFailure
+			if err := waitFailureBarrier(f.releaseFailure, "failing train release"); err != nil {
+				return experiment.StepResult{}, err
+			}
 			return experiment.StepResult{}, errors.New("injected train failure")
 		}
-		<-f.failurePublished
+		if err := waitFailureBarrier(f.failurePublished, "controller failure publication"); err != nil {
+			return experiment.StepResult{}, err
+		}
 		return experiment.StepResult{}, errRunAborted
 	}
 	return f.in.Execute(step, runDir)
+}
+
+func waitFailureBarrier(ch <-chan struct{}, what string) error {
+	// Fire before the enclosing test's 2s await so a broken orchestration returns
+	// the specific barrier error instead of only the outer generic timeout.
+	timer := time.NewTimer(runControlTestTimeout / 2)
+	defer timer.Stop()
+	select {
+	case <-ch:
+		return nil
+	case <-timer.C:
+		return fmt.Errorf("failure barrier timed out waiting for %s", what)
+	}
 }
 
 func (f *failureBarrierExec) dirCount() int {
