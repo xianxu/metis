@@ -158,12 +158,12 @@ finished in ~4 min — the run looked alive while making no progress. The `--par
 documents exactly this caveat; it still shipped as the default behavior on a real sweep. Relaunch
 with `OMP_NUM_THREADS=1 …=1 --parallel 8` → load ~21, ~107 trains/min, done in ~28 min.
 
-**Rule:** for a real (subprocess-leaf) sweep, ALWAYS pin the leaf's thread env
-(`OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 VECLIB_MAXIMUM_THREADS=1 MKL_NUM_THREADS=1`) and cap
-`--parallel` below core count. Diagnostic signature of the thrash: starts ≫ completions with the
-process alive (throughput ≈ 0) — which is also why the #38 progress board needs a moving-average
-runs/sec line, not just liveness. Deeper fix candidate: metis could set single-thread BLAS env for
-its leaf subprocesses BY DEFAULT (the parallelism budget belongs to the orchestrator, not the leaf).
+**Rule:** for a real (subprocess-leaf) sweep, the leaf's thread env must be pinned and
+`--parallel` capped below core count. **RESOLVED BY DEFAULT since metis#48** — bare `metis run`
+now injects the four pins at both spawn seams (export a `*_NUM_THREADS` value to override); the
+rule survives for non-metis contexts and as the WHY behind the default. Diagnostic signature of
+the thrash: starts ≫ completions with the process alive (throughput ≈ 0) — which is also why the
+#38 progress board needs a moving-average runs/sec line, not just liveness.
 
 ## Plan-sketch folds: set-cardinality, not incremental counts (metis#39 plan review)
 - **A "keep the latest, count the others" fold specified incrementally silently overcounts under non-monotone input — specify it as set-cardinality (`len(set)-1`) with the latest tracked separately.** The #39 plan's ExtraCommits sketch counted displacement transitions per ROW; interleaved-timestamp records (two concurrent sweeps, same fingerprint) would have inflated it row-for-row, and the plan's own happy-path fixture (2 records, monotone) structurally couldn't catch it — add an out-of-order fixture whenever a fold's correctness depends on input order. metis-specific ground truth: **ledger rows are NOT time-ordered** (`sortPointRuns` orders by content key; append order is sweep-completion order).
