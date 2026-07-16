@@ -439,12 +439,19 @@ func TestShapeSweep_DryRunListsWithoutRunning(t *testing.T) {
 func TestShapeSweep_FailingFoldIsFatal(t *testing.T) {
 	ws := t.TempDir()
 	expPath := writeShapeFile(t, ws, foldShapeMD("[a, fail]")) // model=fail makes train exit non-zero
-	err := runFoldSweep(t, expPath, false, nil, io.Discard, nil)
+	var out strings.Builder
+	err := runFoldSweep(t, expPath, false, nil, &out, nil)
 	if err == nil {
 		t.Fatal("a failing fold must abort the sweep (a partial resample isn't an honest estimate)")
 	}
 	if !strings.Contains(err.Error(), "fold") {
 		t.Errorf("the error should name the failing fold; got: %v", err)
+	}
+	// metis#30: after firstErr latches, remaining outer closures return sentinel zeros —
+	// the error-gated driverEvent must NOT fold them into a displayed estimate. A bogus
+	// "est 0.0000" line would read as a real (terrible) score on an aborting run.
+	if strings.Contains(out.String(), "est 0.0000") {
+		t.Errorf("an aborting nested sweep must not display sentinel-zero estimates:\n%s", out.String())
 	}
 }
 

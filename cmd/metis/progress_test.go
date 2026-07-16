@@ -80,14 +80,15 @@ func at(ms int) time.Time {
 // completion, and emits a final line at finish().
 func TestSweepProgress_ThrottleAndAlwaysEmit(t *testing.T) {
 	var out strings.Builder
-	// Clock: construction, then one reading per event/emit-check.
-	// 10 fold events at 200ms spacing → boundaries at ≥1s: event 5 (t=1000) and event 10 (t=2000).
+	// Clock: one reading per event. 10 fold events at 200ms spacing starting at t=0.
+	// Emits: event 1 (the FIRST event always emits — started=false) and event 6
+	// (t=1000, the first ≥1s after t=0). Events 2-5 and 7-10 are throttled.
 	times := []time.Time{at(0)}
 	for i := 1; i <= 10; i++ {
 		times = append(times, at(i*200))
 	}
 	times = append(times, at(2100), at(2200)) // driver event, finish
-	prog := newSweepProgress(&out, scriptedClock(times...), "maximize",
+	prog := newSweepProgress(&out, scriptedClock(times...),
 		progressTotals{nested: true, outer: 2, outerKind: sampler.SizeExact,
 			configs: 4, configKind: sampler.SizeExact, folds: 20, foldKind: sampler.SizeExact})
 	hooks := prog.forPass(0)
@@ -96,7 +97,7 @@ func TestSweepProgress_ThrottleAndAlwaysEmit(t *testing.T) {
 			Out: sampler.FoldOutcome{Score: 0.8}})
 	}
 	throttled := strings.Count(out.String(), "metis: progress")
-	if throttled != 2 { // t=1000 and t=2000 only
+	if throttled != 2 { // event 1 (first) + event 6 (throttle boundary)
 		t.Fatalf("want 2 throttled emits, got %d:\n%s", throttled, out.String())
 	}
 	// A driver-level completion always emits, regardless of throttle.
@@ -134,7 +135,7 @@ func TestSweepProgress_ConcurrentCounts(t *testing.T) {
 	var out strings.Builder
 	var mu sync.Mutex
 	safeOut := writerFunc(func(p []byte) (int, error) { mu.Lock(); defer mu.Unlock(); return out.Write(p) })
-	prog := newSweepProgress(safeOut, func() time.Time { return at(0) }, "maximize",
+	prog := newSweepProgress(safeOut, func() time.Time { return at(0) },
 		progressTotals{nested: true, folds: 64, foldKind: sampler.SizeExact})
 	var wg sync.WaitGroup
 	for g := 0; g < 8; g++ {

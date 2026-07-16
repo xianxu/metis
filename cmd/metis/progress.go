@@ -143,18 +143,19 @@ func seededTotals(ctx sampler.Ctx, nested bool, runFolds int, configPts []shape.
 // driver-level (outer fold) completion ALWAYS emits; finish() emits the terminal
 // line. A nil *sweepProgress is a no-op everywhere (the non-sweep path is silent).
 type sweepProgress struct {
-	mu        sync.Mutex
-	out       io.Writer
-	now       func() time.Time
-	direction string
-	st        progressState
-	lastEmit  time.Time
-	started   bool
+	mu       sync.Mutex
+	out      io.Writer
+	now      func() time.Time
+	st       progressState
+	lastEmit time.Time
+	started  bool
 }
 
-func newSweepProgress(out io.Writer, now func() time.Time, direction string, totals progressTotals) *sweepProgress {
+// (No objective-direction param: #30's line shows running means, which need no
+// direction; #38 reintroduces it when the board renders per-fold incumbents.)
+func newSweepProgress(out io.Writer, now func() time.Time, totals progressTotals) *sweepProgress {
 	return &sweepProgress{
-		out: out, now: now, direction: direction,
+		out: out, now: now,
 		st: progressState{
 			nested:     totals.nested,
 			outerTotal: totals.outer, outerKind: totals.outerKind,

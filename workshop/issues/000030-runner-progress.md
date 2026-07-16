@@ -1,12 +1,13 @@
 ---
 id: 000030
-status: working
+status: codecomplete
 deps: []
 github_issue:
 created: 2026-07-13
 updated: 2026-07-15
 estimate_hours: 1.63
 started: 2026-07-15T16:07:52-07:00
+actual_hours: 1.51
 ---
 
 # runner progress reporting — SizeHint + progress callback (k/n + live outer-cv)
@@ -98,6 +99,7 @@ outer-fold identity for #38). Single-pass close, no milestones.
   degradation target), #38 owns the TTY presentation. This issue's scope is unchanged.
 
 ### 2026-07-15
+- 2026-07-15: closed — TDD red-green per task; full module go test green (-race on sampler + progress tests); go vet clean. Real-run evidence: metis run --parallel 8 titanic-sweep-smoke.md (real uv/Python leaves, BLAS pinned, stdout redirected to file) printed 6 live progress lines — mid-run folds 1/36→21/36 while outer 0/3, est evolving 0.7980 → 0.8064±0.0084 → final outer 3/3 · configs 12/12 · folds 36/36 · est 0.8103±0.0062; zero escape codes in the captured file. Fixture pins in nested+flat sweep tests assert the final-line counts.; review verdict: SHIP
 - Claimed + start-plan (T2 order, operator-set). Durable plan authored + fresh-eyes reviewed
   (verdict: issues found, all folded — see Plan section). Lessons persisted to workshop/lessons.md.
 - **Design decision (spec revision, full rationale in the plan):** the callback fires at POINT
@@ -137,3 +139,10 @@ outer-fold identity for #38). Single-pass close, no milestones.
   uv/Python leaves, BLAS pinned, stdout redirected): 6 progress lines, live mid-run updates
   (`folds 1/36 → 21/36` while outer 0/3), est evolving `0.7980 → 0.8064 ± 0.0084 → 0.8103 ±
   0.0062`, final `outer 3/3 · configs 12/12 · folds 36/36`; zero escape codes in the captured file.
+- Close review (sidecar: workshop/plans/000030-runner-progress-close-review.md): **SHIP**, no
+  Critical/Important. Minor findings addressed in the close commit anyway: vestigial `direction`
+  param dropped (dead since the flat-format correction; #38 reintroduces it for incumbents), the
+  throttle-test comment corrected (emits are event 1 + event 6, not 5+10), and the error-gated
+  driverEvent path pinned (failing nested sweep must not display sentinel-zero estimates —
+  extended TestShapeSweep_FailingFoldIsFatal). Left as noted: the test-only IndexByte nit; the
+  SizeHint interface break is repo-internal (no out-of-repo Sampler implementers exist).
