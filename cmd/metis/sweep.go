@@ -252,7 +252,28 @@ func runShapeSweep(o runOpts, sh experiment.Shape, now func() time.Time, out io.
 	// metis#30: seed the sink's denominators AT WIRING TIME from the same SizeHint the
 	// levels report (stream-learned totals would arrive only with each level's first
 	// completion — for the driver level that's the first COMPLETED outer fold, too late).
-	ss.prog = newSweepProgress(out, now, seededTotals(ctx, nested, runFolds, configPts, k))
+	ss.prog = newSweepProgress(out, now, sh.Sweeper.Objective.Direction, seededTotals(ctx, nested, runFolds, configPts, k))
+	// metis#38: board mode — the sink paints the pinned board instead of plain lines,
+	// and a 500ms ticker keeps the rate decay + ETA live between events (sink-first:
+	// tick() locks sp.mu then hands the frame to bw — the one global lock order).
+	if o.board != nil {
+		ss.prog.bw = o.board
+		ss.prog.width = boardWidth()
+		ss.prog.gauge = o.leafGauge
+		ticker := time.NewTicker(500 * time.Millisecond)
+		tickDone := make(chan struct{})
+		go func() {
+			for {
+				select {
+				case <-ticker.C:
+					ss.prog.tick()
+				case <-tickDone:
+					return
+				}
+			}
+		}()
+		defer func() { ticker.Stop(); close(tickDone) }()
+	}
 
 	// metis#32: >1 config → nested CV (records inner + per-family outer rows; the honest measure).
 	if nested {
