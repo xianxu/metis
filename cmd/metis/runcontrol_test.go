@@ -26,6 +26,7 @@ func TestRunResolvedExperiment_AbortedBeforeSideEffects(t *testing.T) {
 		expPath:    filepath.Join(ws, "shape.md"),
 		runControl: control,
 		runLabel:   "queued fold",
+		cache:      true,
 	}, "queued", fixedNow(), &out)
 	if !errors.Is(err, errRunAborted) {
 		t.Fatalf("error = %v, want errRunAborted", err)
@@ -35,6 +36,9 @@ func TestRunResolvedExperiment_AbortedBeforeSideEffects(t *testing.T) {
 	}
 	if _, statErr := os.Stat(filepath.Join(ws, "runs", "queued")); !errors.Is(statErr, os.ErrNotExist) {
 		t.Fatalf("queued run created state: %v", statErr)
+	}
+	if _, statErr := os.Stat(filepath.Join(ws, ".metis-cache")); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("queued run initialized cache state: %v", statErr)
 	}
 }
 
