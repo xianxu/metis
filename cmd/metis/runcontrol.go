@@ -1,0 +1,79 @@
+package main
+
+import (
+	"errors"
+	"fmt"
+	"sync"
+
+	"github.com/xianxu/metis/pkg/experiment"
+)
+
+var errRunAborted = errors.New("run aborted after earlier sweep failure")
+
+// runControl bounds admitted concrete runs independently of leaf subprocess
+// parallelism and latches the first whole-run failure. Callbacks must not call
+// back into the controller.
+type runControl struct {
+	slots chan struct{}
+
+	mu  sync.Mutex
+	err error
+
+	beforeFailureLock   func()
+	beforeFailureUnlock func()
+}
+
+func newRunControl(maxParallel int) *runControl {
+	control := &runControl{}
+	if maxParallel > 1 {
+		control.slots = make(chan struct{}, 2*maxParallel)
+	}
+	return control
+}
+
+func (c *runControl) firstError() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.err
+}
+
+func (c *runControl) fail(label string, err error) error {
+	if err == nil {
+		return nil
+	}
+	contextual := fmt.Errorf("%s: %w", label, err)
+	if c.beforeFailureLock != nil {
+		c.beforeFailureLock()
+	}
+
+	c.mu.Lock()
+	if c.err == nil {
+		c.err = contextual
+		if c.beforeFailureUnlock != nil {
+			c.beforeFailureUnlock()
+		}
+	}
+	authoritative := c.err
+	c.mu.Unlock()
+	return authoritative
+}
+
+func (c *runControl) run(label string, fn func() (experiment.Run, error)) (experiment.Run, error) {
+	if c.slots != nil {
+		c.slots <- struct{}{}
+		defer func() { <-c.slots }()
+	}
+
+	if c.firstError() != nil {
+		return experiment.Run{}, errRunAborted
+	}
+
+	run, err := fn()
+	if err != nil {
+		return experiment.Run{}, c.fail(label, err)
+	}
+	if c.firstError() != nil {
+		return experiment.Run{}, errRunAborted
+	}
+	return run, nil
+}
