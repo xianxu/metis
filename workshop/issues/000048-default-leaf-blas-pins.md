@@ -5,7 +5,7 @@ deps: []
 github_issue:
 created: 2026-07-16
 updated: 2026-07-16
-estimate_hours:
+estimate_hours: 0.96
 started: 2026-07-16T11:10:34-07:00
 ---
 
@@ -45,9 +45,37 @@ metis sets single-thread BLAS env for its LEAF subprocesses by default:
 - One loud injection note per run; RUNBOOK updated; a bare real-sweep smoke shows sane
   throughput (no thrash) — rate line evidence in the close.
 
+## Estimate
+
+```estimate
+model: estimate-logic-v3.1
+familiarity: 1.0
+item: smaller-go-module   design=0.05 impl=0.25   # blasPins pure core + unit tests
+item: smaller-go-module   design=0.05 impl=0.30   # two spawn seams (execStep, fork-server) + seam tests
+item: smaller-go-module   design=0.02 impl=0.15   # runExperiment wiring + note + full-chain e2e
+item: atlas-docs          design=0.02 impl=0.10   # RUNBOOK rewrite + atlas + stale-pin grep-sweep
+design-buffer: 0.15
+total: 0.96
+```
+
+*Produced via `brain/data/life/42shots/velocity/estimate-logic-v3.1.md` against `baseline-v3.1.md`. Method A only.*
+
+Cache-identity question resolved at design (no cache work): `Kpre` hashes
+`{step_id, uses, with, seed, upstream}`, HIT-validation re-hashes read-set D, fingerprint is
+git state — env is in none of them, so injection perturbs nothing (documented in
+`blaspins.go`'s doc comment).
+
 ## Plan
 
-- [ ] (at claim) Confirm env/cache-identity non-interaction; TDD both spawn seams; RUNBOOK.
+Durable plan: `workshop/plans/000048-default-leaf-blas-pins-plan.md` (single pass, no Mx —
+one close boundary).
+
+- [ ] blasPins pure core (ambient-wins rule) + unit tests
+- [ ] legacy execStep seam: pins field → child env, env-dump seam test
+- [ ] fork-server seam: pins on server env at spawn (children inherit), real-uv test
+- [ ] runExperiment once-per-run wiring + loud note + full-chain e2e (note + passthrough)
+- [ ] docs: RUNBOOK §1 simplification (kbench), atlas, stale-pin grep-sweep
+- [ ] bare real-sweep smoke — rate-line evidence in the close
 
 ## Log
 
