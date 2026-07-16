@@ -72,6 +72,10 @@ func TestRunControlBoundsAdmissionAtTwiceParallelism(t *testing.T) {
 	results := make(chan runControlResult, 12)
 	var active atomic.Int32
 	var peak atomic.Int32
+	var acquired atomic.Int32
+	var released atomic.Int32
+	control.afterAcquire = func(string) { acquired.Add(1) }
+	control.beforeRelease = func(string) { released.Add(1) }
 
 	for range 12 {
 		go func() {
@@ -109,6 +113,12 @@ func TestRunControlBoundsAdmissionAtTwiceParallelism(t *testing.T) {
 	}
 	if got := peak.Load(); got != 6 {
 		t.Fatalf("peak callbacks = %d, want exactly 6", got)
+	}
+	if got := acquired.Load(); got != 12 {
+		t.Fatalf("acquire hook calls = %d, want 12 attempted runs", got)
+	}
+	if got := released.Load(); got != 12 {
+		t.Fatalf("release hook calls = %d, want 12 attempted runs", got)
 	}
 }
 

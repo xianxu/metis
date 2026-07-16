@@ -11,8 +11,8 @@ import (
 var errRunAborted = errors.New("run aborted after earlier sweep failure")
 
 // runControl bounds admitted concrete runs independently of leaf subprocess
-// parallelism and latches the first whole-run failure. Callbacks must not call
-// back into the controller.
+// parallelism and latches the first whole-run failure. Observation callbacks
+// must not call back into the controller or block production work.
 type runControl struct {
 	slots chan struct{}
 
@@ -21,6 +21,8 @@ type runControl struct {
 
 	beforeFailureLock   func()
 	beforeFailureUnlock func()
+	afterAcquire        func(label string)
+	beforeRelease       func(label string)
 }
 
 func newRunControl(maxParallel int) *runControl {
@@ -78,7 +80,15 @@ func (c *runControl) fail(label string, err error) error {
 func (c *runControl) run(label string, fn func() (experiment.Run, error)) (experiment.Run, error) {
 	if c.slots != nil {
 		c.slots <- struct{}{}
-		defer func() { <-c.slots }()
+		if c.afterAcquire != nil {
+			c.afterAcquire(label)
+		}
+		defer func() {
+			if c.beforeRelease != nil {
+				c.beforeRelease(label)
+			}
+			<-c.slots
+		}()
 	}
 
 	if c.firstError() != nil {

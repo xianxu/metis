@@ -2,11 +2,13 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -14,6 +16,7 @@ import (
 	"time"
 
 	"github.com/xianxu/metis/pkg/experiment"
+	"github.com/xianxu/metis/pkg/record"
 )
 
 // TestSweep_ParallelEqualsSerial (metis#31 M3, cmd-level): the SAME sweep run
@@ -25,7 +28,7 @@ import (
 // write the fan-out touches (configs/points/err).
 func TestSweep_ParallelEqualsSerial(t *testing.T) {
 	body := foldShapeMD("[a, b, c]") // 3 configs × 2 folds = 6 per-fold rows
-	run := func(maxPar int) (ledger, manifest []byte) {
+	run := func(maxPar int) (ledger, manifest []byte, runs map[string]experiment.Run, records map[string]record.RunRecord) {
 		ws := t.TempDir()
 		expPath := writeShapeFile(t, ws, body)
 		if _, err := runExperiment(runOpts{
@@ -51,15 +54,141 @@ func TestSweep_ParallelEqualsSerial(t *testing.T) {
 		if err != nil {
 			t.Fatalf("read manifest: %v", err)
 		}
-		return lb, mb
+		return lb, mb, loadPersistedRuns(t, ws), loadPersistedRecords(t, ws)
 	}
-	sL, sM := run(1)
-	pL, pM := run(8)
+	sL, sM, sRuns, sRecords := run(1)
+	pL, pM, pRuns, pRecords := run(8)
 	if !bytes.Equal(sL, pL) {
 		t.Errorf("ledger bytes differ serial vs parallel:\n--serial--\n%s\n--parallel--\n%s", sL, pL)
 	}
 	if !bytes.Equal(sM, pM) {
 		t.Errorf("manifest bytes differ serial vs parallel:\n--serial--\n%s\n--parallel--\n%s", sM, pM)
+	}
+	if !reflect.DeepEqual(sRuns, pRuns) {
+		t.Errorf("run.json values differ serial vs parallel:\nserial=%#v\nparallel=%#v", sRuns, pRuns)
+	}
+	if !reflect.DeepEqual(sRecords, pRecords) {
+		t.Errorf("record.json values differ serial vs parallel:\nserial=%#v\nparallel=%#v", sRecords, pRecords)
+	}
+}
+
+func loadPersistedRuns(t *testing.T, root string) map[string]experiment.Run {
+	t.Helper()
+	paths, err := filepath.Glob(filepath.Join(root, "runs", "*", "run.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := make(map[string]experiment.Run, len(paths))
+	for _, path := range paths {
+		b, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var run experiment.Run
+		if err := json.Unmarshal(b, &run); err != nil {
+			t.Fatalf("parse %s: %v", path, err)
+		}
+		run.Started = ""
+		run.Finished = ""
+		got[run.ID] = run
+	}
+	return got
+}
+
+func loadPersistedRecords(t *testing.T, root string) map[string]record.RunRecord {
+	t.Helper()
+	paths, err := filepath.Glob(filepath.Join(root, "runs", "*", "record.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := make(map[string]record.RunRecord, len(paths))
+	for _, path := range paths {
+		b, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var rec record.RunRecord
+		if err := json.Unmarshal(b, &rec); err != nil {
+			t.Fatalf("parse %s: %v", path, err)
+		}
+		rec.Started = ""
+		rec.Finished = ""
+		got[rec.RunID] = rec
+	}
+	return got
+}
+
+type scheduleTrace struct {
+	mu     sync.Mutex
+	events []string
+}
+
+func (t *scheduleTrace) add(event string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.events = append(t.events, event)
+}
+
+func (t *scheduleTrace) snapshot() []string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return append([]string(nil), t.events...)
+}
+
+type scheduleTraceExec struct {
+	in    foldFakeExec
+	trace *scheduleTrace
+}
+
+func (e scheduleTraceExec) Execute(step experiment.Step, runDir string) (experiment.StepResult, error) {
+	result, err := e.in.Execute(step, runDir)
+	if err == nil && step.ID == "train" {
+		e.trace.add("train-complete:" + runDir)
+	}
+	return result, err
+}
+
+func TestSweep_ColdAdmissionCompletesTrainBeforeFifthAcquire(t *testing.T) {
+	ws := t.TempDir()
+	body := strings.Replace(foldShapeMD("[a]"), "k: 2", "k: 6", 1)
+	expPath := writeShapeFile(t, ws, body)
+	control := newRunControl(2)
+	trace := &scheduleTrace{}
+	control.afterAcquire = func(label string) { trace.add("acquire:" + label) }
+
+	result := make(chan error, 1)
+	go func() {
+		_, err := runExperiment(runOpts{
+			expPath: expPath, now: fixedNow(),
+			git: fakeGitProbe{name: "metis", sha: "sha"}, cache: false,
+			exec: scheduleTraceExec{in: foldFakeExec{}, trace: trace}, out: io.Discard,
+			maxParallel: 2, runControl: control,
+		})
+		result <- err
+	}()
+	if err := awaitRunControl(t, result, "flat k=6 cold sweep"); err != nil {
+		t.Fatal(err)
+	}
+
+	events := trace.snapshot()
+	firstTrain, fifthAcquire := -1, -1
+	acquires := 0
+	for i, event := range events {
+		switch {
+		case strings.HasPrefix(event, "train-complete:") && firstTrain < 0:
+			firstTrain = i
+		case strings.HasPrefix(event, "acquire:"):
+			acquires++
+			if acquires == 5 {
+				fifthAcquire = i
+			}
+		}
+	}
+	if firstTrain < 0 || fifthAcquire < 0 {
+		t.Fatalf("trace missing first train completion or fifth acquire: %v", events)
+	}
+	if firstTrain >= fifthAcquire {
+		t.Fatalf("cold wave acquired five runs before completing a train: %v", events)
 	}
 }
 
@@ -107,6 +236,23 @@ func TestNestedCV_PeakConcurrencyWithinCap(t *testing.T) {
 	sem := make(chan struct{}, cap)
 	var mu sync.Mutex
 	var cur, peak int
+	var activeRuns, peakRuns, acquiredRuns, releasedRuns int
+	control := newRunControl(cap)
+	control.afterAcquire = func(string) {
+		mu.Lock()
+		defer mu.Unlock()
+		activeRuns++
+		acquiredRuns++
+		if activeRuns > peakRuns {
+			peakRuns = activeRuns
+		}
+	}
+	control.beforeRelease = func(string) {
+		mu.Lock()
+		defer mu.Unlock()
+		activeRuns--
+		releasedRuns++
+	}
 	pe := peakExec{sem: sem, mu: &mu, cur: &cur, peak: &peak, in: foldFakeExec{}}
 	result := make(chan error, 1)
 	go func() {
@@ -119,6 +265,7 @@ func TestNestedCV_PeakConcurrencyWithinCap(t *testing.T) {
 			out:         io.Discard,
 			maxParallel: cap,
 			leafSem:     sem, // runExperiment reuses my sem (maxParallel>1 & non-nil)
+			runControl:  control,
 		})
 		result <- err
 	}()
@@ -128,12 +275,25 @@ func TestNestedCV_PeakConcurrencyWithinCap(t *testing.T) {
 	}
 	mu.Lock()
 	got := peak
+	gotActiveRuns := activeRuns
+	gotPeakRuns := peakRuns
+	gotAcquiredRuns := acquiredRuns
+	gotReleasedRuns := releasedRuns
 	mu.Unlock()
 	if got > cap {
 		t.Fatalf("peak concurrency %d exceeded the global cap %d — the leaf budget leaked across nesting", got, cap)
 	}
 	if got < 2 {
 		t.Fatalf("peak concurrency %d — the fan-out never overlapped, so the test can't prove the cap actually holds", got)
+	}
+	if gotPeakRuns > 2*cap {
+		t.Fatalf("peak admitted runs %d exceeded controller cap %d", gotPeakRuns, 2*cap)
+	}
+	if gotActiveRuns != 0 {
+		t.Fatalf("active admitted runs after completion = %d, want 0", gotActiveRuns)
+	}
+	if gotAcquiredRuns != gotReleasedRuns {
+		t.Fatalf("admission hooks acquired=%d released=%d, want equal", gotAcquiredRuns, gotReleasedRuns)
 	}
 }
 
