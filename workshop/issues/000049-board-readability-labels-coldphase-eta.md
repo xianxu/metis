@@ -153,18 +153,18 @@ model: estimate-logic-v3.1
 familiarity: 1.0
 item: smaller-go-module   design=0.05 impl=0.35
 item: smaller-go-module   design=0.06 impl=0.35
-item: tui-state-machine   design=0.15 impl=0.55
+item: tui-screen          design=0.15 impl=0.55
 item: cross-cutting-refactor design=0.05 impl=0.25
 item: smaller-go-module   design=0.06 impl=0.35
 item: atlas-docs          design=0.02 impl=0.10
-item: code-review         design=0.03 impl=0.20
+item: milestone-review    design=0.03 impl=0.20
 design-buffer: 0.15
 total: 2.63
 ```
 
 Rows: (1) typed activity entities/decorator; (2) event-time reducer and rate/occupancy math;
 (3) board state/rendering and scripted traces; (4) shared vocabulary migration; (5) concrete-run,
-controller, and sweep wiring; (6) peer RUNBOOK plus atlas/stale-term sweep; (7) one SDLC close review.
+controller, and sweep wiring; (6) peer RUNBOOK plus atlas/stale-term sweep; (7) one SDLC milestone-review row.
 
 *Produced via `brain/data/life/42shots/velocity/estimate-logic-v3.1.md` against
 `baseline-v3.1.md`. Method A only.*
