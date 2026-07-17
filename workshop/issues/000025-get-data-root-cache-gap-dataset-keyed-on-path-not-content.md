@@ -1,11 +1,12 @@
 ---
 id: 000025
-status: open
+status: working
 deps: []
 github_issue:
 created: 2026-07-07
-updated: 2026-07-07
+updated: 2026-07-17
 estimate_hours:
+started: 2026-07-17T16:50:53-07:00
 ---
 
 # get-data root cache gap — dataset keyed on path string, not content
