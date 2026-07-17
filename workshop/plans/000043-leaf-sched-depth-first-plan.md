@@ -694,7 +694,7 @@ git commit -m "#43: abort queued runs across nested sweep passes" -m "Use one ex
 - Modify: `cmd/metis/runcontrol_test.go`
 - Modify: `cmd/metis/parallel_test.go:16-175`
 
-- [ ] **Step 1: Add acquire/release observation seams for integration tests**
+- [x] **Step 1: Add acquire/release observation seams for integration tests**
 
 Add two nil-by-default hooks to `runControl`:
 
@@ -718,7 +718,7 @@ if c.slots != nil {
 
 These are observation-only test seams: callbacks must not call controller methods or block production. Extend `TestRunControlBoundsAdmission` to count hook acquisitions/releases and assert both equal the attempted run count.
 
-- [ ] **Step 2: Write the deterministic cold-wave regression**
+- [x] **Step 2: Write the deterministic cold-wave regression**
 
 Add a shared trace recorder and executor:
 
@@ -780,7 +780,7 @@ func TestSweep_ColdAdmissionCompletesTrainBeforeFifthRunStarts(t *testing.T) {
 
 Because the fifth acquire hook cannot fire until a token is released, and token release occurs only after the admitted concrete run returns, this test deterministically pins the desired ordering without sleeps.
 
-- [ ] **Step 3: Extend the nested test to inspect both concurrency budgets**
+- [x] **Step 3: Extend the nested test to inspect both concurrency budgets**
 
 Inject a controller into `TestNestedCV_PeakConcurrencyWithinCap`. Its acquire/release hooks update `activeRuns`, `peakRuns`, `acquiredRuns`, and `releasedRuns` under the test mutex while the existing `peakExec` tracks leaves. Run `runExperiment` in a goroutine and use `recvWithin` for a two-second deadlock bound. Assert:
 
@@ -793,7 +793,7 @@ if acquiredRuns != releasedRuns { t.Fatalf("acquired=%d released=%d", acquiredRu
 
 Keep the unit controller test's exact `peak == 2n` assertion; the nested integration assertion is an upper bound because fast fake runs need not saturate all slots.
 
-- [ ] **Step 4: Strengthen serial/parallel determinism to include run semantics**
+- [x] **Step 4: Strengthen serial/parallel determinism to include run semantics**
 
 Extend `TestSweep_ParallelEqualsSerial` so its helper loads every `runs/*/run.json` and `runs/*/record.json` into maps keyed by run ID. Normalize only `Started` and `Finished`, which are timing-bearing:
 
@@ -831,13 +831,13 @@ func semanticRecords(t *testing.T, ws string) map[string]record.RunRecord {
 
 Return both maps beside ledger/manifest bytes and assert `reflect.DeepEqual` for serial versus parallel runs and records. Keep the existing byte comparisons unchanged.
 
-- [ ] **Step 5: Run the complete scheduling acceptance subset**
+- [x] **Step 5: Run the complete scheduling acceptance subset**
 
 Run: `go test ./cmd/metis -run 'TestRunControl|TestSweep_ColdAdmission|TestSweep_ParallelEqualsSerial|TestNestedCV_PeakConcurrency|TestNestedCV_FirstFailure' -race -count=10`
 
 Expected: PASS ten times with no race, timeout, admission leak, post-failure output, or deterministic-output difference.
 
-- [ ] **Step 6: Commit the scheduling regressions**
+- [x] **Step 6: Commit the scheduling regressions**
 
 ```bash
 git add cmd/metis/runcontrol.go cmd/metis/runcontrol_test.go cmd/metis/parallel_test.go

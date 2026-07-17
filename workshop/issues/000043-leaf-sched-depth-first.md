@@ -169,6 +169,13 @@ Durable implementation detail: [workshop/plans/000043-leaf-sched-depth-first-pla
   and an error erases and forgets the frame before deferred close. Controlled pre/post-failure tick
   tests and the focused `-race -count=20` suite passed, followed by full spec and quality approval.
 
+### 2026-07-16 — Task 4 scheduling acceptance complete
+- Proved a flat cold sweep completes a train before its fifth admission, nested run/leaf peaks remain
+  independently capped, every token releases, and serial/parallel manifests, ledgers, runs, and
+  records remain byte- or semantically identical as appropriate.
+- Review hardened the proof against zero-hook false passes, hook panics, and payload/path identity
+  swaps. The scheduling/cancellation subset passed `-race -count=10` and full race verification.
+
 ## Revisions
 
 ### 2026-07-16 — fresh-eyes spec review
