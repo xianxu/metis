@@ -186,3 +186,13 @@ the thrash: starts ≫ completions with the process alive (throughput ≈ 0) —
 - **Doc-consistency sweeps must include Go sources, not just `*.md`** — operator guidance lives in flag `--help` strings and load-bearing comments (main.go's `--parallel` help told operators to hand-pin BLAS).
 - **A plan's inline test code must be written against the VERIFIED fixture/format; promote any fixture gap to an explicit numbered step.** A parenthetical "check the fixture" hedge next to code that contradicts it breaks the TDD red-green sequence and invites wrong-reason debugging (env-dump dumps METIS_* only; experiment steps live in YAML frontmatter, not a fenced block).
 - **A cross-repo deliverable is invisible to the closing repo's review window — pin the peer repository + exact commit in the issue Log before close.** A checked plan row and prose saying “RUNBOOK updated” are not independently traceable when the actual diff lives in kbench. Record the peer commit as soon as it lands so the boundary reviewer can verify the requirement without trusting the implementor's assertion.
+
+## Plan-review lessons (metis#25 plan)
+- **Env-dependent truth can't live in a shared static config.** Before pinning hashes (or any
+  environment-specific constant) into a config file, enumerate every consumer of that file — the
+  same kbench shapes are driven by both the live CLI (real data) and the hermetic e2e (fixture
+  data), so one pin block cannot satisfy both; the seam must be explicit (here: pin only the
+  live-only shape).
+- **When hashing "everything in a directory," mirror the runner's existing exclusion set.** Step
+  dirs mix artifacts with contract files (with.json etc.); any scheme where a config file would
+  pin its own hash is a self-reference red flag to check for explicitly.

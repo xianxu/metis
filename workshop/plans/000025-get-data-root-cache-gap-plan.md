@@ -65,3 +65,30 @@
 - [ ] Issue Log: evidence (test output, the mutated-payload failure line, kbench pin commit sha). Close with cross-repo commit pinned in the Log (the #48 close-review lesson).
 
 **Verification gate:** kaggle suite green; the mutated-payload test red-proofed (revert the verify call, watch (b) fail); kbench dry-run parses the pinned shapes.
+
+## Revisions
+
+### 2026-07-17 — plan review folded (2 Critical, 2 Important, 4 Minor)
+
+- **PIN SCOPE (Critical 1):** pin ONLY `titanic-sweep.md` — the live RUNBOOK decision shape,
+  the one shape the hermetic e2e does NOT copy. `titanic-baseline.md`, `titanic-features.md`,
+  `titanic-sweep-smoke.md` are dual-use (live CLI + e2e fixture data via KAGGLE_FAKE_DATA_DIR):
+  a single static pin block cannot satisfy both truths — they stay UNPINNED (the loud unpinned
+  note is their documented mode). Recorded in the atlas rule. Verify the new stderr note doesn't
+  break kbench e2e assertions (run the suite).
+- **EXCLUSION SET (Critical 2):** `verifyPins` walks RECURSIVELY with slash-relative path keys
+  and excludes top-level `with.json`/`metrics.json`/`reads.json` — mirroring metis
+  `collectArtifacts` (exec.go:214-224) so a config can never pin its own hash.
+- **HASH SOURCE (Important 3):** compute pins from a live run's get-data artifacts
+  (`competition/titanic/pipelines/runs/best-rf-6dde4f89/get-data/{train,test,gender_submission}.csv`
+  — real 891/418-row data, THREE files), NOT `data/titanic/` (that's adapt's output). Cross-check
+  by letting the step's own unpinned print confirm the same hashes on the next live run.
+- **OPERATOR NOTE (Important 4):** first run after pinning = full cold re-run (new Kpre chain)
+  + ledger cohort discontinuity (PointAddress moves) — CORRECT behavior, loud in: issue Log,
+  kbench commit body, one RUNBOOK line.
+- Minor 5: with→MISS coverage exists — cite caching_test.go:123-132 (knob change → selective
+  MISS), :447-452 (nested-map re-key), record_test.go:12-22 (map-order canonical). No new test.
+- Minor 7: mutation test uses KAGGLE_FAKE_DATA_DIR temp dir (fake serves it byte-for-byte);
+  default stub is 2-file — set the dir for 3-file realism.
+- Minor 8: verification-gate command named: `metis run -dry-run competition/titanic/pipelines/titanic-sweep.md`
+  (strict ParseShape) + the kbench e2e suite.
