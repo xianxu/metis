@@ -137,13 +137,13 @@ exact peer commit in this issue's Log before close so the cross-repo requirement
 Durable plan: `workshop/plans/000049-board-readability-labels-coldphase-eta-plan.md`
 (single pass, no Mx — one close boundary).
 
-- [ ] Add typed step/run activity at the concrete executor and persistence seams, including cache,
+- [x] Add typed step/run activity at the concrete executor and persistence seams, including cache,
   failure, role, ordering, and cancellation tests.
-- [ ] Reduce time-driven occupancy and eligible-run telemetry with deterministic readiness, decay,
+- [x] Reduce time-driven occupancy and eligible-run telemetry with deterministic readiness, decay,
   recovery, and out-of-order-event tests.
-- [ ] Render truthful flat/nested vocabulary, startup observations, last-run age, and mature rate/ETA;
+- [x] Render truthful flat/nested vocabulary, startup observations, last-run age, and mature rate/ETA;
   preserve repaint, failure, width, and terminal behavior.
-- [ ] Update and commit the kbench Titanic RUNBOOK, pin its full commit here, then run focused,
+- [x] Update and commit the kbench Titanic RUNBOOK, pin its full commit here, then run focused,
   race, full-suite, formatting, and stale-vocabulary verification.
 
 ## Estimate
@@ -192,6 +192,18 @@ controller, and sweep wiring; (6) peer RUNBOOK plus atlas/stale-term sweep; (7) 
 - Fresh-eyes plan review: Chunk 1 found Important gaps in shared run-control activity gating and
   concrete flat/nested role propagation; Chunk 2 found an Important gap in aggregate counter ownership.
   Patched the plan and both reviewers re-checked clean. Chunk 3 fresh-eyes review returned clean.
+
+### 2026-07-17 — implementation verification
+- Implemented typed step/run activity, run-role propagation, run-control-gated publication, event-time
+  eligible-run rate reduction, tick-smoothed `~slots`, factual cold-start board wording, shared
+  flat/nested progress vocabulary, and last-run-age/mature `~ETA` rendering. Updated atlas with the
+  durable activity seam and board contract.
+- Updated the kbench Titanic operator RUNBOOK and committed it as
+  `68edc6ca312dbe5306ce87315abec2d67e678005` (`docs: update metis board progress contract`).
+- Verification run: `go test ./cmd/metis -count=1`; `go test ./cmd/metis -race -count=1`;
+  `go test ./... -race -count=1`; metis `git diff --check`; kbench `git diff --check`; stale board
+  terminology grep over metis `cmd/`, `atlas/`, issue/plan, and the kbench RUNBOOK. Remaining grep hits
+  are historical problem/spec wording or negative test fixtures, not live operator output.
 
 ## Revisions
 

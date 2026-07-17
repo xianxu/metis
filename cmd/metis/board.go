@@ -53,15 +53,15 @@ func renderBoard(bs boardState, env boardEnv) []string {
 		r := bs.rows[i]
 		switch {
 		case r.done:
-			lines = append(lines, fmt.Sprintf("  fold %d ✓ held-out %.4f", i, r.heldOut))
+			lines = append(lines, fmt.Sprintf("  outer fold %d ✓ held-out %.4f", i, r.heldOut))
 		case r.configK == 0 && r.foldK == 0:
-			lines = append(lines, fmt.Sprintf("  fold %d — queued", i))
+			lines = append(lines, fmt.Sprintf("  outer fold %d — queued", i))
 		default:
 			b := ""
 			if r.hasBest {
 				b = fmt.Sprintf(" · best %.4f", r.best)
 			}
-			lines = append(lines, fmt.Sprintf("  fold %d ▸ configs %d/%d · folds %d/%d%s",
+			lines = append(lines, fmt.Sprintf("  outer fold %d ▸ configs scored %d/%d · inner-CV runs %d/%d%s",
 				i, r.configK, perConfigs, r.foldK, perFolds, b))
 		}
 	}
@@ -71,17 +71,42 @@ func renderBoard(bs boardState, env boardEnv) []string {
 
 	// Leaves / throughput / ETA.
 	var segs []string
+	runNoun := "CV runs"
+	runSingular := "CV run"
+	if bs.st.nested {
+		runNoun = "inner-CV runs"
+		runSingular = "inner-CV run"
+	}
 	if env.capacity > 0 {
-		segs = append(segs, fmt.Sprintf("leaves %d/%d", env.busy, env.capacity))
+		segs = append(segs, fmt.Sprintf("~slots %d/%d", env.busy, env.capacity))
+	}
+	if bs.st.foldK == 0 {
+		start := []string{"starting"}
+		start = append(start, segs...)
+		if bs.st.stepK > 0 {
+			start = append(start, fmt.Sprintf("%d steps completed", bs.st.stepK))
+			if !bs.st.lastStepAt.IsZero() {
+				start = append(start, "last step "+fmtAge(env.now.Sub(bs.st.lastStepAt))+" ago")
+			}
+		}
+		start = append(start, fmt.Sprintf("no %s complete", runSingular))
+		lines = append(lines, strings.Join(start, " · "))
+		for i, l := range lines {
+			lines[i] = clampLine(l, env.width)
+		}
+		return lines
+	}
+	if !bs.st.lastRunAt.IsZero() {
+		segs = append(segs, fmt.Sprintf("last %s %s ago", runSingular, fmtAge(env.now.Sub(bs.st.lastRunAt))))
 	}
 	if perMin, ok := bs.rate.rate(env.now); ok {
-		segs = append(segs, fmt.Sprintf("%.1f folds/min", perMin))
+		segs = append(segs, fmt.Sprintf("%.1f %s/min", perMin, runNoun))
 	} else {
-		segs = append(segs, "— folds/min")
+		segs = append(segs, fmt.Sprintf("— %s/min", runNoun))
 	}
 	if remaining := bs.st.foldTotal - bs.st.foldK; remaining > 0 {
 		if eta, ok := bs.rate.eta(env.now, remaining); ok {
-			segs = append(segs, "ETA "+fmtETA(eta))
+			segs = append(segs, "~ETA "+fmtETA(eta))
 		}
 	}
 	lines = append(lines, strings.Join(segs, " · "))
@@ -90,6 +115,13 @@ func renderBoard(bs boardState, env boardEnv) []string {
 		lines[i] = clampLine(l, env.width)
 	}
 	return lines
+}
+
+func fmtAge(d time.Duration) string {
+	if d < 0 {
+		d = 0
+	}
+	return fmtETA(d)
 }
 
 // fmtETA renders a duration compactly: 34s · 3m10s · 2h5m.

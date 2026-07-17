@@ -179,6 +179,136 @@ func TestRunExperiment_FailedStepStillWritesLedger(t *testing.T) {
 	}
 }
 
+func TestRunExperimentActivityRunSuccessPublishesAfterRequiredArtifacts(t *testing.T) {
+	root := repoRoot(t)
+	src := filepath.Join(root, "testdata", "experiment", "run-echo.md")
+	b, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	expPath := filepath.Join(dir, "run-echo.md")
+	if err := os.WriteFile(expPath, b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var runEvents []activityEvent
+	var publishErrs []error
+	_, err = runExperiment(runOpts{
+		expPath:  expPath,
+		runID:    "run-activity",
+		stepPath: []string{filepath.Join(root, "testdata", "steps")},
+		now:      func() time.Time { return time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC) },
+		git:      fakeGitProbe{name: "metis", sha: "testsha", dirty: false},
+		out:      io.Discard,
+		activity: func(ev activityEvent) {
+			if ev.Kind != activityRunSuccess {
+				return
+			}
+			runEvents = append(runEvents, ev)
+			for _, name := range []string{"run.json", "record.json"} {
+				if _, statErr := os.Stat(filepath.Join(dir, "runs", ev.RunID, name)); statErr != nil {
+					publishErrs = append(publishErrs, statErr)
+				}
+			}
+		},
+	})
+	if err != nil {
+		t.Fatalf("runExperiment: %v", err)
+	}
+	if len(publishErrs) > 0 {
+		t.Fatalf("run-success event arrived before required artifacts existed: %v", publishErrs)
+	}
+	if len(runEvents) != 1 {
+		t.Fatalf("run-success events = %d; want 1 (%+v)", len(runEvents), runEvents)
+	}
+	if runEvents[0].RunID != "run-activity" {
+		t.Fatalf("run event = %+v; want runID run-activity", runEvents[0])
+	}
+	if runEvents[0].Role != runRoleNone {
+		t.Fatalf("plain run event role = %q; want no role/ineligible", runEvents[0].Role)
+	}
+}
+
+func TestRunExperimentActivityRunSuccessNotPublishedForFailedExecution(t *testing.T) {
+	root := repoRoot(t)
+	src := filepath.Join(root, "testdata", "experiment", "run-fail.md")
+	b, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	expPath := filepath.Join(dir, "run-fail.md")
+	if err := os.WriteFile(expPath, b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var runEvents []activityEvent
+	_, err = runExperiment(runOpts{
+		expPath:  expPath,
+		runID:    "run-failed-activity",
+		stepPath: []string{filepath.Join(root, "testdata", "steps")},
+		now:      func() time.Time { return time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC) },
+		git:      fakeGitProbe{name: "metis", sha: "testsha", dirty: false},
+		out:      io.Discard,
+		activity: func(ev activityEvent) {
+			if ev.Kind == activityRunSuccess {
+				runEvents = append(runEvents, ev)
+			}
+		},
+	})
+	if err == nil {
+		t.Fatal("runExperiment: want failing step error")
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, "runs", "run-failed-activity", "run.json")); statErr != nil {
+		t.Fatalf("failed run should still write run.json: %v", statErr)
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, "runs", "run-failed-activity", "record.json")); statErr != nil {
+		t.Fatalf("failed run should still write record.json: %v", statErr)
+	}
+	if len(runEvents) != 0 {
+		t.Fatalf("failed execution emitted run-success events: %+v", runEvents)
+	}
+}
+
+func TestRunExperimentActivityRunSuccessNotPublishedWhenRecordPersistenceFails(t *testing.T) {
+	root := repoRoot(t)
+	src := filepath.Join(root, "testdata", "experiment", "run-echo.md")
+	b, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	expPath := filepath.Join(dir, "run-echo.md")
+	if err := os.WriteFile(expPath, b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "runs", "run-record-fails", "record.json"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	var runEvents []activityEvent
+	_, err = runExperiment(runOpts{
+		expPath:  expPath,
+		runID:    "run-record-fails",
+		stepPath: []string{filepath.Join(root, "testdata", "steps")},
+		now:      func() time.Time { return time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC) },
+		git:      fakeGitProbe{name: "metis", sha: "testsha", dirty: false},
+		out:      io.Discard,
+		activity: func(ev activityEvent) {
+			if ev.Kind == activityRunSuccess {
+				runEvents = append(runEvents, ev)
+			}
+		},
+	})
+	if err == nil {
+		t.Fatal("runExperiment: want record persistence error")
+	}
+	if len(runEvents) != 0 {
+		t.Fatalf("record persistence failure emitted run-success events: %+v", runEvents)
+	}
+}
+
 // TestRunExperiment_RejectsInvalidAtRunTime is the execution-time enforcement
 // test: a semantically-invalid experiment (a cycle — shape-valid, so CUE accepts
 // it) is rejected by `metis run` BEFORE any step runs, closing the SHAPE-only gap

@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -46,14 +47,17 @@ type progressState struct {
 	configKind           sampler.SizeKind
 	foldK, foldTotal     int
 	foldKind             sampler.SizeKind
+	stepK                int
+	lastStepAt           time.Time
+	lastRunAt            time.Time
 	outerScores          []float64 // nested: completed outer-fold held-out scores
 	flatScores           []float64 // flat: the one config's completed fold scores
 }
 
 // progressLine renders the aggregated line. Nested:
-// `outer 1/3 · configs 84/216 · folds 421/1080 · est 0.8283 ± 0.0140`
+// `outer folds 1/3 · configs scored 84/216 · inner-CV runs 421/1080 · est 0.8283 ± 0.0140`
 // (est — until an outer fold lands; ± only at n≥2). Flat (since metis#32: iff 1
-// config): `folds 3/5 · score 0.8400` (the running fold mean — nothing to be
+// config): `CV runs 3/5 · score 0.8400` (the running fold mean — nothing to be
 // "best" of). Kinds render k/n (exact), k/≤n (budget), k/? (unknown). Pure.
 func progressLine(st progressState) string {
 	return "metis: progress " + progressCore(st)
@@ -75,9 +79,9 @@ func progressCore(st progressState) string {
 	}
 	var parts []string
 	if st.nested {
-		parts = append(parts, "outer "+frac(st.outerK, st.outerTotal, st.outerKind))
-		parts = append(parts, "configs "+frac(st.configK, st.configTotal, st.configKind))
-		parts = append(parts, "folds "+frac(st.foldK, st.foldTotal, st.foldKind))
+		parts = append(parts, "outer folds "+frac(st.outerK, st.outerTotal, st.outerKind))
+		parts = append(parts, "configs scored "+frac(st.configK, st.configTotal, st.configKind))
+		parts = append(parts, "inner-CV runs "+frac(st.foldK, st.foldTotal, st.foldKind))
 		mean, se, n := meanSE(st.outerScores)
 		switch {
 		case n == 0:
@@ -88,7 +92,7 @@ func progressCore(st progressState) string {
 			parts = append(parts, fmt.Sprintf("est %.4f ± %.4f", mean, se))
 		}
 	} else {
-		parts = append(parts, "folds "+frac(st.foldK, st.foldTotal, st.foldKind))
+		parts = append(parts, "CV runs "+frac(st.foldK, st.foldTotal, st.foldKind))
 		if mean, _, n := meanSE(st.flatScores); n > 0 {
 			parts = append(parts, fmt.Sprintf("score %.4f", mean))
 		}
@@ -142,36 +146,38 @@ func seededTotals(ctx sampler.Ctx, nested bool, runFolds int, configPts []shape.
 	}
 }
 
-// movingRate is metis#38's throughput window: a ring of the last 64 fold-completion
-// instants. rate(now) = n / (now − oldest) — `now` in the denominator means a STALL
-// decays the rate live (the k10-probe BLAS-thrash signature: throughput → 0 while the
-// process looks alive). Moving-average by construction (the operator's requirement:
-// per-leaf times vary by config, rf500 ≫ logreg). Pure over passed-in instants.
+// movingRate retains the latest eligible run completions by event time. rate(now)
+// = (n-1)/(now-oldest) after the confidence gate; `now` in the denominator means
+// a STALL decays live while last-run age remains the sharp freshness signal.
 type movingRate struct {
-	times [64]time.Time
-	n     int // total adds (ring index = n % len)
+	times []time.Time
 }
 
 func (m *movingRate) add(t time.Time) {
-	m.times[m.n%len(m.times)] = t
-	m.n++
+	i := sort.Search(len(m.times), func(i int) bool { return !m.times[i].Before(t) })
+	m.times = append(m.times, time.Time{})
+	copy(m.times[i+1:], m.times[i:])
+	m.times[i] = t
+	if len(m.times) > 64 {
+		m.times = m.times[1:]
+	}
 }
 
-// rate returns completions/minute over the kept window; ok=false until 2 completions.
+// rate returns eligible runs/minute over the kept event-time window.
 func (m *movingRate) rate(now time.Time) (perMin float64, ok bool) {
-	if m.n < 2 {
+	if len(m.times) < 16 {
 		return 0, false
 	}
-	kept := m.n
-	if kept > len(m.times) {
-		kept = len(m.times)
+	oldest := m.times[0]
+	newest := m.times[len(m.times)-1]
+	if newest.Sub(oldest) < 15*time.Second {
+		return 0, false
 	}
-	oldest := m.times[(m.n-kept)%len(m.times)]
 	mins := now.Sub(oldest).Minutes()
 	if mins <= 0 {
 		return 0, false
 	}
-	return float64(kept) / mins, true
+	return float64(len(m.times)-1) / mins, true
 }
 
 // eta = remaining / rate; ok=false when the rate is unavailable or zero.
@@ -181,6 +187,36 @@ func (m *movingRate) eta(now time.Time, remaining int) (time.Duration, bool) {
 		return 0, false
 	}
 	return time.Duration(float64(remaining) / r * float64(time.Minute)), true
+}
+
+type occupancySample struct {
+	busy, capacity int
+}
+
+type occupancyWindow struct {
+	samples []occupancySample
+}
+
+func (w *occupancyWindow) add(busy, capacity int) {
+	if capacity <= 0 {
+		return
+	}
+	w.samples = append(w.samples, occupancySample{busy: busy, capacity: capacity})
+	if len(w.samples) > 4 {
+		w.samples = w.samples[1:]
+	}
+}
+
+func (w occupancyWindow) mean() (busy, capacity int, ok bool) {
+	if len(w.samples) == 0 {
+		return 0, 0, false
+	}
+	var sum int
+	for _, s := range w.samples {
+		sum += s.busy
+		capacity = s.capacity
+	}
+	return int(math.Round(float64(sum) / float64(len(w.samples)))), capacity, true
 }
 
 // passRow is one outer fold's live board row (metis#38): in-flight counters + the
@@ -223,9 +259,10 @@ type sweepProgress struct {
 	// metis#38 board mode (all nil/zero in plain mode): emits paint the rendered frame
 	// to bw instead of printing plain lines. Lock order: sink.mu → bw.mu, ALWAYS — the
 	// ticker enters via tick() (a sink method), never a boardWriter-first path.
-	bw    *boardWriter
-	width int               // terminal width ($COLUMNS | 80), read once at wiring
-	gauge func() (int, int) // (busy, capacity) leaf occupancy; nil = no leaves segment
+	bw        *boardWriter
+	width     int               // terminal width ($COLUMNS | 80), read once at wiring
+	gauge     func() (int, int) // (busy, capacity) leaf occupancy; nil = no leaves segment
+	occupancy occupancyWindow
 }
 
 func newSweepProgress(out io.Writer, now func() time.Time, direction string, totals progressTotals) *sweepProgress {
@@ -294,8 +331,6 @@ func (sp *sweepProgress) forPass(outer int) passHooks {
 		fold: func(ev sampler.ProgressEvent[sampler.FoldPoint, sampler.FoldOutcome]) {
 			sp.mu.Lock()
 			defer sp.mu.Unlock()
-			sp.st.foldK++
-			sp.rate.add(sp.now()) // #38: throughput window feeds off every leaf completion
 			if !sp.st.nested {
 				sp.st.flatScores = append(sp.st.flatScores, ev.Out.Score)
 			}
@@ -305,6 +340,41 @@ func (sp *sweepProgress) forPass(outer int) passHooks {
 			sp.maybeEmit(false)
 		},
 	}
+}
+
+func (sp *sweepProgress) activity(ev activityEvent) {
+	if sp == nil {
+		return
+	}
+	sp.mu.Lock()
+	defer sp.mu.Unlock()
+	switch ev.Kind {
+	case activityStepSuccess:
+		sp.st.stepK++
+		at := ev.At
+		if at.IsZero() {
+			at = sp.now()
+		}
+		if at.After(sp.st.lastStepAt) {
+			sp.st.lastStepAt = at
+		}
+	case activityRunSuccess:
+		if ev.Role != runRoleNestedInnerCV && ev.Role != runRoleFlatCV {
+			return
+		}
+		sp.st.foldK++
+		at := ev.At
+		if at.IsZero() {
+			at = sp.now()
+		}
+		if at.After(sp.st.lastRunAt) {
+			sp.st.lastRunAt = at
+		}
+		sp.rate.add(at)
+	default:
+		return
+	}
+	sp.maybeEmit(false)
 }
 
 // better orients a display-best comparison by the objective direction.
@@ -349,6 +419,10 @@ func (sp *sweepProgress) tick() {
 		return
 	}
 	sp.mu.Lock()
+	if sp.gauge != nil {
+		busy, capacity := sp.gauge()
+		sp.occupancy.add(busy, capacity)
+	}
 	sp.emit() // stores the fresh frame (budget may skip the draw)
 	bw := sp.bw
 	sp.mu.Unlock()
@@ -388,10 +462,7 @@ func (sp *sweepProgress) maybeEmit(force bool) {
 // plain mode prints the #30 aggregated line. Caller holds sp.mu.
 func (sp *sweepProgress) emit() {
 	if sp.bw != nil {
-		busy, capacity := 0, 0
-		if sp.gauge != nil {
-			busy, capacity = sp.gauge()
-		}
+		busy, capacity, _ := sp.occupancy.mean()
 		sp.bw.paint(renderBoard(sp.snapshotLocked(),
 			boardEnv{width: sp.width, now: sp.now(), busy: busy, capacity: capacity}))
 		return

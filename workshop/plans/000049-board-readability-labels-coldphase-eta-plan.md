@@ -22,24 +22,24 @@ and the kbench Markdown RUNBOOK.
 
 ### PURE entities and transforms
 
-| Concept | Responsibility | Invariants |
-|---|---|---|
-| `activityEvent` | Immutable successful activity fact with kind, typed run role/identity, and injected-clock timestamp. | Failed work creates no event; timestamps describe completion, not callback delivery. |
-| `runRole` | Distinguish nested inner-CV, flat CV, preamble, outer score, and ineligible/no-role runs. | Only inner-CV and flat CV are rate/counter eligible. |
-| `occupancyWindow` | Retain the last four 500ms occupancy samples and return their rounded mean. | Event count cannot affect the result; capacity is four. |
-| `movingRate` | Retain the latest 64 eligible completion times in event-time order and derive readiness/rate from `now`. | Ready only at n≥16 and span≥15s; rate is `(n-1)/(now-oldest)`; reversed delivery is deterministic. |
-| `activitySnapshot` | Read-only facts consumed by formatting: steps, max step time, eligible runs, max run time, smoothed slots, and optional rate. | Last times are maxima; startup ends on the first eligible run. |
+| Concept | Kind | File location | Status | Responsibility | Invariants |
+|---|---|---|---|---|---|
+| `activityEvent` | PURE | `cmd/metis/activity.go` | new | Immutable successful activity fact with kind, typed run role/identity, and injected-clock timestamp. | Failed work creates no event; timestamps describe completion, not callback delivery. |
+| `runRole` | PURE | `cmd/metis/activity.go` | new | Distinguish nested inner-CV, flat CV, preamble, outer score, and ineligible/no-role runs. | Only inner-CV and flat CV are rate/counter eligible. |
+| `occupancyWindow` | PURE | `cmd/metis/progress.go` | new | Retain the last four 500ms occupancy samples and return their rounded mean. | Event count cannot affect the result; capacity is four. |
+| `movingRate` | PURE | `cmd/metis/progress.go` | modified | Retain the latest 64 eligible completion times in event-time order and derive readiness/rate from `now`. | Ready only at n≥16 and span≥15s; rate is `(n-1)/(now-oldest)`; reversed delivery is deterministic. |
+| `progressState` activity fields | PURE | `cmd/metis/progress.go` | modified | Carry read-only activity facts consumed by formatting: steps, max step time, eligible runs, max run time, and optional scores. | Last times are maxima; startup ends on the first eligible run. |
 
 ### INTEGRATION boundaries
 
-| Boundary | Responsibility | Failure semantics |
-|---|---|---|
-| `activityExecutor` | Decorate the final cache-aware executor and emit one step event after a successful real execution or cache hit. | Inner error is returned unchanged and emits nothing. |
-| `runResolvedExperiment` activity publication | Emit the typed run event only after execution and required `runs/<id>/{run,record}.json` persistence succeed. | Execution failure, `run.json`/`record.json` failure, or provenance assembly failure emits no successful-run event; best-effort capture is not a success gate. |
-| `runControl`-gated emitter | Linearize all step and run activity against fatal failure before calling `sweepProgress`. | Rejected after failure; never acquire controller state while holding progress state. |
-| `sweepProgress` | Synchronize activity/tick reduction and publish immutable board snapshots. | Short callbacks; non-sweep callers receive a no-op emitter. |
-| `renderBoard` / `progressCore` | Apply shared vocabulary and factual startup/mature wording to snapshots. | No diagnosis such as “not hung”; width, cadence, failure flush, and terminal cleanup remain intact. |
-| kbench RUNBOOK | Document the shipped board contract using the exact operator-facing nouns. | Full peer commit SHA is recorded in issue #49 before close. |
+| Boundary | Kind | File location | Status | Responsibility | Failure semantics |
+|---|---|---|---|---|---|
+| `activityExecutor` | INTEGRATION | `cmd/metis/activity.go` | new | Decorate the final cache-aware executor and emit one step event after a successful real execution or cache hit. | Inner error is returned unchanged and emits nothing. |
+| `runResolvedExperiment` activity publication | INTEGRATION | `cmd/metis/run.go` | modified | Emit the typed run event only after execution and required `runs/<id>/{run,record}.json` persistence succeed. | Execution failure, `run.json`/`record.json` failure, or provenance assembly failure emits no successful-run event; best-effort capture is not a success gate. |
+| `runControlActivityEmitter` | INTEGRATION | `cmd/metis/activity.go` | new | Linearize all step and run activity against fatal failure before calling `sweepProgress`. | Rejected after failure; never acquire controller state while holding progress state. |
+| `sweepProgress.activity` / `tick` | INTEGRATION | `cmd/metis/progress.go` | modified | Synchronize activity/tick reduction and publish immutable board snapshots. | Short callbacks; non-sweep callers receive a no-op emitter. |
+| `renderBoard` / `progressCore` | INTEGRATION | `cmd/metis/board.go`, `cmd/metis/progress.go` | modified | Apply shared vocabulary and factual startup/mature wording to snapshots. | No diagnosis such as “not hung”; width, cadence, failure flush, and terminal cleanup remain intact. |
+| kbench RUNBOOK | INTEGRATION | `/Users/xianxu/workspace/kbench/competition/titanic/pipelines/RUNBOOK-sweep.md` | modified | Document the shipped board contract using the exact operator-facing nouns. | Full peer commit SHA is recorded in issue #49 before close. |
 
 ## Chunk 1: Typed activity at concrete success seams
 
@@ -200,3 +200,13 @@ and the kbench Markdown RUNBOOK.
    `--no-atlas` is appropriate in close evidence. Check all issue/plan boxes and log exact commands.
 4. Run `sdlc close --issue 49 --verified '<evidence>'` once. Let the binary dispatch the mandatory
    fresh-context boundary review; fix every Critical/Important finding and rerun the gate as directed.
+
+## Revisions
+
+### 2026-07-17 — close-review traceability fix
+- Boundary review found the implementation was still dirty/untracked when `sdlc close` first ran, so
+  the reviewed `HEAD` did not contain the claimed board changes. The fix is to commit the activity,
+  progress, board, run, sweep, atlas, issue, and review bookkeeping before rerunning `sdlc close`.
+- Boundary review also required the Core concepts tables to carry greppable `Kind`, `File location`,
+  and `Status` columns. Added those columns and replaced the non-code `activitySnapshot` row with the
+  implemented `progressState` activity fields.

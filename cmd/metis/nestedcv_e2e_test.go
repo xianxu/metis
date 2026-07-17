@@ -66,7 +66,7 @@ func TestNestedCV_ProducesHonestEstimateNoShip(t *testing.T) {
 	}
 	finalProg := s[strings.LastIndex(s, "metis: progress"):]
 	finalProg = finalProg[:strings.IndexByte(finalProg, '\n')]
-	if !strings.Contains(finalProg, "outer 2/2") || !strings.Contains(finalProg, "est 0.") {
+	if !strings.Contains(finalProg, "outer folds 2/2") || !strings.Contains(finalProg, "est 0.") {
 		t.Errorf("the final progress line must carry the completed outer count + a numeric est; got: %q", finalProg)
 	}
 	// metis#50: the run ends with a paste-ready summary — elapsed, rows → ledger, cohort,
