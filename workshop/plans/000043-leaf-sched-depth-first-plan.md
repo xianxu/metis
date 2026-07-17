@@ -851,7 +851,7 @@ git commit -m "#43: pin bounded depth-first sweep scheduling" -m "Prove early tr
 - Modify: `atlas/index.md:84-113`
 - Modify: `workshop/issues/000043-leaf-sched-depth-first.md`
 
-- [ ] **Step 1: Add the smallest real subprocess sweep fixture**
+- [x] **Step 1: Add the smallest real subprocess sweep fixture**
 
 Create a three-config, two-fold shape. `test/echo` is a process-level data-phase adapter whose `out` points at the copied toy dataset; the pipeline itself uses the real `metis/train` Python step:
 
@@ -887,11 +887,11 @@ A disposable real-process nested sweep used to verify whole-run admission withou
 
 Run `go run ./cmd/metis run --dry-run testdata/experiment/toy-sweep-smoke.md`; expected output reports three configs and nested-CV mode.
 
-- [ ] **Step 2: Document both concurrency budgets in the atlas**
+- [x] **Step 2: Document both concurrency budgets in the atlas**
 
 In the `metis#31` execution paragraph, add: parallel sampler fan-out remains order-preserving, but every concrete run crosses one sweep-scoped `2n` admission controller before side effects; the existing leaf semaphore remains `n`; the controller also owns the experiment-wide first failure so queued runs stop without producing observable state. Cite `cmd/metis/runcontrol.go`, `runResolvedExperiment`, and the cancellation regressions.
 
-- [ ] **Step 3: Run the disposable cold real-process smoke**
+- [x] **Step 3: Run the disposable cold real-process smoke**
 
 Run entirely inside a temporary no-hardlink clone so code capture can update only the clone's Metis refs. Snapshot the source checkout and refs, redirect writable build/runtime caches, and clean up on both success and failure:
 
@@ -901,10 +901,24 @@ set -euo pipefail
 source_repo=$(pwd -P)
 source_status=$(git status --porcelain=v1 --untracked-files=all)
 source_refs=$(git for-each-ref --format='%(refname) %(objectname)' refs/metis)
+ariadne_repo=$(cd "$source_repo/../ariadne" && pwd -P)
+ariadne_sha=$(git -C "$ariadne_repo" rev-parse HEAD)
 tmpdir=$(mktemp -d /tmp/metis-43-smoke.XXXXXX)
-trap 'rm -rf "$tmpdir"' EXIT
+smoke_log="$tmpdir/smoke.log"
+cleanup() {
+  rc=$?
+  if [ "$rc" -ne 0 ] && [ -f "$smoke_log" ]; then
+    tail -120 "$smoke_log"
+  fi
+  chmod -R u+w "$tmpdir" 2>/dev/null || true
+  rm -rf "$tmpdir"
+  exit "$rc"
+}
+trap cleanup EXIT
+git clone --local --no-hardlinks "$ariadne_repo" "$tmpdir/ariadne"
+git -C "$tmpdir/ariadne" checkout --detach "$ariadne_sha"
+test "$ariadne_sha" = "$(git -C "$tmpdir/ariadne" rev-parse HEAD)"
 git clone --local --no-hardlinks "$source_repo" "$tmpdir/metis-src"
-cp "$source_repo/testdata/experiment/toy-sweep-smoke.md" "$tmpdir/metis-src/testdata/experiment/"
 cd "$tmpdir/metis-src"
 export GOCACHE="$tmpdir/go-cache"
 export GOMODCACHE="$tmpdir/go-mod-cache"
@@ -926,12 +940,13 @@ awk '
       print "cold ordering failed: first_train=" first_train ", fifth_inner=" fifth_inner > "/dev/stderr"
       exit 1
     }
+    printf "cold ordering passed: first_train_line=%d fifth_cv_split_line=%d\n", first_train, fifth_inner
   }
 ' "$tmpdir/smoke.log"
 completed_trains=$(rg -c '✓ step train' "$tmpdir/smoke.log")
 awk -v completed="$completed_trains" -v seconds="$elapsed" 'BEGIN {
   rate=60*completed/seconds
-  if (completed < 7 || seconds > 600 || rate <= 0) {
+  if (completed < 7 || seconds > 600 || rate <= 0 || rate != rate) {
     print "throughput check failed: completed=" completed ", seconds=" seconds ", trains/min=" rate > "/dev/stderr"
     exit 1
   }
@@ -940,6 +955,7 @@ awk -v completed="$completed_trains" -v seconds="$elapsed" 'BEGIN {
 test "$source_status" = "$(git -C "$source_repo" status --porcelain=v1 --untracked-files=all)"
 test "$source_refs" = "$(git -C "$source_repo" for-each-ref --format='%(refname) %(objectname)' refs/metis)"
 cd "$source_repo"
+chmod -R u+w "$tmpdir" 2>/dev/null || true
 rm -rf "$tmpdir"
 trap - EXIT
 )
@@ -947,7 +963,7 @@ trap - EXIT
 
 Expected: exit 0; the first `awk` proves the first completed train precedes the fifth inner run's first `cv-split` step, followed by the nested estimate and row summary. The second requires all six inner trains plus the one outer-score train, completion within ten minutes, and a finite positive measured trains/min rate. The source worktree and `refs/metis/*` snapshots are byte-identical before/after; clone refs, experiment outputs, Go build/module/telemetry caches, uv cache, XDG cache, and Python bytecode all live under the removed temporary directory. Record the relevant ordering/result lines in the issue Log before cleanup.
 
-- [ ] **Step 4: Run the complete automated verification**
+- [x] **Step 4: Run the complete automated verification**
 
 Run:
 
@@ -960,11 +976,11 @@ git diff --check
 
 Expected: every command exits 0; no race report; no whitespace errors.
 
-- [ ] **Step 5: Update the issue record with evidence**
+- [x] **Step 5: Update the issue record with evidence**
 
 Tick the plain issue-plan checkboxes only after their commands pass. Append a dated Log entry naming the focused race repetitions, full race suite, serial/parallel byte comparison, semantic run-record comparison, and temporary real-process smoke result. Do not add an `M1` marker: this issue has one close-review boundary.
 
-- [ ] **Step 6: Commit docs and final verification artifacts**
+- [x] **Step 6: Commit docs and final verification artifacts**
 
 ```bash
 git add testdata/experiment/toy-sweep-smoke.md atlas/index.md workshop/issues/000043-leaf-sched-depth-first.md
@@ -990,3 +1006,12 @@ Run `sdlc close --issue 43 --agent codex --verified '<focused race repetitions; 
   assertion to available samples; the direct compositor test retains the explicit stale-ETA proof.
 - Expanded Chunk 2's files, focused race command, and commit boundary to cover `run.go`,
   `progress.go`, `board.go`, and `board_test.go`.
+
+### 2026-07-16 — cold-smoke peer pin correction
+
+- Made the disposable smoke resolve the declared `../ariadne` replacement from the source checkout,
+  snapshot its exact HEAD, and no-hardlink clone Ariadne first into the sibling path expected by the
+  cloned Metis module. The recipe checks out and verifies that detached peer commit before building.
+- Removed the uncommitted-fixture copy assumption now that the fixture is durable, and made cleanup
+  writable-cache-safe while preserving source status/ref, ordering, throughput, and elapsed-time
+  assertions.

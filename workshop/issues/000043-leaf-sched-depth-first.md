@@ -123,7 +123,7 @@ Durable implementation detail: [workshop/plans/000043-leaf-sched-depth-first-pla
 
 - [x] Chunk 1 — build the race-safe `runControl` admission/failure primitive with deterministic handoff tests.
 - [x] Chunk 2 — integrate the controller at the concrete-run boundary and linearize every sampler observation/reduction against global failure.
-- [ ] Chunk 3 — prove early completion, independent nested caps, deterministic records, full race safety, atlas accuracy, and an isolated real-process cold smoke.
+- [x] Chunk 3 — prove early completion, independent nested caps, deterministic records, full race safety, atlas accuracy, and an isolated real-process cold smoke.
 
 ## Log
 
@@ -192,6 +192,11 @@ Durable implementation detail: [workshop/plans/000043-leaf-sched-depth-first-pla
   `git diff --check` also passed with no race or whitespace report. `sdlc issue validate --issue 43`
   passed. Task 4's deterministic acceptance covers byte-identical serial/parallel manifests and
   ledgers plus semantically equal run records.
+- Quality-review rerun pinned the no-hardlink Ariadne clone at
+  `a24643e566eb67ebbc69376126000e469761f09a` before making the no-hardlink Metis clone. The durable
+  recipe passed unchanged: first train line 25 preceded fifth `cv-split` line 32; the estimate and
+  seven-row summary were on lines 60 and 62; seven trains completed in 45s (~9.3/min). Source status
+  and `refs/metis/*` remained byte-identical, and the temporary clone/cache root was removed.
 
 ## Revisions
 
