@@ -189,8 +189,9 @@ Durable implementation detail: [workshop/plans/000043-leaf-sched-depth-first-pla
 - Focused scheduling/cancellation tests passed `go test ./cmd/metis -race -run
   'Test(Sweep_ColdAdmissionCompletesTrainBeforeFifthAcquire|NestedCV_PeakConcurrencyWithinCap|NestedCV_FirstFailureStopsAllObservableWork|RunControl)'
   -count=10`; `go test ./cmd/metis -race -count=1`, `go test ./... -race -count=1`, and
-  `git diff --check` also passed with no race or whitespace report. Task 4's deterministic acceptance
-  covers byte-identical serial/parallel manifests and ledgers plus semantically equal run records.
+  `git diff --check` also passed with no race or whitespace report. `sdlc issue validate --issue 43`
+  passed. Task 4's deterministic acceptance covers byte-identical serial/parallel manifests and
+  ledgers plus semantically equal run records.
 
 ## Revisions
 
