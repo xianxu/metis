@@ -132,6 +132,69 @@ steps:
 	}
 }
 
+func TestCacheActivityEmitsOnColdExecutionAndWarmHit(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH (cache re-hash uses git hash-object)")
+	}
+	root := repoRoot(t)
+	ws := t.TempDir()
+	expPath := filepath.Join(ws, "exp.md")
+	md := `---
+type: experiment
+id: cache-activity
+seed: 5
+status: active
+steps:
+  - id: prep
+    uses: test/echo
+    with: {k: 5}
+---
+`
+	if err := os.WriteFile(expPath, []byte(md), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stepEvents []activityEvent
+	run := func(runID string) string {
+		var out strings.Builder
+		_, err := runExperiment(runOpts{
+			expPath:  expPath,
+			runID:    runID,
+			stepPath: []string{filepath.Join(root, "testdata", "steps")},
+			now:      func() time.Time { return time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC) },
+			git:      fakeGitProbe{name: "metis", sha: "sha", dirty: false},
+			cache:    true,
+			out:      &out,
+			activity: func(ev activityEvent) {
+				if ev.Kind == activityStepSuccess {
+					stepEvents = append(stepEvents, ev)
+				}
+			},
+		})
+		if err != nil {
+			t.Fatalf("run %s: %v", runID, err)
+		}
+		return out.String()
+	}
+
+	out1 := run("activity-cold")
+	if strings.Contains(out1, "cache hit") {
+		t.Fatalf("cold run should not have cache hits; got:\n%s", out1)
+	}
+	out2 := run("activity-warm")
+	if !hitFor(out2, "prep") {
+		t.Fatalf("warm run should hit prep; got:\n%s", out2)
+	}
+	if len(stepEvents) != 2 {
+		t.Fatalf("step events = %d; want one cold execution and one warm cache-hit event: %+v", len(stepEvents), stepEvents)
+	}
+	for i, ev := range stepEvents {
+		if ev.Kind != activityStepSuccess || ev.StepID != "prep" {
+			t.Fatalf("event %d = %+v; want prep step success", i, ev)
+		}
+	}
+}
+
 func hitFor(out, step string) bool {
 	return strings.Contains(out, "step "+step+" (cache hit)")
 }

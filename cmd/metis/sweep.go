@@ -125,6 +125,7 @@ type sweepPass struct {
 	splitK   int                  // the cv-split / FixedKFolds fold count for this pass
 	stratify bool                 // the cv-split stratify flag for this pass
 	partRef  sampler.PartitionRef // this pass's partition identity (fed into each point's address)
+	runRole  runRole              // concrete-run role for every pipeline fold in this pass
 	hooks    passHooks            // metis#30: this pass's progress hooks, closure-bound to its outer fold
 	// metis#31: under ParExec the sweeper fans out over configs and each config's
 	// resample fans out over folds — all appending to this ONE pass. `mu` guards the
@@ -264,6 +265,7 @@ func runShapeSweep(o runOpts, sh experiment.Shape, now func() time.Time, out io.
 	// levels report (stream-learned totals would arrive only with each level's first
 	// completion — for the driver level that's the first COMPLETED outer fold, too late).
 	ss.prog = newSweepProgress(out, now, sh.Sweeper.Objective.Direction, seededTotals(ctx, nested, runFolds, configPts, k))
+	ss.o.activity = teeActivityEmitter(ss.o.activity, ss.prog.activity)
 	// metis#38: board mode — the sink paints the pinned board instead of plain lines,
 	// and a 500ms ticker keeps the rate decay + ETA live between events (sink-first:
 	// tick() locks sp.mu then hands the frame to bw — the one global lock order).
@@ -319,7 +321,7 @@ func runShapeSweep(o runOpts, sh experiment.Shape, now func() time.Time, out io.
 	// deleted shape `driver:`) runs the sweeper once on all data → the sweeper's inner k-fold CV
 	// scores the one config → (mean, SE, complexity) recorded to the ledger. metis#32: it MEASURES
 	// ONLY — no `shipWinner` (shipping is `metis select --promote`).
-	pass := &sweepPass{ss: ss, splitK: k, stratify: stratify, partRef: ss.partRef,
+	pass := &sweepPass{ss: ss, splitK: k, stratify: stratify, partRef: ss.partRef, runRole: runRoleFlatCV,
 		hooks: ss.prog.forPass(-1)} // metis#30: the flat path's single pass
 	res := sampler.Run(ctx, sampler.SingleDriver{}, func(sampler.SinglePoint) sampler.SweepResult {
 		return ss.runSweeper(ctx, configPts, pass)
@@ -485,6 +487,7 @@ func (ss *shapeSweep) materializeOuterAnalysis(outerK int, stratify bool) ([]str
 	preOpts.inSweep = true // one preamble run; skip the per-run capture noise
 	preOpts.readRoot = ""  // outer-split legitimately reads the full dataset
 	preOpts.runLabel = fmt.Sprintf("outer-analysis preamble (%s)", preID)
+	preOpts.runRole = runRoleNestedPreamble
 	if _, err := runResolvedExperiment(exp, preOpts, preID, ss.now, ss.out); err != nil {
 		return nil, err
 	}
@@ -507,7 +510,8 @@ func (ss *shapeSweep) runOuterFold(ctx sampler.Ctx, configPts []shape.Point, k i
 	// (a) sealed selection: the sweeper's inner-CV runs entirely within analysis_i (inner k/stratify).
 	pass := &sweepPass{ss: ss, baseRef: analysisRef, readRoot: analysisAbs, splitK: k,
 		stratify: stratify, partRef: ss.partRef,
-		hooks: ss.prog.forPass(i)} // metis#30/#38: outer-fold identity via closure binding
+		runRole: runRoleNestedInnerCV,
+		hooks:   ss.prog.forPass(i)} // metis#30/#38: outer-fold identity via closure binding
 	sres := ss.runSweeper(ctx, configPts, pass)
 	if err := pass.firstError(); err != nil {
 		return 0, err
@@ -585,6 +589,7 @@ func (ss *shapeSweep) scoreOnOuterFold(point shape.Point, i, k int, stratify boo
 	scoreOpts.inSweep = true
 	scoreOpts.readRoot = "" // the outer-assessment eval reads full data legitimately
 	scoreOpts.runLabel = fmt.Sprintf("outer fold %d family %s score (%s)", i, fam, scoreID)
+	scoreOpts.runRole = runRoleOuterScore
 	run, err := runResolvedExperiment(scoreExp, scoreOpts, scoreID, ss.now, ss.out)
 	if err != nil {
 		return 0, "", "", err
@@ -645,6 +650,7 @@ func (p *sweepPass) runPipelineFold(c shape.Point, f sampler.FoldPoint) sampler.
 	pointOpts.inSweep = true        // metis#14: the sweep captures once (captureSweepCode), not per point
 	pointOpts.readRoot = p.readRoot // metis#23: confine a sealed outer-fold pass to its analysis root
 	pointOpts.runLabel = fmt.Sprintf("config %s fold %d (%s)", freeParamStr(c), f.Idx, runID)
+	pointOpts.runRole = p.runRole
 	run, runErr := runResolvedExperiment(exp, pointOpts, runID, ss.now, ss.out)
 	// A failing fold is FATAL to the sweep, unlike a v1 flat point: a config scored over a
 	// PARTIAL fold set is not an honest (mean, SE) estimate. Any error (a step failure, a

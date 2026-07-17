@@ -28,24 +28,24 @@ func TestProgressLine(t *testing.T) {
 		not  []string
 	}{
 		{"nested pre-outer", nested(0, 84, 421, nil),
-			[]string{"outer 0/3", "configs 84/216", "folds 421/1080", "est —"}, []string{"±"}},
+			[]string{"outer folds 0/3", "configs scored 84/216", "inner-CV runs 421/1080", "est —"}, []string{"±"}},
 		{"nested one outer", nested(1, 100, 500, []float64{0.82}),
-			[]string{"outer 1/3", "est 0.8200"}, []string{"±"}},
+			[]string{"outer folds 1/3", "est 0.8200"}, []string{"±"}},
 		{"nested two outer", nested(2, 200, 900, []float64{0.80, 0.84}),
-			[]string{"outer 2/3", "est 0.8200 ± 0.0200"}, nil},
+			[]string{"outer folds 2/3", "est 0.8200 ± 0.0200"}, nil},
 		{"flat one config", progressState{
 			foldK: 3, foldTotal: 5, foldKind: sampler.SizeExact,
 			flatScores: []float64{0.80, 0.84, 0.88}},
-			[]string{"folds 3/5", "score 0.8400"}, []string{"configs", "outer"}},
+			[]string{"CV runs 3/5", "score 0.8400"}, []string{"configs", "outer", "folds 3/5"}},
 		{"unknown kind", progressState{
 			nested: true,
 			outerK: 1, outerTotal: 0, outerKind: sampler.SizeUnknown,
 			configK: 3, configTotal: 0, configKind: sampler.SizeUnknown},
-			[]string{"outer 1/?", "configs 3/?"}, nil},
+			[]string{"outer folds 1/?", "configs scored 3/?"}, nil},
 		{"budget kind", progressState{
 			nested: true,
 			outerK: 1, outerTotal: 8, outerKind: sampler.SizeBudget},
-			[]string{"outer 1/≤8"}, nil},
+			[]string{"outer folds 1/≤8"}, nil},
 	}
 	for _, c := range cases {
 		got := progressLine(c.st)
@@ -91,10 +91,8 @@ func TestSweepProgress_ThrottleAndAlwaysEmit(t *testing.T) {
 	prog := newSweepProgress(&out, scriptedClock(times...), "maximize",
 		progressTotals{nested: true, outer: 2, outerKind: sampler.SizeExact,
 			configs: 4, configKind: sampler.SizeExact, folds: 20, foldKind: sampler.SizeExact})
-	hooks := prog.forPass(0)
 	for i := 1; i <= 10; i++ {
-		hooks.fold(sampler.ProgressEvent[sampler.FoldPoint, sampler.FoldOutcome]{K: i, Total: 5, Kind: sampler.SizeExact,
-			Out: sampler.FoldOutcome{Score: 0.8}})
+		prog.activity(activityEvent{Kind: activityRunSuccess, Role: runRoleNestedInnerCV, At: at(i * 200)})
 	}
 	throttled := strings.Count(out.String(), "metis: progress")
 	if throttled != 2 { // event 1 (first) + event 6 (throttle boundary)
@@ -110,7 +108,7 @@ func TestSweepProgress_ThrottleAndAlwaysEmit(t *testing.T) {
 		t.Fatalf("finish must emit the final line, got %d lines", got)
 	}
 	final := out.String()[strings.LastIndex(out.String(), "metis: progress"):]
-	for _, w := range []string{"outer 1/2", "folds 10/20", "est 0.8300"} {
+	for _, w := range []string{"outer folds 1/2", "inner-CV runs 10/20", "est 0.8300"} {
 		if !strings.Contains(final, w) {
 			t.Errorf("final line missing %q: %q", w, final)
 		}
@@ -139,18 +137,17 @@ func TestSweepProgress_ConcurrentCounts(t *testing.T) {
 		progressTotals{nested: true, folds: 64, foldKind: sampler.SizeExact})
 	var wg sync.WaitGroup
 	for g := 0; g < 8; g++ {
-		hooks := prog.forPass(g)
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for i := 0; i < 8; i++ {
-				hooks.fold(sampler.ProgressEvent[sampler.FoldPoint, sampler.FoldOutcome]{K: i + 1, Out: sampler.FoldOutcome{Score: 0.5}})
+				prog.activity(activityEvent{Kind: activityRunSuccess, Role: runRoleNestedInnerCV, At: at(i * 1000)})
 			}
 		}()
 	}
 	wg.Wait()
 	prog.finish()
-	if !strings.Contains(out.String(), "folds 64/64") {
+	if !strings.Contains(out.String(), "inner-CV runs 64/64") {
 		t.Errorf("sink-owned counter must see all 64 events (never ev.K):\n%s", out.String())
 	}
 }
@@ -160,39 +157,99 @@ type writerFunc func([]byte) (int, error)
 
 func (f writerFunc) Write(p []byte) (int, error) { return f(p) }
 
-// movingRate: rate = n/(now-oldest) over a ring of the last 64 completions — `now` in
-// the denominator makes a stall DECAY the rate live (the BLAS-thrash signature).
+// movingRate: keep the latest 64 eligible completion times by event time. It is
+// ready only after enough event-time evidence, and rate = (n-1)/(now-oldest).
 func TestMovingRate(t *testing.T) {
 	var r movingRate
 	if _, ok := r.rate(at(0)); ok {
 		t.Error("n=0 must be not-ok")
 	}
-	r.add(at(0))
-	if _, ok := r.rate(at(1000)); ok {
-		t.Error("n=1 must be not-ok (no interval yet)")
+	for i := 0; i < 15; i++ {
+		r.add(at(i * 1000))
 	}
-	for i := 1; i <= 4; i++ {
-		r.add(at(i * 1000)) // 5 completions total, 1s apart (t=0..4s)
+	if _, ok := r.rate(at(15000)); ok {
+		t.Error("15 completions must be below confidence")
 	}
-	if got, ok := r.rate(at(4000)); !ok || got < 74.9 || got > 75.1 {
-		t.Errorf("5 in 4s at now=4s → 75/min, got %v ok=%v", got, ok)
+	var short movingRate
+	for i := 0; i < 16; i++ {
+		short.add(at(i * 900))
 	}
-	// A 60s stall decays the same 5 completions: 5/64s ≈ 4.7/min.
-	if got, ok := r.rate(at(64000)); !ok || got > 5 {
-		t.Errorf("stall must decay the rate (now in denominator), got %v ok=%v", got, ok)
+	if _, ok := short.rate(at(15000)); ok {
+		t.Error("16 completions spanning under 15s must be below confidence")
 	}
-	// Ring wraps at 64: 65 completions 1s apart keeps the newest 64.
+	var ready movingRate
+	for i := 0; i < 16; i++ {
+		ready.add(at(i * 1000))
+	}
+	if got, ok := ready.rate(at(20000)); !ok || got < 44.9 || got > 45.1 {
+		t.Errorf("16+ completions spanning ≥15s at now=20s → 45/min, got %v ok=%v", got, ok)
+	}
+	if got, ok := ready.rate(at(25000)); !ok || got >= 45 {
+		t.Errorf("stall must decay the rate using now in the denominator, got %v ok=%v", got, ok)
+	}
+
+	// Reversed delivery: 65 completions 1s apart keeps the newest 64 by event time.
 	var r2 movingRate
-	for i := 0; i < 65; i++ {
+	for i := 64; i >= 0; i-- {
 		r2.add(at(i * 1000))
 	}
-	// oldest kept = t=1s; at now=64s: 64/(63s) ≈ 60.95/min (not 65/64s ≈ 60.9... distinguish by n)
-	if got, _ := r2.rate(at(64000)); got < 60.5 || got > 61.5 {
-		t.Errorf("ring wrap: want ~60.95/min over the kept 64, got %v", got)
+	// newest kept window = t=1s..64s; at now=65s: 63 completions over 64s ≈ 59.06/min.
+	if got, ok := r2.rate(at(65000)); !ok || got < 58.9 || got > 59.2 {
+		t.Errorf("reversed delivery latest-64 window: want ~59.06/min, got %v ok=%v", got, ok)
 	}
 	// ETA: remaining/rate.
-	if eta, ok := r.eta(at(4000), 75); !ok || eta != time.Minute {
-		t.Errorf("eta 75 remaining at 75/min → 1m, got %v ok=%v", eta, ok)
+	if eta, ok := ready.eta(at(20000), 45); !ok || eta != time.Minute {
+		t.Errorf("eta 45 remaining at 45/min → 1m, got %v ok=%v", eta, ok)
+	}
+}
+
+func TestOccupancyWindowRoundedMeanOfLastFourSamples(t *testing.T) {
+	var w occupancyWindow
+	for _, busy := range []int{1, 2, 3, 4} {
+		w.add(busy, 12)
+	}
+	busy, capacity, ok := w.mean()
+	if !ok || busy != 3 || capacity != 12 {
+		t.Fatalf("[1,2,3,4]/12 mean = (%d,%d,%v); want (3,12,true)", busy, capacity, ok)
+	}
+	w.add(9, 12)
+	busy, capacity, ok = w.mean()
+	if !ok || busy != 5 || capacity != 12 {
+		t.Fatalf("[2,3,4,9]/12 rounded mean = (%d,%d,%v); want (5,12,true)", busy, capacity, ok)
+	}
+}
+
+func TestSweepProgressOccupancySamplesOnlyOnTick(t *testing.T) {
+	var out strings.Builder
+	busy := 0
+	prog := newSweepProgress(&out, func() time.Time { return at(20000) }, "maximize",
+		progressTotals{nested: true, folds: 32, foldKind: sampler.SizeExact})
+	prog.bw = newBoardWriter(&out, func() time.Time { return at(20000) })
+	prog.gauge = func() (int, int) { return busy, 12 }
+
+	for _, v := range []int{1, 2, 3, 4} {
+		busy = v
+		prog.tick()
+	}
+	got, cap, ok := prog.occupancy.mean()
+	if !ok || got != 3 || cap != 12 {
+		t.Fatalf("tick samples [1,2,3,4] mean = (%d,%d,%v); want (3,12,true)", got, cap, ok)
+	}
+
+	for i := 0; i < 10; i++ {
+		busy = 12
+		prog.activity(activityEvent{Kind: activityRunSuccess, Role: runRoleNestedInnerCV, At: at(i * 1000)})
+	}
+	got, cap, ok = prog.occupancy.mean()
+	if !ok || got != 3 || cap != 12 {
+		t.Fatalf("activity burst changed occupancy mean to (%d,%d,%v); want unchanged (3,12,true)", got, cap, ok)
+	}
+
+	busy = 5
+	prog.tick()
+	got, cap, ok = prog.occupancy.mean()
+	if !ok || got != 4 || cap != 12 {
+		t.Fatalf("fifth tick samples [2,3,4,5] mean = (%d,%d,%v); want (4,12,true)", got, cap, ok)
 	}
 }
 
@@ -247,8 +304,38 @@ func TestSweepProgress_PerPassRows(t *testing.T) {
 	if st.rows[0].done {
 		t.Errorf("row 0 must stay in-flight: %+v", st.rows[0])
 	}
-	// The fold events fed the rate ring (3 adds at the frozen clock — n≥2 → ok).
-	if _, ok := st.rate.rate(at(1000)); !ok {
-		t.Error("fold completions must feed the rate ring")
+}
+
+func TestSweepProgressActivityRunEventsOwnAggregateRunCounterAndRate(t *testing.T) {
+	var out strings.Builder
+	prog := newSweepProgress(&out, func() time.Time { return at(20000) }, "maximize",
+		progressTotals{nested: true, outer: 1, outerKind: sampler.SizeExact,
+			configs: 2, configKind: sampler.SizeExact, folds: 16, foldKind: sampler.SizeExact})
+	hooks := prog.forPass(0)
+	hooks.fold(sampler.ProgressEvent[sampler.FoldPoint, sampler.FoldOutcome]{
+		Out: sampler.FoldOutcome{Score: 0.7},
+	})
+	st := prog.boardState()
+	if st.st.foldK != 0 {
+		t.Fatalf("sampler fold callback advanced aggregate run counter to %d; want typed events only", st.st.foldK)
+	}
+	if st.rows[0].foldK != 1 {
+		t.Fatalf("sampler fold callback should retain per-row duties; row = %+v", st.rows[0])
+	}
+
+	prog.activity(activityEvent{Kind: activityRunSuccess, Role: runRoleNestedPreamble, RunID: "pre", At: at(0)})
+	if got := prog.boardState().st.foldK; got != 0 {
+		t.Fatalf("ineligible preamble advanced aggregate run counter to %d", got)
+	}
+
+	for i := 15; i >= 0; i-- {
+		prog.activity(activityEvent{Kind: activityRunSuccess, Role: runRoleNestedInnerCV, RunID: "inner", At: at(i * 1000)})
+	}
+	st = prog.boardState()
+	if st.st.foldK != 16 {
+		t.Fatalf("typed eligible run events advanced foldK to %d; want 16", st.st.foldK)
+	}
+	if got, ok := st.rate.rate(at(20000)); !ok || got < 44.9 || got > 45.1 {
+		t.Fatalf("typed event-time rate = %v ok=%v; want 45/min", got, ok)
 	}
 }

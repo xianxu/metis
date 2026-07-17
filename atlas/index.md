@@ -86,17 +86,28 @@ identical on a non-Kaggle platform?* — if yes, it lives here.
   `progress func(ProgressEvent[P,O])` fired **at point completion** (not Tell — under #31's batch exec
   every Tell lands at batch end), mutex-serialized so k arrives monotone even under ParExec; nil = the
   unwrapped loop. `cmd/metis/progress.go` is the sink: ONE throttled aggregated line
-  (`metis: progress outer 1/3 · configs 84/216 · folds 421/1080 · est 0.8283 ± 0.0140`; flat 1-config →
-  `folds 3/5 · score …`), totals **seeded at wiring** from direct SizeHint calls, 1s throttle on the
-  injected clock, always-emit on outer completions + finish, plain lines (no escape codes — non-TTY-safe).
-  **Outer-fold identity rides the per-pass closure binding** (`prog.forPass(i)` → `passHooks`), never an
-  event payload field — metis#38's TTY board extends the sink behind those hooks with zero pkg/sampler
-  change. (`FoldPoint.Partition` looks like a discriminator but is byte-identical across outer folds.)
-  **metis#38 (the live board, `cmd/metis/board.go`):** on a TTY a sweep pins a live board to the bottom
-  while step logs scroll above — aggregate line, one row per outer fold (`✓ held-out` | `▸ configs a/b ·
-  folds x/y · best` | queued, ≤12 rows + overflow), and `leaves b/c · R folds/min · ETA` (leaves =
-  `len/cap(leafSem)`; rate = a 64-completion ring with `now` in the denominator so a stall DECAYS it live
-  — the BLAS-thrash signature). Hand-rolled ANSI pin-bottom, NO TUI lib (output-only board; 2-dep module).
+  (`metis: progress outer folds 1/3 · configs scored 84/216 · inner-CV runs 421/1080 · est 0.8283 ± 0.0140`;
+  flat 1-config → `CV runs 3/5 · score …`), totals **seeded at wiring** from direct SizeHint calls, 1s
+  throttle on the injected clock, always-emit on outer completions + finish, plain lines (no escape codes —
+  non-TTY-safe). **metis#49:** sampler fold callbacks now own per-row score/config display only; aggregate
+  run counts/rate come from typed concrete-run activity events emitted after successful run execution and
+  required `run.json`/`record.json` persistence. Step activity is emitted by an executor decorator outside
+  the cache, so warm cache hits still publish successful work facts. Run roles (`flat CV`, `nested inner-CV`,
+  `nested preamble`, `outer score`) keep rate/ETA eligibility at the concrete call sites, and `runControl`
+  gates both step and run activity before repaint after a fatal sibling failure. **Outer-fold identity rides
+  the per-pass closure binding** (`prog.forPass(i)` → `passHooks`), never an event payload field — metis#38's
+  TTY board extends the sink behind those hooks with zero pkg/sampler change. (`FoldPoint.Partition` looks
+  like a discriminator but is byte-identical across outer folds.)
+  **metis#38/#49 (the live board, `cmd/metis/board.go`):** on a TTY a sweep pins a live board to the bottom
+  while step logs scroll above — aggregate line, one row per outer fold (`outer fold N ✓ held-out` |
+  `outer fold N ▸ configs scored a/b · inner-CV runs x/y · best` | queued, ≤12 rows + overflow), and a
+  status line with tick-smoothed `~slots b/c`, last-run age, mode-specific rate (`inner-CV runs/min` or
+  `CV runs/min`), and mature `~ETA`. Rate/ETA are withheld until 16 eligible completions span at least
+  15 seconds; before the first eligible run, the board prints factual startup observations such as step
+  count/last-step age and never diagnoses "not hung" or a phase. The event-time rate keeps the latest 64
+  eligible completions sorted by completion time and uses `now-oldest`, so a stall decays live while
+  last-run age remains the sharp freshness signal. Hand-rolled ANSI pin-bottom, NO TUI lib (output-only
+  board; 2-dep module).
   Split: `renderBoard` is pure (plain lines, zero ANSI) / `boardWriter` is the paint-only compositor
   (erase-count bookkeeping; holds unterminated passthrough tails; idempotent deferred close).
   **metis#46: the compositor is DOUBLE-BUFFERED with a 250ms flush budget** — passthrough coalesces

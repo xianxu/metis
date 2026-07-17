@@ -329,7 +329,7 @@ func TestShapeSweep_OneConfigDegeneratesToSingleLevelCV(t *testing.T) {
 		}
 		final := s[strings.LastIndex(s, "metis: progress"):]
 		final = final[:strings.IndexByte(final, '\n')]
-		if !strings.Contains(final, "folds 2/2") || !strings.Contains(final, "score 0.") {
+		if !strings.Contains(final, "CV runs 2/2") || !strings.Contains(final, "score 0.") {
 			t.Errorf("the flat final progress line must carry folds k/k + score; got: %q", final)
 		}
 		// metis#50: the flat path ends with the same summary block.
@@ -350,6 +350,59 @@ func TestShapeSweep_OneConfigDegeneratesToSingleLevelCV(t *testing.T) {
 	if len(shipSteps) != 0 {
 		t.Errorf("the flat path must NOT ship; got %d submission runs", len(shipSteps))
 	}
+}
+
+func TestShapeSweepActivityRunRolesFromFlatAndNestedCallPaths(t *testing.T) {
+	t.Run("flat CV runs are eligible flat roles", func(t *testing.T) {
+		ws := t.TempDir()
+		expPath := writeShapeFile(t, ws, foldShapeShipMD("[a]"))
+		counts := map[runRole]int{}
+		_, err := runExperiment(runOpts{
+			expPath: expPath, now: fixedNow(), git: fakeGitProbe{name: "metis", sha: "sha"},
+			exec: foldFakeExec{}, out: io.Discard,
+			activity: func(ev activityEvent) {
+				if ev.Kind == activityRunSuccess {
+					counts[ev.Role]++
+				}
+			},
+		})
+		if err != nil {
+			t.Fatalf("flat sweep: %v", err)
+		}
+		if counts[runRoleFlatCV] != 2 || len(counts) != 1 {
+			t.Fatalf("flat roles = %v; want exactly 2 flat-CV runs", counts)
+		}
+	})
+
+	t.Run("nested emits preamble inner and outer score roles", func(t *testing.T) {
+		ws := t.TempDir()
+		expPath := writeShapeFile(t, ws, foldShapeMD("[a, b]"))
+		counts := map[runRole]int{}
+		_, err := runExperiment(runOpts{
+			expPath: expPath, now: fixedNow(), git: fakeGitProbe{name: "metis", sha: "sha"},
+			exec: foldFakeExec{}, out: io.Discard,
+			activity: func(ev activityEvent) {
+				if ev.Kind == activityRunSuccess {
+					counts[ev.Role]++
+				}
+			},
+		})
+		if err != nil {
+			t.Fatalf("nested sweep: %v", err)
+		}
+		if counts[runRoleNestedPreamble] != 1 {
+			t.Fatalf("nested roles = %v; want 1 preamble run", counts)
+		}
+		if counts[runRoleNestedInnerCV] != 8 {
+			t.Fatalf("nested roles = %v; want 8 inner-CV runs", counts)
+		}
+		if counts[runRoleOuterScore] != 2 {
+			t.Fatalf("nested roles = %v; want 2 outer-score runs", counts)
+		}
+		if len(counts) != 3 {
+			t.Fatalf("nested roles = %v; want no ineligible/unexpected run roles", counts)
+		}
+	})
 }
 
 // Fold-distinctness + cache under NESTED (metis#32): each (outer-fold, config, inner-fold) of

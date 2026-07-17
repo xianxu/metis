@@ -506,3 +506,23 @@ func TestRunControlObservationLinearizesBeforeFailure(t *testing.T) {
 		t.Fatal("rejected observation callback ran")
 	}
 }
+
+func TestRunControlActivityEmitterDropsLateStepAndRunEventsAfterFailure(t *testing.T) {
+	control := newRunControl(2)
+	var events []activityEvent
+	emit := runControlActivityEmitter(control, func(ev activityEvent) {
+		events = append(events, ev)
+	})
+
+	emit(activityEvent{Kind: activityStepSuccess, StepID: "prep"})
+	if len(events) != 1 {
+		t.Fatalf("healthy activity events = %d; want 1", len(events))
+	}
+
+	control.fail("first", errors.New("boom"))
+	emit(activityEvent{Kind: activityStepSuccess, StepID: "late-step"})
+	emit(activityEvent{Kind: activityRunSuccess, RunID: "late-run"})
+	if len(events) != 1 {
+		t.Fatalf("late activity after failure was published: %+v", events)
+	}
+}

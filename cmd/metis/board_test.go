@@ -10,9 +10,10 @@ import (
 	"github.com/xianxu/metis/pkg/sampler"
 )
 
-// renderBoard is the PURE frame: aggregate line, fold rows (✓ done / ▸ in-flight /
-// queued), overflow cap, leaves+throughput line. NO ANSI — escape codes live only in
-// boardWriter (the paint/content split keeps this byte-testable).
+// renderBoard is the PURE frame: aggregate line, outer-fold rows (✓ done /
+// ▸ in-flight / queued), overflow cap, and the slots/rate line. NO ANSI —
+// escape codes live only in boardWriter (the paint/content split keeps this
+// byte-testable).
 func TestRenderBoard(t *testing.T) {
 	mkState := func(rows []passRow) boardState {
 		st := boardState{
@@ -25,8 +26,9 @@ func TestRenderBoard(t *testing.T) {
 			},
 			rows: rows,
 		}
-		st.rate.add(at(0))
-		st.rate.add(at(2824)) // 2 completions in 2.824s ≈ 42.5/min at now=2824
+		for i := 0; i < 16; i++ {
+			st.rate.add(at(i * 1000))
+		}
 		return st
 	}
 	rows := []passRow{
@@ -34,20 +36,20 @@ func TestRenderBoard(t *testing.T) {
 		{configK: 8, foldK: 25, best: 0.834, hasBest: true},
 		{}, // queued: no events yet
 	}
-	lines := renderBoard(mkState(rows), boardEnv{width: 100, now: at(2824), busy: 8, capacity: 8})
+	lines := renderBoard(mkState(rows), boardEnv{width: 100, now: at(21176), busy: 8, capacity: 8})
 	frame := strings.Join(lines, "\n")
 	for _, want := range []string{
-		"outer 1/3", "configs 14/36", "folds 47/108", "est 0.7980",
-		"fold 0 ✓ held-out 0.7980",
-		"fold 1 ▸ configs 8/12 · folds 25/36 · best 0.8340",
-		"fold 2 — queued",
-		"leaves 8/8", "42.5 folds/min", "ETA",
+		"outer folds 1/3", "configs scored 14/36", "inner-CV runs 47/108", "est 0.7980",
+		"outer fold 0 ✓ held-out 0.7980",
+		"outer fold 1 ▸ configs scored 8/12 · inner-CV runs 25/36 · best 0.8340",
+		"outer fold 2 — queued",
+		"~slots 8/8", "42.5 inner-CV runs/min", "~ETA",
 	} {
 		if !strings.Contains(frame, want) {
 			t.Errorf("frame missing %q:\n%s", want, frame)
 		}
 	}
-	if len(lines) != 5 { // aggregate + 3 fold rows + leaves
+	if len(lines) != 5 { // aggregate + 3 outer-fold rows + slots/rate
 		t.Errorf("want 5 lines, got %d:\n%s", len(lines), frame)
 	}
 	if strings.Contains(frame, "\x1b") {
@@ -60,22 +62,22 @@ func TestRenderBoard(t *testing.T) {
 	st := mkState(allDone)
 	st.st.outerK, st.st.foldK, st.st.configK = 3, 108, 36
 	st.st.outerScores = []float64{0.79, 0.81, 0.82}
-	frame = strings.Join(renderBoard(st, boardEnv{width: 100, now: at(2824), busy: 0, capacity: 8}), "\n")
+	frame = strings.Join(renderBoard(st, boardEnv{width: 100, now: at(21176), busy: 0, capacity: 8}), "\n")
 	if strings.Contains(frame, "▸") || strings.Contains(frame, "ETA") {
 		t.Errorf("all-done: no in-flight rows, no ETA:\n%s", frame)
 	}
 
-	// Flat (no rows): exactly 2 lines — the aggregate + leaves.
+	// Flat (no rows): exactly 2 lines — the aggregate + slots/rate.
 	flat := boardState{st: progressState{foldK: 3, foldTotal: 5, foldKind: sampler.SizeExact, flatScores: []float64{0.8}}}
 	if got := renderBoard(flat, boardEnv{width: 100, now: at(0), busy: 2, capacity: 8}); len(got) != 2 {
 		t.Errorf("flat board = aggregate + leaves, got %d lines: %v", len(got), got)
 	}
 
-	// Overflow: 14 folds → 12 rows + "… +2 more" + leaves + aggregate = 15 lines.
+	// Overflow: 14 folds → 12 rows + "… +2 more" + slots/rate + aggregate = 15 lines.
 	many := make([]passRow, 14)
 	st = mkState(many)
 	st.st.outerTotal = 14
-	if got := renderBoard(st, boardEnv{width: 100, now: at(2824), busy: 8, capacity: 8}); len(got) != 15 {
+	if got := renderBoard(st, boardEnv{width: 100, now: at(21176), busy: 8, capacity: 8}); len(got) != 15 {
 		t.Errorf("overflow: want 15 lines (1+12+1+1), got %d", len(got))
 	} else if !strings.Contains(strings.Join(got, "\n"), "+2 more") {
 		t.Errorf("overflow marker missing:\n%s", strings.Join(got, "\n"))
@@ -92,21 +94,142 @@ func TestRenderBoard(t *testing.T) {
 		t.Error("clamped lines should truncate with …")
 	}
 
-	// No gauge (capacity 0): leaves segment absent, throughput still present.
-	frame = strings.Join(renderBoard(mkState(rows), boardEnv{width: 100, now: at(2824)}), "\n")
-	if strings.Contains(frame, "leaves") {
-		t.Errorf("no gauge → no leaves segment:\n%s", frame)
+	// No gauge (capacity 0): slots segment absent, throughput still present.
+	frame = strings.Join(renderBoard(mkState(rows), boardEnv{width: 100, now: at(21176)}), "\n")
+	if strings.Contains(frame, "slots") {
+		t.Errorf("no gauge → no slots segment:\n%s", frame)
 	}
-	if !strings.Contains(frame, "folds/min") {
+	if !strings.Contains(frame, "inner-CV runs/min") {
 		t.Errorf("throughput must survive a missing gauge:\n%s", frame)
 	}
 
-	// Rate unavailable (fresh ring): "— folds/min".
+	// Rate unavailable (fresh ring): "— inner-CV runs/min".
 	st = mkState(rows)
 	st.rate = movingRate{}
 	frame = strings.Join(renderBoard(st, boardEnv{width: 100, now: at(0), busy: 1, capacity: 8}), "\n")
-	if !strings.Contains(frame, "— folds/min") {
+	if !strings.Contains(frame, "— inner-CV runs/min") {
 		t.Errorf("unavailable rate renders —:\n%s", frame)
+	}
+}
+
+func TestRenderBoardStartupObservationsAreFactual(t *testing.T) {
+	now := at(5000)
+	bs := boardState{st: progressState{
+		nested: true, foldTotal: 10, foldKind: sampler.SizeExact,
+		stepK: 37, lastStepAt: at(4000),
+	}}
+	frame := strings.Join(renderBoard(bs, boardEnv{width: 120, now: now, busy: 8, capacity: 12}), "\n")
+	for _, want := range []string{
+		"starting", "~slots 8/12", "37 steps completed", "last step 1s ago", "no inner-CV run complete",
+	} {
+		if !strings.Contains(frame, want) {
+			t.Fatalf("startup frame missing %q:\n%s", want, frame)
+		}
+	}
+	for _, forbidden := range []string{"not hung", "warming"} {
+		if strings.Contains(frame, forbidden) {
+			t.Fatalf("startup frame made diagnosis %q:\n%s", forbidden, frame)
+		}
+	}
+
+	bs.st.foldK = 1
+	bs.st.lastRunAt = now
+	frame = strings.Join(renderBoard(bs, boardEnv{width: 120, now: now, busy: 8, capacity: 12}), "\n")
+	if strings.Contains(frame, "starting") || strings.Contains(frame, "no inner-CV run complete") {
+		t.Fatalf("startup line must disappear after first eligible run:\n%s", frame)
+	}
+}
+
+func TestRenderBoardFlatStartupAndConfidenceLabels(t *testing.T) {
+	now := at(30000)
+	bs := boardState{st: progressState{
+		foldTotal: 20, foldKind: sampler.SizeExact,
+		stepK: 4, lastStepAt: at(28000),
+	}}
+	frame := strings.Join(renderBoard(bs, boardEnv{width: 120, now: now, busy: 3, capacity: 8}), "\n")
+	for _, want := range []string{
+		"CV runs 0/20", "starting", "~slots 3/8", "4 steps completed", "last step 2s ago", "no CV run complete",
+	} {
+		if !strings.Contains(frame, want) {
+			t.Fatalf("flat startup frame missing %q:\n%s", want, frame)
+		}
+	}
+	if strings.Contains(frame, "inner-CV") || strings.Contains(frame, "warming") || strings.Contains(frame, "not hung") {
+		t.Fatalf("flat startup frame contains nested or diagnostic wording:\n%s", frame)
+	}
+
+	bs.st.foldK = 1
+	bs.st.lastRunAt = at(29000)
+	frame = strings.Join(renderBoard(bs, boardEnv{width: 120, now: now, busy: 3, capacity: 8}), "\n")
+	for _, want := range []string{"CV runs 1/20", "last CV run 1s ago", "— CV runs/min"} {
+		if !strings.Contains(frame, want) {
+			t.Fatalf("flat pre-confidence frame missing %q:\n%s", want, frame)
+		}
+	}
+	if strings.Contains(frame, "starting") || strings.Contains(frame, "ETA") {
+		t.Fatalf("flat pre-confidence frame must be post-startup without ETA:\n%s", frame)
+	}
+}
+
+func TestRenderBoardMatureShowsLastRunAge(t *testing.T) {
+	now := at(20000)
+	var rate movingRate
+	for i := 0; i < 16; i++ {
+		rate.add(at(i * 1000))
+	}
+	bs := boardState{
+		st: progressState{
+			nested: true, foldK: 16, foldTotal: 32, foldKind: sampler.SizeExact,
+			lastRunAt: at(15000),
+		},
+		rate: rate,
+	}
+	frame := strings.Join(renderBoard(bs, boardEnv{width: 120, now: now, busy: 4, capacity: 8}), "\n")
+	for _, want := range []string{"45.0 inner-CV runs/min", "last inner-CV run 5s ago", "~ETA"} {
+		if !strings.Contains(frame, want) {
+			t.Fatalf("mature frame missing %q:\n%s", want, frame)
+		}
+	}
+}
+
+func TestRenderBoardMatureSilenceAdvancesAgeAndDecaysEstimate(t *testing.T) {
+	var rate movingRate
+	for i := 0; i < 16; i++ {
+		rate.add(at(i * 1000))
+	}
+	bs := boardState{
+		st: progressState{
+			nested: true, foldK: 16, foldTotal: 32, foldKind: sampler.SizeExact,
+			lastRunAt: at(15000),
+		},
+		rate: rate,
+	}
+	var prevRate float64
+	var prevETA time.Duration
+	for sec := 20; sec <= 25; sec++ {
+		now := at(sec * 1000)
+		perMin, ok := bs.rate.rate(now)
+		if !ok {
+			t.Fatalf("rate unavailable at t=%ds", sec)
+		}
+		eta, ok := bs.rate.eta(now, bs.st.foldTotal-bs.st.foldK)
+		if !ok {
+			t.Fatalf("ETA unavailable at t=%ds", sec)
+		}
+		frame := strings.Join(renderBoard(bs, boardEnv{width: 120, now: now, busy: 4, capacity: 8}), "\n")
+		wantAge := fmt.Sprintf("last inner-CV run %ds ago", sec-15)
+		if !strings.Contains(frame, wantAge) || !strings.Contains(frame, "~ETA") {
+			t.Fatalf("mature silence frame at t=%ds missing age/ETA:\n%s", sec, frame)
+		}
+		if sec > 20 {
+			if perMin > prevRate {
+				t.Fatalf("rate increased during silence at t=%ds: %f > %f", sec, perMin, prevRate)
+			}
+			if eta < prevETA {
+				t.Fatalf("ETA decreased during silence at t=%ds: %v < %v", sec, eta, prevETA)
+			}
+		}
+		prevRate, prevETA = perMin, eta
 	}
 }
 
@@ -277,7 +400,7 @@ func TestRunExperiment_BoardMode(t *testing.T) {
 	if strings.Contains(s, "metis: progress") {
 		t.Errorf("the board REPLACES the plain progress lines")
 	}
-	if !strings.Contains(s, "outer 2/2") || !strings.Contains(s, "fold 0 ✓") || !strings.Contains(s, "fold 1 ✓") {
+	if !strings.Contains(s, "outer folds 2/2") || !strings.Contains(s, "outer fold 0 ✓") || !strings.Contains(s, "outer fold 1 ✓") {
 		t.Errorf("the final frame must show completed folds:\n%s", s)
 	}
 	// The bypass route: the fake-exec fixture has no traced closure → captureSweepCode
@@ -288,7 +411,7 @@ func TestRunExperiment_BoardMode(t *testing.T) {
 	if warnIdx < 0 {
 		t.Fatalf("expected the uncaptured-code note in a fake-exec fixture:\n%s", s)
 	}
-	if finalFrame := strings.LastIndex(s, "outer 2/2"); warnIdx > finalFrame {
+	if finalFrame := strings.LastIndex(s, "outer folds 2/2"); warnIdx > finalFrame {
 		t.Errorf("the capture warning bypassed the compositor (after the final frame)")
 	}
 
@@ -347,7 +470,7 @@ func TestRunExperiment_BoardFailureRejectsPostPublicationTickAndDiscardsFrame(t 
 	awaitRunControl(t, tickSelected, "pre-failure board tick selection")
 	awaitRunControl(t, tickFinished, "pre-failure board tick completion")
 	preFailure := out.snapshot()
-	for _, want := range []string{"outer 0/2", "fold 0 — queued", "folds/min"} {
+	for _, want := range []string{"outer folds 0/2", "outer fold 0 — queued", "no inner-CV run"} {
 		if !strings.Contains(preFailure, want) {
 			t.Fatalf("pre-failure board missing %q:\n%s", want, preFailure)
 		}
@@ -367,7 +490,7 @@ func TestRunExperiment_BoardFailureRejectsPostPublicationTickAndDiscardsFrame(t 
 	}
 	suffix := out.snapshot()[offset:]
 	for _, forbidden := range []string{
-		"outer 0/2", "fold 0 — queued", "configs ", "folds ", "folds/min", "ETA", "score ", "estimate", "mean ",
+		"outer folds 0/2", "outer fold 0 — queued", "configs ", "inner-CV runs ", "inner-CV runs/min", "ETA", "score ", "estimate", "mean ",
 	} {
 		if strings.Contains(suffix, forbidden) {
 			t.Errorf("post-publication board output contains stale token %q:\n%q", forbidden, suffix)
@@ -526,7 +649,7 @@ func TestBoardWriter_ForceFlushDrainsPending(t *testing.T) {
 	bw2 := newBoardWriter(&term2, func() time.Time { return at(0) })
 	prog.bw, prog.width = bw2, 100
 	prog.tick()
-	if !strings.Contains(term2.String(), "outer 0/1") {
+	if !strings.Contains(term2.String(), "outer folds 0/1") {
 		t.Errorf("tick must render + force-paint the current frame: %q", term2.String())
 	}
 }

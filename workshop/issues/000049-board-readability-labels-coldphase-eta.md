@@ -1,12 +1,13 @@
 ---
 id: 000049
-status: working
+status: codecomplete
 deps: []
 github_issue:
 created: 2026-07-16
-updated: 2026-07-16
-estimate_hours:
+updated: 2026-07-17
+estimate_hours: 2.63
 started: 2026-07-16T12:57:08-07:00
+actual_hours: N/A
 ---
 
 # board readability — label semantics, cold-phase "no progress" confusion, jumpy leaves, wild early ETA
@@ -134,9 +135,40 @@ exact peer commit in this issue's Log before close so the cross-repo requirement
 
 ## Plan
 
-- [ ] Implement the approved typed-telemetry/refined-render design through a durable TDD plan.
-- [ ] Verify labels, startup truthfulness, time-based occupancy, ETA readiness, stall decay/recovery,
-  terminal behavior, and the downstream RUNBOOK update.
+Durable plan: `workshop/plans/000049-board-readability-labels-coldphase-eta-plan.md`
+(single pass, no Mx — one close boundary).
+
+- [x] Add typed step/run activity at the concrete executor and persistence seams, including cache,
+  failure, role, ordering, and cancellation tests.
+- [x] Reduce time-driven occupancy and eligible-run telemetry with deterministic readiness, decay,
+  recovery, and out-of-order-event tests.
+- [x] Render truthful flat/nested vocabulary, startup observations, last-run age, and mature rate/ETA;
+  preserve repaint, failure, width, and terminal behavior.
+- [x] Update and commit the kbench Titanic RUNBOOK, pin its full commit here, then run focused,
+  race, full-suite, formatting, and stale-vocabulary verification.
+
+## Estimate
+
+```estimate
+model: estimate-logic-v3.1
+familiarity: 1.0
+item: smaller-go-module   design=0.05 impl=0.35
+item: smaller-go-module   design=0.06 impl=0.35
+item: tui-screen          design=0.15 impl=0.55
+item: cross-cutting-refactor design=0.05 impl=0.25
+item: smaller-go-module   design=0.06 impl=0.35
+item: atlas-docs          design=0.02 impl=0.10
+item: milestone-review    design=0.03 impl=0.20
+design-buffer: 0.15
+total: 2.63
+```
+
+Rows: (1) typed activity entities/decorator; (2) event-time reducer and rate/occupancy math;
+(3) board state/rendering and scripted traces; (4) shared vocabulary migration; (5) concrete-run,
+controller, and sweep wiring; (6) peer RUNBOOK plus atlas/stale-term sweep; (7) one SDLC milestone-review row.
+
+*Produced via `brain/data/life/42shots/velocity/estimate-logic-v3.1.md` against
+`baseline-v3.1.md`. Method A only.*
 
 ## Log
 
@@ -153,6 +185,41 @@ exact peer commit in this issue's Log before close so the cross-repo requirement
   occupancy cannot distinguish useful work from a hung subprocess. Co-designed after mapping the
   current sink/rate/compositor flow; #43 merges first, then #49 builds against its schedule.
 
+### 2026-07-17 — planning checkpoint
+- Reconciled the brain project after #43 merged, ran `sdlc start-plan`, mapped the final-executor,
+  concrete-run persistence, run-control, sweep-progress, board, and kbench documentation seams, and
+  authored the durable single-boundary TDD plan. Estimate uses v3.1 Method A; the approved spec and
+  existing #38/#43 patterns make this familiar extension work rather than a novel TUI subsystem.
+- Fresh-eyes plan review: Chunk 1 found Important gaps in shared run-control activity gating and
+  concrete flat/nested role propagation; Chunk 2 found an Important gap in aggregate counter ownership.
+  Patched the plan and both reviewers re-checked clean. Chunk 3 fresh-eyes review returned clean.
+
+### 2026-07-17 — implementation verification
+- Implemented typed step/run activity, run-role propagation, run-control-gated publication, event-time
+  eligible-run rate reduction, tick-smoothed `~slots`, factual cold-start board wording, shared
+  flat/nested progress vocabulary, and last-run-age/mature `~ETA` rendering. Updated atlas with the
+  durable activity seam and board contract.
+- Updated the kbench Titanic operator RUNBOOK and committed it as
+  `68edc6ca312dbe5306ce87315abec2d67e678005` (`docs: update metis board progress contract`).
+- Verification run: `go test ./cmd/metis -count=1`; `go test ./cmd/metis -race -count=1`;
+  `go test ./... -race -count=1`; metis `git diff --check`; kbench `git diff --check`; stale board
+  terminology grep over metis `cmd/`, `atlas/`, issue/plan, and the kbench RUNBOOK. Remaining grep hits
+  are historical problem/spec wording or negative test fixtures, not live operator output.
+- Close review verdict: `FIX-THEN-SHIP`. Fixed both Important findings before the close commit by
+  normalizing generated review-sidecar whitespace and adding
+  `TestRenderBoardMatureSilenceAdvancesAgeAndDecaysEstimate` for the five-second mature-silence
+  age/rate/ETA regression. Re-verified with
+  `go test ./cmd/metis -run TestRenderBoardMatureSilenceAdvancesAgeAndDecaysEstimate -count=1`,
+  `go test ./cmd/metis -run 'RenderBoardMatureSilence|RenderBoard|Progress|MovingRate|Occupancy|Activity|RunControl|ShapeSweepActivityRunRoles' -race -count=1`,
+  `go test ./cmd/metis -race -count=1`, `go test ./... -race -count=1`, and metis
+  `git diff --check`.
+- 2026-07-17: closed — Implemented typed activity-backed board telemetry and kbench RUNBOOK update;
+  verified with go test ./cmd/metis -count=1, go test ./cmd/metis -race -count=1, go test ./...
+  -race -count=1, metis/kbench git diff --check, and stale board-terminology greps. Actual
+  measurement was unavailable before implementation commit and later undercounted the
+  already-completed work, so --no-actual excludes this close from calibration.; review verdict:
+  FIX-THEN-SHIP
+
 ## Revisions
 
 ### 2026-07-16 — fresh-eyes spec review
@@ -161,3 +228,8 @@ exact peer commit in this issue's Log before close so the cross-repo requirement
   freshness signal plus a measurable scripted-trace criterion. Separated typed step activity from
   actual concrete-run completion so batch-order sampler callbacks cannot falsify the rate window;
   required execution success independently of successful failure-record persistence.
+
+### 2026-07-17 — durable implementation plan
+- Replaced the two placeholder plan rows with concrete typed-activity, pure-reducer, rendering,
+  cross-repo documentation, and verification steps; added the calibrated estimate and explicit
+  single-close-boundary decision.

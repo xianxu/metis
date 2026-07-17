@@ -79,12 +79,14 @@ type runOpts struct {
 	exec experiment.StepExecutor // test seam: an injected fake replaces the subprocess
 	//                              execStep (nil → the production execStep). Composes with
 	//                              cache: the caching decorator still wraps it.
-	readRoot    string        // metis#23: when set, the production execStep confines base-dataset reads to this root
-	maxParallel int           // metis#31: >1 ⇒ ParExec batches + a leaf semaphore; sizes leafSem
-	leafSem     chan struct{} // metis#31: the shared global subprocess budget (nil = serial/cache-only)
-	runControl  *runControl   // one per shape run: global abort + optional 2n admission slots
-	runLabel    string        // config/fold/preamble context captured with the first error
-	forkserver  bool          // metis#44: warm fork-server leaf executor (cmdRun default true;
+	activity    activityEmitter // successful step/run facts; nil is a no-op
+	runRole     runRole         // role for successful concrete-run activity; zero = ineligible/non-sweep
+	readRoot    string          // metis#23: when set, the production execStep confines base-dataset reads to this root
+	maxParallel int             // metis#31: >1 ⇒ ParExec batches + a leaf semaphore; sizes leafSem
+	leafSem     chan struct{}   // metis#31: the shared global subprocess budget (nil = serial/cache-only)
+	runControl  *runControl     // one per shape run: global abort + optional 2n admission slots
+	runLabel    string          // config/fold/preamble context captured with the first error
+	forkserver  bool            // metis#44: warm fork-server leaf executor (cmdRun default true;
 	//                           zero-value false keeps direct runOpts callers/tests on legacy exec)
 	forkPool *serverPool // metis#44: the per-root warm-server pool, created once per runExperiment
 	//                      when forkserver is set; threaded through nested runOpts copies.
@@ -94,7 +96,7 @@ type runOpts struct {
 	boardTick       <-chan time.Time  // test seam: nil uses the production 500ms ticker
 	beforeBoardTick func()            // test seam: after tick selection, before health observation
 	afterBoardTick  func()            // test seam: after the health observation returns
-	leafGauge       func() (int, int) // metis#38: (busy, capacity) over leafSem — the board's leaves line
+	leafGauge       func() (int, int) // metis#49: (busy, capacity) over leafSem — the board's slots line
 	leafPins        []string          // metis#48: default leaf BLAS pins, computed ONCE per top-level run in
 	//                             runExperiment (nil = not yet computed; non-nil rides nested runOpts
 	//                             copies like forkPool — an all-suppressed result is empty, not nil)
@@ -216,6 +218,7 @@ func runResolvedExperiment(exp experiment.Experiment, o runOpts, runID string, n
 	if o.runControl == nil {
 		return runResolvedExperimentAdmitted(exp, o, runID, now, out)
 	}
+	o.activity = runControlActivityEmitter(o.runControl, o.activity)
 	return o.runControl.run(o.runLabel, func() (experiment.Run, error) {
 		return runResolvedExperimentAdmitted(exp, o, runID, now, out)
 	})
@@ -248,6 +251,7 @@ func runResolvedExperimentAdmitted(exp experiment.Experiment, o runOpts, runID s
 		store := cas.NewFSStore(filepath.Join(cacheDir, "cas"), 0, cas.Clock(now))
 		exec = newCachingExecutor(exec, store, cacheDir, exp.Seed, out)
 	}
+	exec = activityExecutor{inner: exec, now: now, emit: o.activity}
 	runner := experiment.Runner{Exec: exec, Now: now}
 	fmt.Fprintf(out, "metis: run %s of experiment %q\n", runID, exp.ID)
 	run, steps, runErr := runner.Run(exp, runID, runDir)
@@ -297,6 +301,7 @@ func runResolvedExperimentAdmitted(exp experiment.Experiment, o runOpts, runID s
 	if runErr != nil {
 		return run, runErr
 	}
+	o.activity.emit(activityEvent{Kind: activityRunSuccess, At: now(), RunID: runID, Role: o.runRole})
 	fmt.Fprintf(out, "metis: %s %s\n", run.ID, run.Status)
 	return run, nil
 }
