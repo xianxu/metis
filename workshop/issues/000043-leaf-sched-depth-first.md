@@ -1,12 +1,13 @@
 ---
 id: 000043
-status: working
+status: codecomplete
 deps: []
 github_issue:
 created: 2026-07-14
 updated: 2026-07-16
 estimate_hours: 4.74
 started: 2026-07-16T12:57:07-07:00
+actual_hours: 4.70
 ---
 
 # leaf scheduler: depth-first run priority so cold-cache sweeps reach trains early
@@ -130,6 +131,7 @@ Durable implementation detail: [workshop/plans/000043-leaf-sched-depth-first-pla
 ### 2026-07-14
 
 ### 2026-07-16 — paired #43/#49 design approved
+- 2026-07-16: closed — Actual 4.70h is a labeled judgment from the 12:57 claim through 17:39 close window because telemetry was unavailable. Focused scheduling/cancellation/TUI subset passed under go test ./cmd/metis -race -count=10; standalone go test ./cmd/metis -race -count=1 and go test ./... -race -count=1 passed; serial/parallel manifests and ledgers are byte-identical and run/record semantics match after timestamp normalization; pinned-peer no-hardlink cold smoke completed 7 trains in 45s (~9.3/min), first train line 25 before fifth cv-split line 32, source status and refs unchanged; dry-run topology, issue validation, and git diff --check passed.; review verdict: SHIP
 - Chose bounded whole-run admission at the shared concrete-run choke point over a local fold-only
   gate or priority leaf queue. Co-designed with #49 so the board reports the earlier completions
   truthfully; implementation/review boundaries remain separate (#43 merges first).
