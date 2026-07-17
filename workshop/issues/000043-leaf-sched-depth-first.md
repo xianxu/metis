@@ -176,6 +176,22 @@ Durable implementation detail: [workshop/plans/000043-leaf-sched-depth-first-pla
 - Review hardened the proof against zero-hook false passes, hook panics, and payload/path identity
   swaps. The scheduling/cancellation subset passed `-race -count=10` and full race verification.
 
+### 2026-07-16 — Task 5 cold real-process acceptance
+- Added the credential-free three-config, two-fold `toy-sweep-smoke` fixture; its dry run reported
+  nested CV with `2 × (3 configs × 2 inner folds)` and the expected `C=0.5,1,2` grid.
+- In a no-hardlink temporary clone with all writable caches redirected below the temporary root, the
+  first completed train appeared on log line 25 before the fifth `cv-split` start on line 32. The
+  nested estimate appeared on line 60 and the seven-row completion summary on line 62: seven real
+  trains finished in 44s (~9.5 trains/min). Source status and `refs/metis/*` were byte-identical
+  before and after, and the temporary tree was removed. The isolated build also cloned the declared
+  `../ariadne` replacement beside Metis; the first setup attempt had exposed that missing dependency
+  before the sweep began.
+- Focused scheduling/cancellation tests passed `go test ./cmd/metis -race -run
+  'Test(Sweep_ColdAdmissionCompletesTrainBeforeFifthAcquire|NestedCV_PeakConcurrencyWithinCap|NestedCV_FirstFailureStopsAllObservableWork|RunControl)'
+  -count=10`; `go test ./cmd/metis -race -count=1`, `go test ./... -race -count=1`, and
+  `git diff --check` also passed with no race or whitespace report. Task 4's deterministic acceptance
+  covers byte-identical serial/parallel manifests and ledgers plus semantically equal run records.
+
 ## Revisions
 
 ### 2026-07-16 — fresh-eyes spec review
