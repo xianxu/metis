@@ -10,9 +10,10 @@ import (
 	"github.com/xianxu/metis/pkg/sampler"
 )
 
-// renderBoard is the PURE frame: aggregate line, fold rows (✓ done / ▸ in-flight /
-// queued), overflow cap, leaves+throughput line. NO ANSI — escape codes live only in
-// boardWriter (the paint/content split keeps this byte-testable).
+// renderBoard is the PURE frame: aggregate line, outer-fold rows (✓ done /
+// ▸ in-flight / queued), overflow cap, and the slots/rate line. NO ANSI —
+// escape codes live only in boardWriter (the paint/content split keeps this
+// byte-testable).
 func TestRenderBoard(t *testing.T) {
 	mkState := func(rows []passRow) boardState {
 		st := boardState{
@@ -48,7 +49,7 @@ func TestRenderBoard(t *testing.T) {
 			t.Errorf("frame missing %q:\n%s", want, frame)
 		}
 	}
-	if len(lines) != 5 { // aggregate + 3 fold rows + leaves
+	if len(lines) != 5 { // aggregate + 3 outer-fold rows + slots/rate
 		t.Errorf("want 5 lines, got %d:\n%s", len(lines), frame)
 	}
 	if strings.Contains(frame, "\x1b") {
@@ -188,6 +189,47 @@ func TestRenderBoardMatureShowsLastRunAge(t *testing.T) {
 		if !strings.Contains(frame, want) {
 			t.Fatalf("mature frame missing %q:\n%s", want, frame)
 		}
+	}
+}
+
+func TestRenderBoardMatureSilenceAdvancesAgeAndDecaysEstimate(t *testing.T) {
+	var rate movingRate
+	for i := 0; i < 16; i++ {
+		rate.add(at(i * 1000))
+	}
+	bs := boardState{
+		st: progressState{
+			nested: true, foldK: 16, foldTotal: 32, foldKind: sampler.SizeExact,
+			lastRunAt: at(15000),
+		},
+		rate: rate,
+	}
+	var prevRate float64
+	var prevETA time.Duration
+	for sec := 20; sec <= 25; sec++ {
+		now := at(sec * 1000)
+		perMin, ok := bs.rate.rate(now)
+		if !ok {
+			t.Fatalf("rate unavailable at t=%ds", sec)
+		}
+		eta, ok := bs.rate.eta(now, bs.st.foldTotal-bs.st.foldK)
+		if !ok {
+			t.Fatalf("ETA unavailable at t=%ds", sec)
+		}
+		frame := strings.Join(renderBoard(bs, boardEnv{width: 120, now: now, busy: 4, capacity: 8}), "\n")
+		wantAge := fmt.Sprintf("last inner-CV run %ds ago", sec-15)
+		if !strings.Contains(frame, wantAge) || !strings.Contains(frame, "~ETA") {
+			t.Fatalf("mature silence frame at t=%ds missing age/ETA:\n%s", sec, frame)
+		}
+		if sec > 20 {
+			if perMin > prevRate {
+				t.Fatalf("rate increased during silence at t=%ds: %f > %f", sec, perMin, prevRate)
+			}
+			if eta < prevETA {
+				t.Fatalf("ETA decreased during silence at t=%ds: %v < %v", sec, eta, prevETA)
+			}
+		}
+		prevRate, prevETA = perMin, eta
 	}
 }
 

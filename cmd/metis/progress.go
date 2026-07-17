@@ -231,7 +231,7 @@ type passRow struct {
 }
 
 // boardState is the pure render input for metis#38's board: the #30 aggregate state
-// plus the per-pass rows and the throughput ring (a mutex'd snapshot — renderers never
+// plus the per-pass rows and the eligible-run rate window (a mutex'd snapshot — renderers never
 // touch the live sink).
 type boardState struct {
 	st   progressState
@@ -253,7 +253,7 @@ type sweepProgress struct {
 	direction string // the objective direction — orients each pass's display-best (#38)
 	st        progressState
 	rows      []passRow  // metis#38: one row per outer fold (nil on the flat path)
-	rate      movingRate // metis#38: fold-completion throughput window
+	rate      movingRate // metis#49: eligible-run completion rate window
 	lastEmit  time.Time
 	started   bool
 	// metis#38 board mode (all nil/zero in plain mode): emits paint the rendered frame
@@ -261,7 +261,7 @@ type sweepProgress struct {
 	// ticker enters via tick() (a sink method), never a boardWriter-first path.
 	bw        *boardWriter
 	width     int               // terminal width ($COLUMNS | 80), read once at wiring
-	gauge     func() (int, int) // (busy, capacity) leaf occupancy; nil = no leaves segment
+	gauge     func() (int, int) // (busy, capacity) leaf occupancy; nil = no slots segment
 	occupancy occupancyWindow
 }
 

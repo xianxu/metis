@@ -1,12 +1,13 @@
 ---
 id: 000049
-status: working
+status: codecomplete
 deps: []
 github_issue:
 created: 2026-07-16
 updated: 2026-07-17
 estimate_hours: 2.63
 started: 2026-07-16T12:57:08-07:00
+actual_hours: N/A
 ---
 
 # board readability — label semantics, cold-phase "no progress" confusion, jumpy leaves, wild early ETA
@@ -204,6 +205,20 @@ controller, and sweep wiring; (6) peer RUNBOOK plus atlas/stale-term sweep; (7) 
   `go test ./... -race -count=1`; metis `git diff --check`; kbench `git diff --check`; stale board
   terminology grep over metis `cmd/`, `atlas/`, issue/plan, and the kbench RUNBOOK. Remaining grep hits
   are historical problem/spec wording or negative test fixtures, not live operator output.
+- Close review verdict: `FIX-THEN-SHIP`. Fixed both Important findings before the close commit by
+  normalizing generated review-sidecar whitespace and adding
+  `TestRenderBoardMatureSilenceAdvancesAgeAndDecaysEstimate` for the five-second mature-silence
+  age/rate/ETA regression. Re-verified with
+  `go test ./cmd/metis -run TestRenderBoardMatureSilenceAdvancesAgeAndDecaysEstimate -count=1`,
+  `go test ./cmd/metis -run 'RenderBoardMatureSilence|RenderBoard|Progress|MovingRate|Occupancy|Activity|RunControl|ShapeSweepActivityRunRoles' -race -count=1`,
+  `go test ./cmd/metis -race -count=1`, `go test ./... -race -count=1`, and metis
+  `git diff --check`.
+- 2026-07-17: closed — Implemented typed activity-backed board telemetry and kbench RUNBOOK update;
+  verified with go test ./cmd/metis -count=1, go test ./cmd/metis -race -count=1, go test ./...
+  -race -count=1, metis/kbench git diff --check, and stale board-terminology greps. Actual
+  measurement was unavailable before implementation commit and later undercounted the
+  already-completed work, so --no-actual excludes this close from calibration.; review verdict:
+  FIX-THEN-SHIP
 
 ## Revisions
 

@@ -96,7 +96,7 @@ type runOpts struct {
 	boardTick       <-chan time.Time  // test seam: nil uses the production 500ms ticker
 	beforeBoardTick func()            // test seam: after tick selection, before health observation
 	afterBoardTick  func()            // test seam: after the health observation returns
-	leafGauge       func() (int, int) // metis#38: (busy, capacity) over leafSem — the board's leaves line
+	leafGauge       func() (int, int) // metis#49: (busy, capacity) over leafSem — the board's slots line
 	leafPins        []string          // metis#48: default leaf BLAS pins, computed ONCE per top-level run in
 	//                             runExperiment (nil = not yet computed; non-nil rides nested runOpts
 	//                             copies like forkPool — an all-suppressed result is empty, not nil)

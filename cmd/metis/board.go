@@ -30,8 +30,8 @@ const maxFoldRows = 12
 
 // renderBoard renders the frame: the #30 aggregate line, one row per outer fold
 // (✓ done → held-out score · ▸ in-flight → per-pass counters + incumbent · queued),
-// and the leaves/throughput/ETA line. Pure; width-clamped (a wrapped line would
-// break the compositor's erase-count bookkeeping).
+// and the slots/rate/ETA line. Pure; width-clamped (a wrapped line would break
+// the compositor's erase-count bookkeeping).
 func renderBoard(bs boardState, env boardEnv) []string {
 	var lines []string
 	// Row 1: the aggregate — the same core the plain line prints (one source, no
