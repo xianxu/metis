@@ -987,7 +987,7 @@ git add testdata/experiment/toy-sweep-smoke.md atlas/index.md workshop/issues/00
 git commit -m "#43: document bounded sweep admission" -m "Record the independent run and leaf budgets and keep a credential-free real-process sweep for cold scheduling smoke checks." -m "Co-Authored-By: OpenAI Codex <codex@openai.com>"
 ```
 
-- [ ] **Step 7: Enter the single SDLC close boundary**
+- [x] **Step 7: Enter the single SDLC close boundary**
 
 Run `sdlc close --issue 43 --agent codex --verified '<focused race repetitions; full go test ./... -race; byte/semantic determinism; disposable real-process smoke>'` and address every Critical/Important finding from the gate-owned fresh review before proceeding to PR/merge.
 

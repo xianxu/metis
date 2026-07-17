@@ -198,6 +198,12 @@ Durable implementation detail: [workshop/plans/000043-leaf-sched-depth-first-pla
   seven-row summary were on lines 60 and 62; seven trains completed in 45s (~9.3/min). Source status
   and `refs/metis/*` remained byte-identical, and the temporary clone/cache root was removed.
 
+### 2026-07-16 — pre-close verification
+- Re-ran the focused scheduling/cancellation/TUI subset under `-race -count=10`, the standalone
+  `cmd/metis` race suite, and `go test ./... -race -count=1`; all passed. The smoke dry-run again
+  reported `2 × (3 configs × 2 inner folds)`, issue validation conformed, the diff check passed, and
+  the worktree was clean before entering the gate-owned close review.
+
 ## Revisions
 
 ### 2026-07-16 — fresh-eyes spec review
