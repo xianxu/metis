@@ -72,9 +72,7 @@ type configScore struct {
 }
 
 // shapeSweep is the mutable accumulator the pure nested-Sampler loop folds through the IO
-// shell: it drives each (config, fold) point-run through the shared cached runner, records
-// the manifest + per-config estimates, and captures the first fatal error (the pure Run
-// has no error channel, so a fatal fold sets ss.err and short-circuits the rest).
+// shell. Its runControl is the one failure authority across every nested pass.
 type shapeSweep struct {
 	o             runOpts
 	sh            experiment.Shape
@@ -93,10 +91,24 @@ type shapeSweep struct {
 
 // addManPoints appends a batch of manifest rows under the manifest lock (metis#32: the
 // nested run's outer folds run concurrently under ParExec, each recording its inner+outer rows).
-func (ss *shapeSweep) addManPoints(pts []pointRun) {
-	ss.manMu.Lock()
-	defer ss.manMu.Unlock()
-	ss.man.Points = append(ss.man.Points, pts...)
+func (ss *shapeSweep) fail(label string, err error) error {
+	return ss.o.runControl.fail(label, err)
+}
+
+func (ss *shapeSweep) firstError() error {
+	return ss.o.runControl.firstError()
+}
+
+func (ss *shapeSweep) whileHealthy(fn func()) bool {
+	return ss.o.runControl.whileHealthy(fn)
+}
+
+func (ss *shapeSweep) addManPoints(pts []pointRun) bool {
+	return ss.whileHealthy(func() {
+		ss.manMu.Lock()
+		defer ss.manMu.Unlock()
+		ss.man.Points = append(ss.man.Points, pts...)
+	})
 }
 
 // sweepPass accumulates ONE black-box sweeper run (the sweeper ⊃ resample loop): its per-config
@@ -116,44 +128,37 @@ type sweepPass struct {
 	hooks    passHooks            // metis#30: this pass's progress hooks, closure-bound to its outer fold
 	// metis#31: under ParExec the sweeper fans out over configs and each config's
 	// resample fans out over folds — all appending to this ONE pass. `mu` guards the
-	// orchestration bookkeeping (configs/points/err); the honest reduce stays in the
+	// orchestration bookkeeping (configs/points); the honest reduce stays in the
 	// sampler's pure Tell/Done, not here.
 	mu      sync.Mutex
 	configs []configScore
 	points  []pointRun
-	err     error
 }
 
-// setErr records the FIRST fatal error of the pass (set-once, mutex-guarded — the
-// fan-out writes it concurrently). A no-op once an error is already latched.
-func (p *sweepPass) setErr(err error) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.err == nil {
-		p.err = err
-	}
+func (p *sweepPass) setErr(label string, err error) error {
+	return p.ss.fail(label, err)
 }
 
-// firstError returns the latched error (mutex-guarded read — a concurrent read+write
-// is a race even when the write is set-once).
 func (p *sweepPass) firstError() error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.err
+	return p.ss.firstError()
 }
 
 // addConfigScore / addPoint append the per-config estimate / per-fold row under the
 // pass lock (concurrent under ParExec).
-func (p *sweepPass) addConfigScore(cs configScore) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.configs = append(p.configs, cs)
+func (p *sweepPass) addConfigScore(cs configScore) bool {
+	return p.ss.whileHealthy(func() {
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		p.configs = append(p.configs, cs)
+	})
 }
 
-func (p *sweepPass) addPoint(pr pointRun) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.points = append(p.points, pr)
+func (p *sweepPass) addPoint(pr pointRun) bool {
+	return p.ss.whileHealthy(func() {
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		p.points = append(p.points, pr)
+	})
 }
 
 // runSweeper runs the black-box sweeper (GridConfigs ⊃ FixedKFolds) over configPts, folding each
@@ -166,11 +171,15 @@ func (ss *shapeSweep) runSweeper(ctx sampler.Ctx, configPts []shape.Point, pass 
 		func(c shape.Point) sampler.MeanSE {
 			ms := sampler.Run(ctx, sampler.FixedKFolds{K: pass.splitK},
 				func(f sampler.FoldPoint) sampler.FoldOutcome { return pass.runPipelineFold(c, f) },
-				sampler.ExecFor[sampler.FoldPoint, sampler.FoldOutcome](ss.parallel), pass.hooks.fold)
+				sampler.ExecFor[sampler.FoldPoint, sampler.FoldOutcome](ss.parallel), func(ev sampler.ProgressEvent[sampler.FoldPoint, sampler.FoldOutcome]) {
+					ss.whileHealthy(func() { pass.hooks.fold(ev) })
+				})
 			pass.addConfigScore(configScore{point: c, meanSE: ms})
 			return ms
 		},
-		sampler.ExecFor[shape.Point, sampler.MeanSE](ss.parallel), pass.hooks.config)
+		sampler.ExecFor[shape.Point, sampler.MeanSE](ss.parallel), func(ev sampler.ProgressEvent[shape.Point, sampler.MeanSE]) {
+			ss.whileHealthy(func() { pass.hooks.config(ev) })
+		})
 }
 
 // runShapeSweep drives the metis#18 nested Sampler loop: the sweeper (GridConfigs over the
@@ -180,7 +189,7 @@ func (ss *shapeSweep) runSweeper(ctx sampler.Ctx, configPts []shape.Point, pass 
 // the winner by the objective; driver:single ships it (M1a-5). Produces per-config (mean,SE)
 // + the manifest + the raw per-fold ledger. Per-fold failure is fatal to the sweep (surfaced,
 // not swallowed — a partial resample is not an honest estimate).
-func runShapeSweep(o runOpts, sh experiment.Shape, now func() time.Time, out io.Writer) error {
+func runShapeSweep(o runOpts, sh experiment.Shape, now func() time.Time, out io.Writer) (result error) {
 	sweepStart := now() // metis#50: the run-end summary reports wall-clock elapsed
 	// probeRepo's HEAD sha still drives the mid-sweep code-freeze guard (codeID) — NOT the
 	// identity (metis#27 dropped repo_shas). The shape's blob-hash content-addresses the intent.
@@ -262,19 +271,41 @@ func runShapeSweep(o runOpts, sh experiment.Shape, now func() time.Time, out io.
 		ss.prog.bw = o.board
 		ss.prog.width = boardWidth()
 		ss.prog.gauge = o.leafGauge
-		ticker := time.NewTicker(500 * time.Millisecond)
+		tickC := o.boardTick
+		var ticker *time.Ticker
+		if tickC == nil {
+			ticker = time.NewTicker(500 * time.Millisecond)
+			tickC = ticker.C
+		}
 		tickDone := make(chan struct{})
+		tickStopped := make(chan struct{})
 		go func() {
+			defer close(tickStopped)
 			for {
 				select {
-				case <-ticker.C:
-					ss.prog.tick()
+				case <-tickC:
+					if o.beforeBoardTick != nil {
+						o.beforeBoardTick()
+					}
+					ss.whileHealthy(func() { ss.prog.tick() })
+					if o.afterBoardTick != nil {
+						o.afterBoardTick()
+					}
 				case <-tickDone:
 					return
 				}
 			}
 		}()
-		defer func() { ticker.Stop(); close(tickDone) }()
+		defer func() {
+			if ticker != nil {
+				ticker.Stop()
+			}
+			close(tickDone)
+			<-tickStopped
+			if result != nil {
+				ss.prog.abort()
+			}
+		}()
 	}
 
 	// metis#32: >1 config → nested CV (records inner + per-family outer rows; the honest measure).
@@ -293,7 +324,10 @@ func runShapeSweep(o runOpts, sh experiment.Shape, now func() time.Time, out io.
 	res := sampler.Run(ctx, sampler.SingleDriver{}, func(sampler.SinglePoint) sampler.SweepResult {
 		return ss.runSweeper(ctx, configPts, pass)
 	}, sampler.ExecFor[sampler.SinglePoint, sampler.SweepResult](ss.parallel), nil)
-	ss.prog.finish() // metis#30: the terminal progress line, before the report
+	if err := ss.firstError(); err != nil {
+		return err
+	}
+	ss.whileHealthy(ss.prog.finish) // metis#30: the terminal progress line, before the report
 	// metis#31: sort the fan-out's completion-order bookkeeping to a stable content key
 	// BEFORE persisting, so manifest.json + the ledger are byte-deterministic across
 	// serial/parallel runs (the winner/estimate are already deterministic; this makes
@@ -301,24 +335,22 @@ func runShapeSweep(o runOpts, sh experiment.Shape, now func() time.Time, out io.
 	sortPointRuns(pass.points)
 	ss.man.Points = pass.points
 	ss.configs = pass.configs
-	if err := pass.firstError(); err != nil {
-		return err
-	}
-
 	if err := writeManifest(o.expPath, ss.man); err != nil {
-		return err
+		return ss.fail("write sweep manifest", err)
 	}
 	// Capture the sweep's code closure to a git side ref (metis#8/#14) — BEST-EFFORT: the
 	// records + manifest are already valid, so a capture hiccup warns, never aborts.
 	cohort, err := captureSweepCode(o, ss.man)
 	if err != nil {
-		fmt.Fprintf(out, "metis: warning: code capture failed (%v) — the sweep's records are valid but not committed to a side ref\n", err)
+		ss.whileHealthy(func() {
+			fmt.Fprintf(out, "metis: warning: code capture failed (%v) — the sweep's records are valid but not committed to a side ref\n", err)
+		})
 	}
 	// Persist the raw per-fold rows to the shape's append-only ledger sidecar (metis#8/#18):
 	// AggregateView reduces them read-time to per-config (mean, SE) — so metis#19's 1-SE
 	// select re-reduces the same rows without a re-run.
 	if err := writeSweepLedger(o.expPath, ss.man); err != nil {
-		return err
+		return ss.fail("write sweep ledger", err)
 	}
 	// Guard (metis#19): a parsimony rule (one-std-err/pct-loss) needs a measured complexity
 	// for every swept family — else the parsimony axis is silently dropped and the winner is
@@ -326,11 +358,13 @@ func runShapeSweep(o runOpts, sh experiment.Shape, now func() time.Time, out io.
 	// the ship/report is gated. Checked here (post-fold) because HasComplexity is only known
 	// after the folds run.
 	if err := sampler.GuardComplexity(sh.Sweeper.Objective.Select, configStatsOf(ss.configs)); err != nil {
-		return err
+		return ss.fail("sweep complexity guard", err)
 	}
-	ss.reportWinner(res)
-	printRunSummary(out, o.expPath, now().Sub(sweepStart), len(ss.man.Points), cohort)
-	return nil
+	ss.whileHealthy(func() {
+		ss.reportWinner(res)
+		printRunSummary(out, o.expPath, now().Sub(sweepStart), len(ss.man.Points), cohort)
+	})
+	return ss.firstError()
 }
 
 // configStatsOf builds the per-config stats (with each config's family) from a completed
@@ -372,54 +406,38 @@ func (ss *shapeSweep) runNestedCV(ctx sampler.Ctx, configPts []shape.Point, k, r
 	// fewer of them (runFolds ≤ k). Deterministic run id → the analysis_i refs are locatable.
 	analysisRefs, err := ss.materializeOuterAnalysis(k, stratify)
 	if err != nil {
-		return err
+		if first := ss.firstError(); first != nil {
+			return first
+		}
+		return ss.fail("nested-CV preamble", err)
 	}
 	outerPart := sampler.PartitionRef(fmt.Sprintf("outer-cv-k%d-strat%t-seed%d", k, stratify, ss.sh.Seed))
 
-	// metis#31: CVDriver.Ask emits all outer folds as one batch, so ParExec runs these
-	// closures concurrently — firstErr's read+write must be mutex-guarded (a set-once
-	// write racing a read is still a data race). Each outer fold has its OWN sweepPass
-	// (created in runOuterFold), so the inner fan-out is guarded there; this guards only
-	// the outer-fold error latch. The per-fold ledger-row recording is guarded by ss.manMu.
-	var errMu sync.Mutex
-	var firstErr error
-	setFirst := func(err error) {
-		errMu.Lock()
-		defer errMu.Unlock()
-		if firstErr == nil {
-			firstErr = err
-		}
-	}
-	getFirst := func() error {
-		errMu.Lock()
-		defer errMu.Unlock()
-		return firstErr
-	}
 	est := sampler.Run(ctx, sampler.CVDriver{K: runFolds, Stratify: stratify},
 		func(p sampler.OuterFoldPoint) float64 {
-			if getFirst() != nil {
+			if ss.firstError() != nil {
 				return 0
 			}
 			score, ferr := ss.runOuterFold(ctx, configPts, k, stratify, analysisRefs[p.Idx], outerPart, p.Idx)
 			if ferr != nil {
-				setFirst(ferr)
+				if ss.firstError() == nil {
+					ss.fail(fmt.Sprintf("outer fold %d", p.Idx), ferr)
+				}
 				return 0
 			}
 			return score
 		},
 		sampler.ExecFor[sampler.OuterFoldPoint, float64](ss.parallel),
-		// metis#30: outer-fold completions always emit. Error-gated: once firstErr
+		// metis#30: outer-fold completions always emit. Error-gated: once runControl
 		// latches, remaining closures return sentinel zeros — don't fold those into
 		// the displayed est (the run is aborting; a fake 0 would tank the line).
 		func(ev sampler.ProgressEvent[sampler.OuterFoldPoint, float64]) {
-			if getFirst() == nil {
-				ss.prog.driverEvent(ev)
-			}
+			ss.whileHealthy(func() { ss.prog.driverEvent(ev) })
 		})
-	if err := getFirst(); err != nil {
+	if err := ss.firstError(); err != nil {
 		return err
 	}
-	ss.prog.finish() // metis#30: the terminal progress line, before the estimate report
+	ss.whileHealthy(ss.prog.finish) // metis#30: the terminal progress line, before the estimate report
 
 	// metis#32: the nested run now RECORDS (unlike metis#23's estimation-only path) — persist the
 	// inner + per-family outer rows accumulated in ss.man.Points so `metis select` can reduce them
@@ -427,18 +445,22 @@ func (ss *shapeSweep) runNestedCV(ctx sampler.Ctx, configPts []shape.Point, k, r
 	// (the outer folds appended concurrently under ParExec) for byte-deterministic artifacts.
 	sortPointRuns(ss.man.Points)
 	if err := writeManifest(ss.o.expPath, ss.man); err != nil {
-		return err
+		return ss.fail("write nested sweep manifest", err)
 	}
 	cohort, cerr := captureSweepCode(ss.o, ss.man)
 	if cerr != nil {
-		fmt.Fprintf(ss.out, "metis: warning: code capture failed (%v) — the nested run's records are valid but not committed to a side ref\n", cerr)
+		ss.whileHealthy(func() {
+			fmt.Fprintf(ss.out, "metis: warning: code capture failed (%v) — the nested run's records are valid but not committed to a side ref\n", cerr)
+		})
 	}
 	if err := writeSweepLedger(ss.o.expPath, ss.man); err != nil {
-		return err
+		return ss.fail("write nested sweep ledger", err)
 	}
-	ss.reportEstimate(est, runFolds)
-	printRunSummary(ss.out, ss.o.expPath, ss.now().Sub(ss.start), len(ss.man.Points), cohort)
-	return nil
+	ss.whileHealthy(func() {
+		ss.reportEstimate(est, runFolds)
+		printRunSummary(ss.out, ss.o.expPath, ss.now().Sub(ss.start), len(ss.man.Points), cohort)
+	})
+	return ss.firstError()
 }
 
 // materializeOuterAnalysis runs the nested-CV preamble ({data phase + outer-split(k=outerK)}) ONCE
@@ -457,13 +479,14 @@ func (ss *shapeSweep) materializeOuterAnalysis(outerK int, stratify bool) ([]str
 	exp.Type = "experiment"
 	preID, err := pointAddressOf(exp, ss.shapeBlobHash)
 	if err != nil {
-		return nil, fmt.Errorf("nested-CV preamble: %w", err)
+		return nil, ss.fail("nested-CV preamble address", err)
 	}
 	preOpts := ss.o
 	preOpts.inSweep = true // one preamble run; skip the per-run capture noise
 	preOpts.readRoot = ""  // outer-split legitimately reads the full dataset
+	preOpts.runLabel = fmt.Sprintf("outer-analysis preamble (%s)", preID)
 	if _, err := runResolvedExperiment(exp, preOpts, preID, ss.now, ss.out); err != nil {
-		return nil, fmt.Errorf("nested-CV preamble (%s): %w", preID, err)
+		return nil, err
 	}
 	refs := make([]string, outerK)
 	for i := 0; i < outerK; i++ {
@@ -479,7 +502,7 @@ func (ss *shapeSweep) materializeOuterAnalysis(outerK int, stratify bool) ([]str
 func (ss *shapeSweep) runOuterFold(ctx sampler.Ctx, configPts []shape.Point, k int, stratify bool, analysisRef string, outerPart sampler.PartitionRef, i int) (float64, error) {
 	analysisAbs, err := filepath.Abs(filepath.Join(filepath.Dir(ss.o.expPath), analysisRef))
 	if err != nil {
-		return 0, err
+		return 0, ss.fail(fmt.Sprintf("outer fold %d analysis path", i), err)
 	}
 	// (a) sealed selection: the sweeper's inner-CV runs entirely within analysis_i (inner k/stratify).
 	pass := &sweepPass{ss: ss, baseRef: analysisRef, readRoot: analysisAbs, splitK: k,
@@ -487,22 +510,26 @@ func (ss *shapeSweep) runOuterFold(ctx sampler.Ctx, configPts []shape.Point, k i
 		hooks: ss.prog.forPass(i)} // metis#30/#38: outer-fold identity via closure binding
 	sres := ss.runSweeper(ctx, configPts, pass)
 	if err := pass.firstError(); err != nil {
-		return 0, fmt.Errorf("outer fold %d sealed sweep: %w", i, err)
+		return 0, err
 	}
 	// Guard (metis#19/#23 I1): the parsimony select rule needs a measured complexity for every
 	// swept family — same guard the flat path runs before trusting its winner. Without it, a
 	// parsimony-select + non-reporting-model shape would SILENTLY mis-select in each outer fold.
 	if err := sampler.GuardComplexity(ss.sh.Sweeper.Objective.Select, configStatsOf(pass.configs)); err != nil {
-		return 0, fmt.Errorf("outer fold %d: %w", i, err)
+		return 0, ss.fail(fmt.Sprintf("outer fold %d complexity guard", i), err)
 	}
 
 	// metis#32: record the sealed sweep's INNER rows (Level=inner, tagged with this outer fold).
 	of := i
 	rows := make([]pointRun, 0, len(pass.points)+len(sres.PerFamily))
-	for _, pr := range pass.points {
-		pr.Level = "inner"
-		pr.OuterFold = &of
-		rows = append(rows, pr)
+	if !ss.whileHealthy(func() {
+		for _, pr := range pass.points {
+			pr.Level = "inner"
+			pr.OuterFold = &of
+			rows = append(rows, pr)
+		}
+	}) {
+		return 0, errRunAborted
 	}
 
 	// (b) score EACH family's inner-winner on the held outer-assessment — post-selection, so
@@ -516,44 +543,51 @@ func (ss *shapeSweep) runOuterFold(ctx sampler.Ctx, configPts []shape.Point, k i
 	var shipScore float64
 	for _, fam := range sortedFamilies(sres.PerFamily) {
 		w := sres.PerFamily[fam]
-		score, scoreID, status, ferr := ss.scoreOnOuterFold(w.Point, i, k, stratify, outerPart)
+		score, scoreID, status, ferr := ss.scoreOnOuterFold(w.Point, i, k, stratify, outerPart, fam)
 		if ferr != nil {
-			return 0, fmt.Errorf("outer fold %d family %s score: %w", i, fam, ferr)
+			return 0, ferr
 		}
-		rows = append(rows, pointRun{
-			RunID:      scoreID,
-			FreeParams: freeParamMap(w.Point),
-			Fold:       of, // the outer fold this held-out score is on
-			Level:      "outer",
-			OuterFold:  &of,
-			Status:     status,
-			// Metrics filled read-time from the run's record.json (namespaced), like inner rows.
-		})
-		if fam == shipFamily {
-			shipScore = score
+		if !ss.whileHealthy(func() {
+			rows = append(rows, pointRun{
+				RunID:      scoreID,
+				FreeParams: freeParamMap(w.Point),
+				Fold:       of, // the outer fold this held-out score is on
+				Level:      "outer",
+				OuterFold:  &of,
+				Status:     status,
+				// Metrics filled read-time from the run's record.json (namespaced), like inner rows.
+			})
+			if fam == shipFamily {
+				shipScore = score
+			}
+			fmt.Fprintf(ss.out, "  outer fold %d: %s winner %s → held-out %.4f\n",
+				i, fam, freeParamStrFromParams(w.Point.FreeParams), score)
+		}) {
+			return 0, errRunAborted
 		}
-		fmt.Fprintf(ss.out, "  outer fold %d: %s winner %s → held-out %.4f\n",
-			i, fam, freeParamStrFromParams(w.Point.FreeParams), score)
 	}
-	ss.addManPoints(rows)
+	if !ss.addManPoints(rows) {
+		return 0, errRunAborted
+	}
 	return shipScore, nil
 }
 
 // scoreOnOuterFold refit-and-scores one config's winner on the held outer-assessment fold i (a
 // full-data fold run at outer-k; post-selection, so unconfined). Returns the held-out fold_score,
 // the run id (→ its record.json carries the namespaced metric the ledger reads), and its status.
-func (ss *shapeSweep) scoreOnOuterFold(point shape.Point, i, k int, stratify bool, outerPart sampler.PartitionRef) (float64, string, string, error) {
+func (ss *shapeSweep) scoreOnOuterFold(point shape.Point, i, k int, stratify bool, outerPart sampler.PartitionRef, fam string) (float64, string, string, error) {
 	scoreExp := ss.buildFoldExperiment(point, sampler.FoldPoint{Idx: i}, nil, k, stratify, outerPart)
 	scoreID, err := pointAddressOf(scoreExp, ss.shapeBlobHash)
 	if err != nil {
-		return 0, "", "", err
+		return 0, "", "", ss.fail(fmt.Sprintf("outer fold %d family %s score address", i, fam), err)
 	}
 	scoreOpts := ss.o
 	scoreOpts.inSweep = true
 	scoreOpts.readRoot = "" // the outer-assessment eval reads full data legitimately
+	scoreOpts.runLabel = fmt.Sprintf("outer fold %d family %s score (%s)", i, fam, scoreID)
 	run, err := runResolvedExperiment(scoreExp, scoreOpts, scoreID, ss.now, ss.out)
 	if err != nil {
-		return 0, "", "", fmt.Errorf("%s: %w", scoreID, err)
+		return 0, "", "", err
 	}
 	return run.Metrics[foldMetric], scoreID, run.Status, nil
 }
@@ -580,8 +614,9 @@ func (ss *shapeSweep) reportEstimate(est sampler.MeanSE, outerK int) {
 // runPipelineFold runs ONE (config, fold) point: build its per-fold experiment (data +
 // synthesized cv-split + pipeline, with the config + fold-context overlaid), run it through
 // the shared cached runner, record the manifest row, and return the fold_score the inner
-// resample Sampler folds. A fatal outcome sets ss.err and returns 0 (the pure Run keeps
-// going; runShapeSweep checks ss.err before using the winner).
+// resample Sampler folds. A fatal outcome publishes through the experiment-wide
+// runControl and returns 0; every sampler callback/sink rejects placeholders after
+// publication, and the top level returns the stored concrete cause.
 func (p *sweepPass) runPipelineFold(c shape.Point, f sampler.FoldPoint) sampler.FoldOutcome {
 	ss := p.ss
 	if p.firstError() != nil {
@@ -595,34 +630,39 @@ func (p *sweepPass) runPipelineFold(c shape.Point, f sampler.FoldPoint) sampler.
 	// .git/index.lock so a transient probe failure is expected; treating "" as a change
 	// would false-abort the whole honest run.
 	if _, s, _ := probeRepo(ss.o.git, filepath.Dir(ss.o.expPath)); s != "" && s != ss.codeID {
-		p.setErr(fmt.Errorf("code changed mid-sweep (%s → %s) — re-run to sweep the new revision", ss.codeID, s))
+		p.setErr(fmt.Sprintf("config %s fold %d", freeParamStr(c), f.Idx),
+			fmt.Errorf("code changed mid-sweep (%s → %s) — re-run to sweep the new revision", ss.codeID, s))
 		return sampler.FoldOutcome{}
 	}
 
 	exp := ss.buildFoldExperiment(c, f, p.baseRef, p.splitK, p.stratify, p.partRef)
 	runID, err := pointAddressOf(exp, ss.shapeBlobHash)
 	if err != nil {
-		p.setErr(fmt.Errorf("config %s fold %d: %w", freeParamStr(c), f.Idx, err))
+		p.setErr(fmt.Sprintf("config %s fold %d", freeParamStr(c), f.Idx), err)
 		return sampler.FoldOutcome{}
 	}
 	pointOpts := ss.o
 	pointOpts.inSweep = true        // metis#14: the sweep captures once (captureSweepCode), not per point
 	pointOpts.readRoot = p.readRoot // metis#23: confine a sealed outer-fold pass to its analysis root
+	pointOpts.runLabel = fmt.Sprintf("config %s fold %d (%s)", freeParamStr(c), f.Idx, runID)
 	run, runErr := runResolvedExperiment(exp, pointOpts, runID, ss.now, ss.out)
 	// A failing fold is FATAL to the sweep, unlike a v1 flat point: a config scored over a
 	// PARTIAL fold set is not an honest (mean, SE) estimate. Any error (a step failure, a
 	// validation never-start, a persistence error) aborts — surfaced, never a half-scored config.
 	if runErr != nil {
-		p.setErr(fmt.Errorf("config %s fold %d (%s): %w", freeParamStr(c), f.Idx, runID, runErr))
+		// runControl already published a concrete admitted-run failure. A queued or
+		// late sibling returns errRunAborted; neither path may republish the sentinel.
 		return sampler.FoldOutcome{}
 	}
-	p.addPoint(pointRun{
+	if !p.addPoint(pointRun{
 		RunID:      runID,
 		FreeParams: freeParamMap(c),
 		Fold:       f.Idx,
 		Status:     run.Status,
 		Metrics:    run.Metrics,
-	})
+	}) {
+		return sampler.FoldOutcome{}
+	}
 	// metis#19 M2: read the train step's realized-complexity metric. Present → the parsimony
 	// rules consume it; absent (HasComplexity false) → the guard rejects a parsimony rule.
 	cx, hasCx := run.Metrics[foldComplexityMetric]

@@ -139,7 +139,13 @@ identical on a non-Kaggle platform?* — if yes, it lives here.
   rebuild the exact run DIRECTLY, not by re-expanding the grid. The **driver** is `cmd/metis`: `metis run` on an experiment-shape
   drives the real three-level loop (`runShapeSweep`: `Run(SingleDriver) ⊃ Run(GridConfigs) ⊃
   Run(FixedKFolds)`), running each `(config, fold)` through the shared `runResolvedExperiment` (cached
-  runner) keyed by its content-address. The sweeper (`GridConfigs ⊃ FixedKFolds`) is extracted as
+  runner) keyed by its content-address. Parallel sampler fan-out remains order-preserving, while every
+  concrete run crosses one sweep-scoped `2n` admission controller before side effects; the independent
+  leaf semaphore remains capped at `n`. The controller (`cmd/metis/runcontrol.go`, installed at
+  `runResolvedExperiment`) also owns the experiment-wide first failure, so queued runs produce no
+  observable state after cancellation; the scheduling and cancellation regressions in
+  `cmd/metis/parallel_test.go` pin both budgets and the failure boundary. The sweeper
+  (`GridConfigs ⊃ FixedKFolds`) is extracted as
   `runSweeper`/`sweepPass` (per-call accumulators) so `driver:cv` can run it once **per outer fold**,
   each pass repointed at that fold's sealed `analysis_i` + confined (`METIS_READ_ROOT`) — the flat
   `driver:single` path is `runSweeper` with `baseRef=nil`, unconfined. Each fold builds a per-fold experiment (`data ++ engine-synthesized

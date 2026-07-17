@@ -221,6 +221,33 @@ func TestBoardWriter_CloseFlushesPending(t *testing.T) {
 	}
 }
 
+func TestBoardWriter_DiscardFrameErasesWithoutRedraw(t *testing.T) {
+	var term strings.Builder
+	bw := newBoardWriter(&term, steppingClock(300*time.Millisecond))
+	bw.paint([]string{"folds 2/8", "31.2 folds/min · ETA 12s"})
+	offset := term.Len()
+
+	bw.discardFrame()
+	bw.close()
+	suffix := term.String()[offset:]
+	if !strings.Contains(suffix, "\x1b[2A\x1b[J") {
+		t.Fatalf("discard must erase the painted two-line frame: %q", suffix)
+	}
+	for _, stale := range []string{"folds 2/8", "folds/min", "ETA"} {
+		if strings.Contains(suffix, stale) {
+			t.Errorf("discard/close redrew stale token %q: %q", stale, suffix)
+		}
+	}
+	if !strings.HasSuffix(suffix, "\x1b[?25h") {
+		t.Errorf("close after discard must restore the cursor: %q", suffix)
+	}
+	n := term.Len()
+	bw.close()
+	if term.Len() != n {
+		t.Fatal("close after discard must remain idempotent")
+	}
+}
+
 // Board mode end-to-end over the fixture sweep: frames paint (cursor hide, fold rows),
 // the #30 plain lines are REPLACED (not duplicated), the final frame carries the
 // completed counts, and a capture warning — the plan-review bypass route (o.out) —
@@ -280,6 +307,85 @@ func TestRunExperiment_BoardMode(t *testing.T) {
 	}
 	if !strings.Contains(plain.String(), "metis: progress") {
 		t.Error("tui=false keeps the #30 plain lines")
+	}
+}
+
+func TestRunExperiment_BoardFailureRejectsPostPublicationTickAndDiscardsFrame(t *testing.T) {
+	ws := t.TempDir()
+	expPath := writeShapeFile(t, ws, foldShapeCVMD("[a, b, c]"))
+	control := newRunControl(2)
+	exec := newFailureBarrierExec()
+	out := &concurrentBuffer{}
+	boardTick := make(chan time.Time)
+	tickSelected := make(chan struct{}, 2)
+	tickFinished := make(chan struct{}, 2)
+	publishedOffset := make(chan int, 1)
+	postFailureTickSend := make(chan error, 1)
+	control.beforeFailureUnlock = func() {
+		publishedOffset <- out.len()
+		postFailureTickSend <- sendBoardTickWithin(boardTick, at(2000), "post-publication tick receive")
+		close(exec.failurePublished)
+	}
+	result := make(chan error, 1)
+	go func() {
+		_, err := runExperiment(runOpts{
+			expPath: expPath, now: fixedNow(),
+			git: fakeGitProbe{name: "metis", sha: "sha"}, exec: exec, out: out,
+			maxParallel: 2, runControl: control, tui: true, boardTick: boardTick,
+			beforeBoardTick: func() { tickSelected <- struct{}{} },
+			afterBoardTick:  func() { tickFinished <- struct{}{} },
+		})
+		result <- err
+	}()
+	for i := 0; i < 4; i++ {
+		awaitRunControl(t, exec.innerEntered, "four board-mode inner run directories")
+	}
+
+	if err := sendBoardTickWithin(boardTick, at(1000), "pre-failure tick receive"); err != nil {
+		t.Fatal(err)
+	}
+	awaitRunControl(t, tickSelected, "pre-failure board tick selection")
+	awaitRunControl(t, tickFinished, "pre-failure board tick completion")
+	preFailure := out.snapshot()
+	for _, want := range []string{"outer 0/2", "fold 0 — queued", "folds/min"} {
+		if !strings.Contains(preFailure, want) {
+			t.Fatalf("pre-failure board missing %q:\n%s", want, preFailure)
+		}
+	}
+
+	close(exec.releaseFailure)
+	offset := awaitRunControl(t, publishedOffset, "board failure publication offset")
+	if err := awaitRunControl(t, postFailureTickSend, "post-publication tick send result"); err != nil {
+		awaitRunControl(t, result, "board-mode failure cleanup after tick-send timeout")
+		t.Fatal(err)
+	}
+	awaitRunControl(t, tickSelected, "post-publication board tick selection")
+	awaitRunControl(t, tickFinished, "rejected post-publication board tick")
+	err := awaitRunControl(t, result, "board-mode failure cleanup")
+	if err == nil || !strings.Contains(err.Error(), "injected train failure") {
+		t.Fatalf("board-mode error = %v, want injected train failure", err)
+	}
+	suffix := out.snapshot()[offset:]
+	for _, forbidden := range []string{
+		"outer 0/2", "fold 0 — queued", "configs ", "folds ", "folds/min", "ETA", "score ", "estimate", "mean ",
+	} {
+		if strings.Contains(suffix, forbidden) {
+			t.Errorf("post-publication board output contains stale token %q:\n%q", forbidden, suffix)
+		}
+	}
+	if !strings.Contains(suffix, "\x1b[J") || !strings.HasSuffix(suffix, "\x1b[?25h") {
+		t.Errorf("failure cleanup must erase the board and restore the cursor: %q", suffix)
+	}
+}
+
+func sendBoardTickWithin(ch chan<- time.Time, tick time.Time, what string) error {
+	timer := time.NewTimer(runControlTestTimeout)
+	defer timer.Stop()
+	select {
+	case ch <- tick:
+		return nil
+	case <-timer.C:
+		return fmt.Errorf("timed out waiting for %s", what)
 	}
 }
 
