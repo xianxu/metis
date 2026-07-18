@@ -239,8 +239,8 @@ func distinctFingerprintCount(led ledger.Ledger) int {
 // loadLedgerRecords reads record.json for each distinct run the ledger references
 // (Row.PointAddr IS the run id — rowsFromManifest). Missing/unparseable records are
 // SKIPPED (an inspect surface tolerates cleaned run dirs; the summary shows "?").
-// The IO seam for cohortSummaries — called on the inspect command and on select's
-// error paths only, never on the happy select path.
+// The IO seam for cohortSummaries — called on the inspect command, on select's error
+// paths, and (metis#53) on every --promote for the fingerprint-consistency guard.
 func loadLedgerRecords(shapePath string, led ledger.Ledger) map[string]record.RunRecord {
 	dir := filepath.Dir(shapePath)
 	out := map[string]record.RunRecord{}

@@ -169,7 +169,14 @@ wrapped by **thin step-executables** honoring the contract above. Hermetic via *
   never ships** (shipping moved to `metis select --promote`). **metis#52:** `select --cohort` lists the
   fingerprint cohorts (delegates to the #39 core), and every pick line carries its
   `· point <addr>` override handle (a representative ledger-row addr; round-trips through
-  `--point`). **metis#50:** a sweep ends with the
+  `--point`). **metis#53:** `select --promote`
+  (both `--best*` and `--point`) runs the **fingerprint-consistency guard** before executing the
+  promoted run: the cohort's captured D closure (per-path blob hashes from `record.json`) is
+  re-hashed against the working tree with the SAME `gitBlobHashes` capture uses — any drifted
+  path REFUSES the promote with a diff-shaped message (path + captured→working blobs + the
+  capture-commit restore hint; `--no-fingerprint-check` overrides loudly; absent/legacy
+  provenance warns-and-proceeds, never blocks). Closes at the promote seam the silent-blend
+  class the #32 cohort guard stops at the ledger; restore itself is metis#28. **metis#50:** a sweep ends with the
   run-end summary — elapsed wall-clock, rows→ledger, the cohort fingerprint, and the paste-ready
   `metis select … --fingerprint <fp>` follow-ups (completing #39's visibility loop: the operator
   never scrapes scrollback to assemble the next command; degraded capture degrades to `cohort ?`

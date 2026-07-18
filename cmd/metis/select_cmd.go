@@ -32,6 +32,7 @@ func cmdSelect(args []string) error {
 	promote := fs.Bool("promote", false, "materialize the selected config(s): reconstruct from the ledger + run on ALL data → runs/best-{family}-{hash}/submission.csv; prints the run id(s)")
 	fingerprint := fs.String("fingerprint", "", "restrict to one code-fingerprint (metis#27)")
 	point := fs.String("point", "", "metis#41: publish an OPERATOR-CHOSEN config by ledger row — a point_addr (git-style prefix ok); ships as point-{family}-{hash}. Mutually exclusive with --best/--best-per-model-class")
+	noFPCheck := fs.Bool("no-fingerprint-check", false, "metis#53: skip the promote fingerprint-consistency guard (promotes against a DRIFTED working tree — loud)")
 	cohort := fs.Bool("cohort", false, "metis#52: list the ledger's code-fingerprint cohorts and exit (the `metis ledger fingerprints` table, on select's surface)")
 	shapePath, flags, err := hoistShapePath(args)
 	if err != nil {
@@ -50,7 +51,7 @@ func cmdSelect(args []string) error {
 	}
 	return runSelect(selectOpts{
 		shapePath: shapePath, best: *best, perClass: *perClass, promote: *promote, point: *point,
-		fingerprint: *fingerprint, stepPath: stepPath(shapePath), out: os.Stdout,
+		fingerprint: *fingerprint, noFPCheck: *noFPCheck, stepPath: stepPath(shapePath), out: os.Stdout,
 	})
 }
 
@@ -60,6 +61,7 @@ type selectOpts struct {
 	perClass    bool
 	promote     bool
 	point       string // metis#41: point_addr (prefix) of an operator-chosen config; "" = rule-based
+	noFPCheck   bool   // metis#53: skip the promote fingerprint-consistency guard (loud)
 	fingerprint string
 	stepPath    []string
 	git         gitProbe                // nil → gitCLI (production)
@@ -161,7 +163,7 @@ func runSelect(o selectOpts) error {
 	printSelect(o.out, sh, est, picks, o.perClass)
 
 	if o.promote {
-		return promoteSelected(o, sh, picks)
+		return promoteSelected(o, sh, led, picks)
 	}
 	return nil
 }
@@ -338,9 +340,14 @@ func complexityMetricFor(metric string) string {
 // promoteSelected materializes each picked config: reconstruct from the ledger (promotedExperiment
 // — free-params → experiment, all-data fit since no `_fold`) and run it through the shared runner
 // into runs/best-{family}-{hash}/, printing the id for `kaggle submit --run <id>`.
-func promoteSelected(o selectOpts, sh experiment.Shape, picks []familyPick) error {
+func promoteSelected(o selectOpts, sh experiment.Shape, led ledger.Ledger, picks []familyPick) error {
 	if len(sh.Ship) == 0 {
 		return fmt.Errorf("select --promote: shape %q has an empty `ship:` — nothing to submit (need predict + submission steps to produce submission.csv)", sh.ID)
+	}
+	// metis#53: refuse to execute the promoted run when the working tree is not the
+	// selected cohort's code (post-pin the ledger is single-cohort — any row's fingerprint).
+	if err := guardPromote(o, led); err != nil {
+		return err
 	}
 	now := o.now
 	if now == nil {
@@ -521,6 +528,11 @@ func runPointSelect(o selectOpts, sh experiment.Shape, led ledger.Ledger, metric
 	now := o.now
 	if now == nil {
 		now = time.Now
+	}
+	// metis#53: same guard on the operator-chosen path — a --point promote still promises
+	// that the selected cohort's code ships.
+	if err := guardPromote(o, led); err != nil {
+		return err
 	}
 	exp, err := promotedExperiment(sh, config)
 	if err != nil {

@@ -204,3 +204,10 @@ the thrash: starts ≫ completions with the process alive (throughput ≈ 0) —
   the --sort path (the operator's actual flow) while the direct-render test stayed green. When
   a Done-when names a specific invocation form, the round-trip test must drive THAT form
   end-to-end, not the nearest pure function.
+
+## Close-review lesson (metis#53)
+- **An injected test fake must mirror the production seam's FAILURE semantics, not just its
+  happy path.** gitBlobHashes fails the whole batch on one missing path; a fake that
+  per-path-skips instead certified behavior production can't exhibit (the "missing detected"
+  unit test passed while the real flow rendered every sibling as missing). When faking a
+  batched IO call, fake the batching.
