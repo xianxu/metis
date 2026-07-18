@@ -1,11 +1,12 @@
 ---
 id: 000034
-status: open
+status: working
 deps: []
 github_issue:
 created: 2026-07-13
-updated: 2026-07-13
+updated: 2026-07-17
 estimate_hours:
+started: 2026-07-17T17:12:38-07:00
 ---
 
 # repo-root-relative shape path as canonical key (cwd-independent run/select/submit)
