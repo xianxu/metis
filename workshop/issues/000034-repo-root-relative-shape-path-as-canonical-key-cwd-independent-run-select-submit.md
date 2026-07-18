@@ -5,7 +5,7 @@ deps: []
 github_issue:
 created: 2026-07-13
 updated: 2026-07-17
-estimate_hours: 0.44
+estimate_hours: 0.38
 started: 2026-07-17T17:12:38-07:00
 ---
 
@@ -80,7 +80,7 @@ familiarity: 1.0
 item: smaller-go-module   design=0.04 impl=0.18
 item: smaller-go-module   design=0.03 impl=0.12
 design-buffer: 0.15
-total: 0.44
+total: 0.38
 ```
 
 *Produced via `brain/data/life/42shots/velocity/estimate-logic-v3.1.md` against `baseline-v3.1.md`. Method A only.*
