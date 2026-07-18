@@ -5,7 +5,7 @@ deps: []
 github_issue:
 created: 2026-07-16
 updated: 2026-07-17
-estimate_hours:
+estimate_hours: 0.17
 started: 2026-07-17T22:50:40-07:00
 ---
 
@@ -31,9 +31,28 @@ board line (the natural place to grab a handle for a near-winner --point overrid
 - `metis ledger show <shape> --sort <metric>` rows carry a short point_addr usable directly
   as `select --point <prefix>` (round-trip asserted in a fixture test).
 
+## Estimate
+
+```estimate
+model: estimate-logic-v3.1
+familiarity: 1.0
+item: smaller-go-module   design=0.02 impl=0.15
+design-buffer: 0.15
+total: 0.17
+```
+
+*Produced via `brain/data/life/42shots/velocity/estimate-logic-v3.1.md` against `baseline-v3.1.md`. Method A only.*
+
+One row: the renderLedger column + the round-trip fixture test (short handle → the existing
+--point prefix resolver → same row). The select-side half of the original Spec ("winner's
+point_addr in select's board line") already SHIPPED via metis#52 (`· point <addr>` handles) —
+this issue closes the remaining `ledger show` gap only.
+
 ## Plan
 
-- [ ]
+- [ ] `renderLedger`: `point` column (short 8-char) after `code`; header updated
+- [ ] round-trip test: rendered short handle resolves via the --point prefix path to the same row
+- [ ] Log evidence; atlas untouched (`--no-atlas` justified: one column on an existing documented surface)
 
 ## Log
 
