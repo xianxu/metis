@@ -7,7 +7,7 @@ created: 2026-07-18
 updated: 2026-07-18
 estimate_hours: 0.1
 started: 2026-07-18T10:34:46-07:00
-actual_hours: 0.15
+actual_hours: 0.2
 ---
 
 # board scrolling log renders gray
@@ -37,6 +37,7 @@ un-grayed. NO_COLOR: no change (no SGR at all).
 ## Log
 
 ### 2026-07-18
+- 2026-07-18: closed — findings folded: atlas banding entry names gray scroll; close-site tail gray-wrap pinned; comment fixed; suite green; actual 0.2h labeled judgment; review verdict: SHIP
 - 2026-07-18: closed — gray-wrap unit test (scroll gray, frame+epilogue un-grayed), NoColor extended, board e2e + full -race green; actual 0.15h labeled judgment; review verdict: FIX-THEN-SHIP
 
 ### (built)
