@@ -65,3 +65,70 @@ None.
 ### 7. Plan revision recommendations
 
 None — the plan's checklist matches what the code delivers. If Important #1's fix lands, add a `## Log` note (not a revision) that the deletion case routes through per-path fallback hashing, since the "design refinement" paragraph currently implies the batch hasher's semantics are sufficient.
+
+---
+
+## Re-review — 2026-07-17T23:24:06-07:00 (SHIP)
+
+| field | value |
+|-------|-------|
+| issue | 53 — promote fingerprint-consistency guard — refuse when the working tree is not the cohort's code |
+| repo | 000053-promote-fingerprint-consistency-guard |
+| issue file | workshop/issues/000053-promote-fingerprint-consistency-guard.md |
+| boundary | whole-issue close |
+| milestone | — |
+| window | 9ab02c858ad831268c2b922b96c2bec36fc60772..HEAD |
+| command | sdlc close --issue 53 |
+| reviewer | claude |
+| timestamp | 2026-07-17T23:24:06-07:00 |
+| verdict | SHIP |
+
+## Review
+
+All verification I can do without a shell is complete. The record types, harness helpers, guard wiring, and every folded fix from the prior FIX-THEN-SHIP review check out in the code. Writing up the review now.
+
+```verdict
+verdict: SHIP
+confidence: medium
+```
+
+This boundary delivers exactly what #53's Spec promises, and — the specific thing this second-pass review had to check — every finding from the prior FIX-THEN-SHIP review is verifiably folded into the code, not just claimed in the Log. The batch-poisoning Important is fixed with a per-path retry that keeps the hasher error (`promoteguard.go:77-89`); the fake hasher now mirrors `gitBlobHashes`' real fail-the-whole-batch semantics (`promoteguard_test.go:14-29`); the new deletion e2e asserts the unchanged sibling does NOT read as drifted (`TestPromoteGuard_DeletedFileDoesNotPoisonSiblings`); and all four prior minors landed (shared `guardPromote` helper, sorted-addr deterministic restore hint, refreshed `loadLedgerRecords` comment, no `fmt` pin). Confidence is medium for one reason only: the Bash tool is broken at the harness level in this session (EPERM creating its session-env dir, before any command runs — subagents hit the same wall), so I could not execute the suite; the review is by close reading. Nothing I read blocks a SHIP.
+
+### 1. Strengths
+
+- **The per-path retry fix is the right shape** — `promoteguard.go:77-89` retries individually only when the batch fails, so the common clean/edited cases stay one git call per repo, unchanged siblings still verify with their real hashes, and the failing path carries the first line of the actual hasher error into the refusal as `<unhashable: …>` (`promoteguard.go:117-118`). No silent swallowing anywhere on the path.
+- **Fake-hasher fidelity restored** — `fakeHasher` (`promoteguard_test.go:16-29`) now fails the whole call on any unknown path, matching `gitBlobHashes` (`trace.go:66-68`), and `TestPromoteDrift_EditAndMissingDetected` pins precisely the recovery contract: edited sibling gets its real new hash, missing path carries the error. The unit tests no longer certify fiction.
+- **Both promote seams derive from one guard** — `guardPromote(o, led)` at `select_cmd.go:349` and `select_cmd.go:534` is a single shared call; the prior byte-identical duplication is gone.
+- **Deterministic restore hint** — sorted record pick (`promoteguard.go:46`) replaces map-iteration-order nondeterminism.
+- **Fail-open only where the spec says** — absent/legacy provenance warns loudly and proceeds (`promoteguard.go:139-142`); no cohort identity (`cohortFP == ""`) is a no-op; everything else refuses. Every degradation points the safe direction.
+
+### 2. Critical findings
+
+None.
+
+### 3. Important findings
+
+None. (I specifically re-checked the two prior Importants against the head: both fixed, both now covered by tests that would catch a regression.)
+
+### 4. Minor findings
+
+- `promoteguard.go:53-54` — `captureCommit` can be taken from an earlier same-cohort record that carries steps but no D refs, while the closure comes from a later record; commits within a cohort can differ (same blobs, different HEAD). Deterministic now, but still hint-only imprecision; not worth code today.
+- `select_cmd.go:39` — the usage string in the `hoistShapePath` error doesn't mention `--no-fingerprint-check` (or `--cohort`); pre-existing abbreviation pattern, flag help covers it.
+- `promoteguard.go:119-120` — the `<missing>` default branch is unreachable with the real hasher (a missing file always errors per-path, so `Err` is set → `<unhashable>`); harmless defensive rendering.
+
+### 5. Test coverage notes
+
+- Covered: clean tree (no false positive), content-drift refusal asserting path + capture-commit hint + override token + headline, loud override, restore round-trip, `--point` parity, legacy warn-and-proceed, wrong-cohort exclusion, per-path retry semantics at the unit level, and — new this window — real-hasher deletion without sibling poisoning (the exact assertion the prior review said would have caught the batch bug).
+- Remaining small gaps (fine to leave): the refusal's `captured <old> → working <new>` blob rendering and the `<unhashable: …>` branch aren't string-asserted anywhere (only path names and headline are); the round-trip restores by rewriting content rather than a literal `git checkout` (acceptable — the fixture commit `cafe1234` is synthetic; the test pins the hint's effect).
+- I could not run the suite (harness shell failure); the issue Log claims full `-race` green at close, and nothing in the code contradicts compilability or the claimed behavior, but the main agent should re-run `go test ./...` in a working session before recording the close verdict.
+
+### 6. Architectural notes
+
+- **ARCH-DRY: pass.** The design's central DRY call — reuse `gitBlobHashes` instead of re-minting the fingerprint — held through the fix; the guard also reuses `loadLedgerRecords`, `short`, and the prior review's duplication minor is consolidated into `guardPromote`. The duplicated empty-`ship:` check in the two promote paths predates this diff.
+- **ARCH-PURE: pass.** `promoteDrift` is pure over the injected hasher and unit-tested with zero IO; `guardPromoteFingerprint` is the one thin IO caller. The seam-fidelity caveat from the prior review is resolved — the fake now honors the production contract.
+- **ARCH-PURPOSE: pass.** Shadow-sweep of promote consumers: `promoteSelected` (`select_cmd.go:349`) and `runPointSelect` (`select_cmd.go:534`) are the only two seams that execute a promoted run, and both derive from the single guard; `kaggle submit --run` ships an existing run without executing code. Detection-only scope matches the issue's declared split (restore is #28, a genuinely separable issue, not a deferred core).
+- Carry-forward for #28: `driftedPath` + `captureCommit` is exactly a restore verb's input; and the mixed-ledger edge (legacy unfingerprinted rows alongside one cohort → a `--point` at a legacy row is guarded against the cohort's closure, over-guarding in the safe direction) remains worth a conscious decision when restore lands.
+
+### 7. Plan revision recommendations
+
+None — the plan checklist, Log (including the close-review fold entry), and code agree. The only follow-through this review asks of the main agent is operational, not documentary: re-run the full suite in a session with a working shell, since neither this review nor the prior one could execute it.
