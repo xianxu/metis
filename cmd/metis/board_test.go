@@ -772,6 +772,7 @@ func TestBoardWriter_ScrollChunksAreGray(t *testing.T) {
 	bw.Write([]byte("→ step train\n"))
 	bw.paint([]string{"AGG", "~slots"}, 20)
 	fmt.Fprintln(bw.epilogueWriter(), "RESULT line")
+	bw.Write([]byte("partial tail")) // unterminated — held back, dumped by close's writeScroll site
 	bw.close()
 	s := term.String()
 	if !strings.Contains(s, sgrGray+"→ step train\n"+sgrReset) {
@@ -779,5 +780,8 @@ func TestBoardWriter_ScrollChunksAreGray(t *testing.T) {
 	}
 	if strings.Contains(s, sgrGray+"AGG") || strings.Contains(s, sgrGray+"RESULT") {
 		t.Error("frame and epilogue must NOT be gray")
+	}
+	if !strings.Contains(s, sgrGray+"partial tail\n"+sgrReset) {
+		t.Errorf("close's tail dump must gray-wrap (newline appended):\n%q", s)
 	}
 }

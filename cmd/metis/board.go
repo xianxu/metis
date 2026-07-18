@@ -350,7 +350,7 @@ func (b *boardWriter) close() {
 	b.closed = true
 }
 
-// writeScroll dumps a scroll-region chunk — DIM when color is on (metis#57: the running
+// writeScroll dumps a scroll-region chunk — GRAY when color is on (metis#57: the running
 // log de-emphasizes so the footer + result carry the eye; step logs emit no SGR of their
 // own, so a chunk-level wrap can't be cancelled mid-block). Terminal copy strips
 // attributes, so copy-paste stays clean. Caller holds b.mu.

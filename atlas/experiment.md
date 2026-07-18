@@ -216,7 +216,8 @@ wrapped by **thin step-executables** honoring the contract above. Hermetic via *
   stays plain — the paint/content split): `redraw` adds a dim full-width `─` separator rule
   above the frame (counted in the erase math), bolds the aggregate line, colors ✓/▸ glyphs
   (the status line stays default — live telemetry is not de-emphasized, #56) — gated on `NO_COLOR` (env read at the one production wiring point;
-  tests inject). The run RESULT (estimate + #50 summary) routes through `summaryWriter` into
+  tests inject). Scroll-region chunks dump in bright-black GRAY (`writeScroll`, both pending-dump
+  sites — #57) so the footer + result carry the eye. The run RESULT (estimate + #50 summary) routes through `summaryWriter` into
   the board's EPILOGUE, flushed after the final frame + cursor restore — the terminal ends on
   the paste-ready commands, not the board. Plain/redirected output is unchanged (zero SGR).
 - **inner_k — the partial-inner-CV cost knob (metis#45):** `sweeper.resample.cv.k` is the
