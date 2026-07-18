@@ -27,7 +27,7 @@ result.
   keeps returning plain lines — the pyte-replay + byte-clean tests stay untouched). `redraw`
   classifies frame lines and wraps AFTER truncation: a new full-width DIM `─` separator line
   above the frame (the band boundary), the aggregate line BOLD, `✓` green / `▸` yellow on the
-  fold-row glyphs, the status line DIM. Scrolling log stays unstyled (pristine copy-paste).
+  fold-row glyphs, the status line DEFAULT (dim dropped by #56 — operator feedback). Scrolling log stays unstyled (pristine copy-paste).
 - **Gating:** board mode only (already TTY-gated). `NO_COLOR` (non-empty, per no-color.org)
   disables SGR styling ONLY — the separator rule is STRUCTURAL separation, not color, and
   paints regardless (close-review Critical 1, doc route: NO_COLOR by convention governs

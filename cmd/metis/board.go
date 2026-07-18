@@ -336,6 +336,13 @@ func (b *boardWriter) close() {
 		fmt.Fprint(b.w, "\x1b[?25h")
 	}
 	if len(b.epi) > 0 { // metis#55: the RESULT prints after the final frame — last wins the eye
+		if b.width > 0 { // metis#56: a closing rule bands the result off the footer too
+			rule := strings.Repeat("─", b.width)
+			if b.color {
+				rule = sgrDim + rule + sgrReset
+			}
+			fmt.Fprintln(b.w, rule)
+		}
 		b.w.Write(b.epi)
 		b.epi = nil
 	}
@@ -355,7 +362,7 @@ func (b *boardWriter) erase() {
 // redraw paints the stored frame. Caller holds b.mu (and has erased).
 // metis#55: PAINT-side decoration only (the #38 paint/content split — renderBoard stays
 // plain): a dim separator rule bands the footer off the scrolling log, the aggregate line
-// is bold, ✓/▸ glyphs get state color, the status line is dim. SGR wraps AFTER clamping
+// is bold, ✓/▸ glyphs get state color; the status line stays DEFAULT (metis#56 — live telemetry is not de-emphasized). SGR wraps AFTER clamping
 // (escape bytes occupy no cells — the width math is untouched).
 func (b *boardWriter) redraw() {
 	if len(b.frame) > 0 && b.width > 0 {

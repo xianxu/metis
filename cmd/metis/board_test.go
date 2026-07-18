@@ -412,9 +412,17 @@ func TestRunExperiment_BoardMode(t *testing.T) {
 	if !strings.Contains(s, "outer folds 2/2") || !strings.Contains(s, "outer fold 0 \x1b[32m✓") || !strings.Contains(s, "outer fold 1 \x1b[32m✓") {
 		t.Errorf("the final frame must show completed folds (green ticks — color on, no NO_COLOR in this env):\n%s", s)
 	}
-	// metis#55: the banding — dim separator rule + bold aggregate + dim status line.
+	// metis#55/#56: the banding — dim separator rule + bold aggregate; the status line stays DEFAULT.
 	if !strings.Contains(s, "\x1b[2m──") || !strings.Contains(s, "\x1b[1mouter folds") {
 		t.Errorf("board banding missing (separator/bold aggregate):\n%q", s[:min(len(s), 300)])
+	}
+	if strings.Contains(s, sgrDim+"~slots") || strings.Contains(s, sgrDim+"starting") {
+		t.Error("metis#56: the status line must stay DEFAULT color (regression pin)")
+	}
+	// metis#56: a closing rule bands the footer off the RESULT — present between the
+	// cursor restore and the estimate.
+	if restoreIdx >= 0 && sumIdx > restoreIdx && !strings.Contains(s[restoreIdx:sumIdx], "──") {
+		t.Error("metis#56: closing rule missing between footer and result")
 	}
 	// The bypass route: the fake-exec fixture has no traced closure → captureSweepCode
 	// notes "no first-party code closure" via o.out — which after the runExperiment
