@@ -214,8 +214,8 @@ wrapped by **thin step-executables** honoring the contract above. Hermetic via *
   per-`k/n` progress is deferred to metis#30.
 - **Board banding + result-last (metis#55):** color lives in the PAINTER only (renderBoard
   stays plain — the paint/content split): `redraw` adds a dim full-width `─` separator rule
-  above the frame (counted in the erase math), bolds the aggregate line, colors ✓/▸ glyphs,
-  dims the status line — gated on `NO_COLOR` (env read at the one production wiring point;
+  above the frame (counted in the erase math), bolds the aggregate line, colors ✓/▸ glyphs
+  (the status line stays default — live telemetry is not de-emphasized, #56) — gated on `NO_COLOR` (env read at the one production wiring point;
   tests inject). The run RESULT (estimate + #50 summary) routes through `summaryWriter` into
   the board's EPILOGUE, flushed after the final frame + cursor restore — the terminal ends on
   the paste-ready commands, not the board. Plain/redirected output is unchanged (zero SGR).

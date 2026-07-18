@@ -370,8 +370,6 @@ func (b *boardWriter) redraw() {
 			switch {
 			case i == 0:
 				l = sgrBold + l + sgrReset
-			case i == len(b.frame)-1:
-				l = sgrDim + l + sgrReset
 			case strings.Contains(l, "✓"):
 				l = strings.Replace(l, "✓", sgrGreen+"✓"+sgrReset, 1)
 			case strings.Contains(l, "▸"):
