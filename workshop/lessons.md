@@ -211,3 +211,15 @@ the thrash: starts ≫ completions with the process alive (throughput ≈ 0) —
   per-path-skips instead certified behavior production can't exhibit (the "missing detected"
   unit test passed while the real flow rendered every sibling as missing). When faking a
   batched IO call, fake the batching.
+
+## Plan-review lessons (metis#45 plan)
+- **Content-hash compat is a field-tag question.** Adding a field to any struct that reaches
+  record.CanonicalHash/json.Marshal needs `json:",omitempty"` for absent-value backward compat —
+  yaml-only-tagged structs marshal under raw Go field names WITH zero values. Grep for
+  hash/marshal consumers of any struct you extend before claiming "byte-identical".
+- **Re-grep by FIELD, not by local variable.** A completeness net keyed on the threading
+  variable (splitK) misses sites reading the source field directly (partitionRef, dry-run
+  banners) and whole-struct marshals. Shadow-sweep the struct field.
+- **A drift guard is only as strong as its fixture.** An optional-field schema addition is
+  unexercised by a fixture that omits the field — pair every optional-key CUE change with a
+  fixture carrying the key.
