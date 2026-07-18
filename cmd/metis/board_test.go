@@ -725,10 +725,11 @@ func TestBoardWriter_SynchronizedOutputBrackets(t *testing.T) {
 func TestBoardWriter_NoColorHasNoSGR(t *testing.T) {
 	var term strings.Builder
 	bw := newBoardWriter(&term, steppingClock(300*time.Millisecond), false)
+	bw.Write([]byte("→ step train\n")) // metis#57: scroll chunks too — no SGR with color off
 	bw.paint([]string{"AGG", "fold 0 ✓ held", "~slots"}, 40)
 	bw.close()
 	s := term.String()
-	for _, sgr := range []string{sgrBold, sgrDim, sgrGreen, sgrYellow} {
+	for _, sgr := range []string{sgrBold, sgrDim, sgrGreen, sgrYellow, sgrGray} {
 		if strings.Contains(s, sgr) {
 			t.Errorf("color=false must emit no SGR %q:\n%q", sgr, s)
 		}
@@ -760,5 +761,23 @@ func TestBoardWriter_EpilogueAfterFinalFrame(t *testing.T) {
 	// erase math: each erase's cursor-up count must equal lines painted (frame+separator=3)
 	if strings.Contains(s, "\x1b[2A\x1b[J") {
 		t.Error("erase used 2-line count — the separator line was not counted (ghost line)")
+	}
+}
+
+// metis#57: scroll-region chunks render GRAY (bright-black) when color is on — the running
+// log de-emphasizes; the frame and the epilogue result stay un-grayed.
+func TestBoardWriter_ScrollChunksAreGray(t *testing.T) {
+	var term strings.Builder
+	bw := newBoardWriter(&term, steppingClock(300*time.Millisecond), true)
+	bw.Write([]byte("→ step train\n"))
+	bw.paint([]string{"AGG", "~slots"}, 20)
+	fmt.Fprintln(bw.epilogueWriter(), "RESULT line")
+	bw.close()
+	s := term.String()
+	if !strings.Contains(s, sgrGray+"→ step train\n"+sgrReset) {
+		t.Errorf("scroll chunk must be gray-wrapped:\n%q", s)
+	}
+	if strings.Contains(s, sgrGray+"AGG") || strings.Contains(s, sgrGray+"RESULT") {
+		t.Error("frame and epilogue must NOT be gray")
 	}
 }

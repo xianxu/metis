@@ -147,6 +147,7 @@ const (
 	sgrDim    = "\x1b[2m"
 	sgrGreen  = "\x1b[32m"
 	sgrYellow = "\x1b[33m"
+	sgrGray   = "\x1b[90m" // bright-black — true gray across terminals (dim renders inconsistently)
 )
 
 // clampLine truncates to width runes with a trailing … (a wrapped physical line
@@ -305,7 +306,7 @@ func (b *boardWriter) flushLocked(now time.Time) {
 	// Hold back an unterminated tail: a partial line fused into the board's first
 	// row would corrupt both; it flushes when its newline arrives (or at close).
 	if i := lastNewline(b.pending); i >= 0 {
-		b.w.Write(b.pending[:i+1])
+		b.writeScroll(b.pending[:i+1])
 		b.pending = b.pending[i+1:]
 	}
 	b.redraw()
@@ -327,7 +328,7 @@ func (b *boardWriter) close() {
 		if b.pending[len(b.pending)-1] != '\n' {
 			b.pending = append(b.pending, '\n')
 		}
-		b.w.Write(b.pending)
+		b.writeScroll(b.pending)
 		b.pending = nil
 	}
 	b.redraw()
@@ -347,6 +348,20 @@ func (b *boardWriter) close() {
 		b.epi = nil
 	}
 	b.closed = true
+}
+
+// writeScroll dumps a scroll-region chunk — DIM when color is on (metis#57: the running
+// log de-emphasizes so the footer + result carry the eye; step logs emit no SGR of their
+// own, so a chunk-level wrap can't be cancelled mid-block). Terminal copy strips
+// attributes, so copy-paste stays clean. Caller holds b.mu.
+func (b *boardWriter) writeScroll(p []byte) {
+	if b.color && len(p) > 0 {
+		fmt.Fprint(b.w, sgrGray)
+		b.w.Write(p)
+		fmt.Fprint(b.w, sgrReset)
+		return
+	}
+	b.w.Write(p)
 }
 
 // erase clears the painted board region: cursor up N, clear to screen end.
