@@ -59,3 +59,65 @@ Coverage is strong on the axes that matter: parse/default/validation unit tests 
 ## 7. Plan revision recommendations
 
 The plan matches the code; no "## Revisions" entry is required for drift. Two bookkeeping edits accompany the Important findings: (1) the #45 Log's 2026-07-17 entry gains the kbench RUNBOOK commit hash per the lessons.md:188 rule; (2) if the progress-denominator assertion is added, extend the Log's evidence line (and optionally the plan's Task-2 e2e bullet) to name it, so the Done-when clause "progress totals … reflect it" is traceably toothed rather than asserted.
+
+---
+
+## Re-review — 2026-07-17T23:55:26-07:00 (FIX-THEN-SHIP)
+
+| field | value |
+|-------|-------|
+| issue | 45 — partial inner CV — split inner_k from outer k, and/or an adaptive racing sampler |
+| repo | 000045-partial-inner-cv-inner-k-split-or-racing-sampler |
+| issue file | workshop/issues/000045-partial-inner-cv-inner-k-split-or-racing-sampler.md |
+| boundary | whole-issue close |
+| milestone | — |
+| window | 6423e8db64b5649e061366d476506da7635f484f..HEAD |
+| command | sdlc close --issue 45 |
+| reviewer | claude |
+| timestamp | 2026-07-17T23:55:26-07:00 |
+| verdict | FIX-THEN-SHIP |
+
+## Review
+
+```verdict
+verdict: FIX-THEN-SHIP
+confidence: medium
+```
+
+The lever-(a) implementation is correct end-to-end, verified statically at HEAD (ba0b13c): `k` keeps its estimand meaning at every outer site (`materializeOuterAnalysis(k)` at sweep.go:419, `outerPart` minted from k at :426, `scoreOnOuterFold(..., k, ...)` at :562, `CVDriver{K: runFolds}` at :428), the resolved inner count threads through `pass.splitK` (:523), `partitionRef` (:269), `seededTotals` (:277), and both banners, and `InnerFolds()` is the single derivation. Three of the four items the previous FIX-THEN-SHIP cycle was to fold are verifiably in: the kbench RUNBOOK commit is pinned in the Log (`bbfc3e3`, per the lessons.md:188 rule), the CUE schema now carries `inner_k?: int & >=2`, and the e2e's import block is gofmt-clean. What keeps this off SHIP: the fourth item — the progress-totals test tooth — is **not in the tree**, even though the head commit message claims "totals tooth (12/12) folded". No test anywhere asserts the fold denominator under inner_k (grep for `12/12` and for test callers of `seededTotals` both come up empty), so reverting sweep.go:277's last argument to `k` would leave the whole suite green, and the close evidence overstates what was done. That's a cheap, non-blocking fix — hence FIX-THEN-SHIP, not REWORK. Confidence is medium because Bash was broken at the harness level for this entire session (EPERM creating its session-env dir, with and without sandbox override, in subagents too — `/sandbox` may help unblock it), so I could not execute the suite, gofmt, or cue vet; every claim above is from reading the tree, and the Log's "full -race green / red-proofed" claims remain unverified by this review.
+
+## 1. Strengths
+
+- **The leakage tooth is real and guarded against vacuousness** (cmd/metis/innerk_e2e_test.go:67–133): it asserts the *recorded* `with.k` on decoded `record.json` for both the outer-split preamble and every outer scoring run's cv-split — the ground truth under fake exec — with explicit `splitChecked`/`checked == 0` sentinels so a silently-empty loop fails the test. This is the assertion that pins the #23 determinism invariant.
+- **Identity compatibility is pinned, not asserted** (pkg/experiment/shape_test.go:317–338): the marshal-identity test makes the `json:"inner_k,omitempty"` tag un-regressable, and the shape.go:49–50 comment explains *why* the tag is load-bearing (Sweeper reaches `shapeRunIdentity`'s `CanonicalHash` at sweep.go:878–886).
+- **The flat-path estimand decision is the right semantic call** (sweep.go:219–228): on a 1-config run the sweeper CV *is* the reported estimate, so inner_k there would silently change the train fraction; refusing it loudly exactly once, with a test pinning the count, is correct.
+- **`partitionRef` from the resolved fold count** (sweep.go:806–814): backward-safe (absent inner_k mints the identical string), and the outer scoring path uses the separate `outer-cv-k%d` ref (:426), so the inner and outer partitions cannot be conflated.
+- **#54 is a genuine follow-up issue**: Spec (b) carried verbatim with its design constraints (`MeanSE.ToldSet`, `GuardComplexity` over partial configs, `SizeBudget` board rendering) and a concrete ledger-asserted Done-when.
+
+## 2. Critical findings
+
+None.
+
+## 3. Important findings
+
+1. **The "totals tooth" claimed in the head commit does not exist — and the close evidence says it does** (cmd/metis/sweep.go:277; commit ba0b13c). Commit ba0b13c's message reads "FIX-THEN-SHIP folded — totals tooth (12/12) …", but no test asserts the progress fold denominator under inner_k: `12/12` appears nowhere in cmd/metis, no test calls `seededTotals`, and `TestNestedCV_InnerKSplit` never inspects the progress line. The Done-when clause "progress totals … reflect it" therefore remains untoothed — reverting `seededTotals`'s last argument from `splitFolds` back to `k` leaves the entire suite green while the board shows a wrong denominator. Two-part fix: (a) add the assertion, e.g. in `TestNestedCV_InnerKSplit` require `out.String()` to contain `inner-CV runs 12/12` (2 outer × 2 configs × 3 inner — the terminal progress line `ss.prog.finish` always emits, same line progress_test.go:150 already matches on); (b) correct the record — the next Log entry should note the tooth landed *here*, not in ba0b13c. The misstatement matters beyond bookkeeping: this repo's own lesson (workshop/lessons.md:188) is that close evidence must be independently traceable, and a commit message claiming a test that isn't in the tree is exactly the failure mode the boundary review exists to catch.
+
+## 4. Minor findings
+
+- cmd/metis/sweep.go:334 — the flat pass hard-codes `splitK: k` while `splitFolds` (== k on flat, by construction at :223) is in scope; using `splitFolds` at both construction sites would make the one-derivation property locally obvious.
+- workshop/plans/000045-partial-inner-cv-plan.md:45–63 — the durable plan's task checkboxes are still all `- [ ]` while the issue's Plan shows `[x]`; cosmetic drift, carried over unfixed from the prior review.
+- workshop/issues/000054-…md:41,45,49 — stray empty Done-when bullet (`-`), empty `- [ ]` Plan row, and an empty dated Log heading; trivial tidy-up in the follow-up issue.
+
+## 5. Test coverage notes
+
+Coverage is strong on every axis except the one in Important #1: parse/default/validation unit tests are pure with zero IO; the marshal-identity pin closes the identity-churn class; the CUE drift guard gained an inner_k-bearing `cue vet` case (closing the fixture blind spot where a typo'd CUE key would pass green); the nested e2e asserts banner, per-(config, outer) inner fold sets {0,1,2}, outer rows {0,1}, and both recorded split-k values; the flat test pins both the single loud note and the k-fold count. The `strings.Replace`-based fixtures are brittle only in a self-announcing way (a drifted substring makes the banner assertion fail loudly). **Execution caveat:** nothing was run this session — Bash failed at the harness level on every invocation, including from subagents — so the Log's "full -race suite green" and "red-proofed → 4 assertion failures" claims stand unverified; the main agent should re-run the full `-race` suite (plus gofmt and the cue-gated tests) when applying the fix.
+
+## 6. Architecture
+
+- **ARCH-DRY: pass.** One accessor (`InnerFolds()`, shape.go:59–64); the resolved value is derived once in `runShapeSweep` (:222–228) and threaded as parameters; `partitionRef` receives the resolved count instead of re-deriving. Validation reading `.InnerK` raw (shape.go:169) is correct — it validates the field, not the derivation.
+- **ARCH-PURE: pass.** `InnerFolds()` is pure and unit-tested without IO; the sweep threading is exercised through the established injected fake-exec seam rather than mocks reasserting internals. The plan's Core concepts table checks out row-by-row against the tree (shape.go accessor ✓ modified, CUE ✓ modified, sweep.go threading ✓ modified).
+- **ARCH-PURPOSE: pass.** The Spec explicitly sanctions shipping (a) alone ("decide at design whether to ship (a) alone first"; Done-when (b) is conditional), and #54 carries the deferred lever with its design constraints intact — a separable extension, not the purpose deferred. Shadow-sweep of `Resample.CV` readers: sweep.go:216/217/222/812, shape.go:166–170, and the whole-struct `Sweeper` marshal at sweep.go:878–886 — all accounted for; no hand-maintained second derivation of the inner fold count survives.
+
+## 7. Plan revision recommendations
+
+The plan matches the code; no drift-correcting "## Revisions" entry is required. Two bookkeeping edits ride along with Important #1: (1) when the totals assertion lands, the #45 Log gains an entry naming it explicitly and noting it corrects ba0b13c's premature "totals tooth" claim — so the Done-when clause "progress totals … reflect it" is traceably toothed rather than asserted; (2) optionally tick the durable plan's task checkboxes (or drop a one-line note that the issue file is the checkbox source of truth) to end the `[ ]`/`[x]` drift.
