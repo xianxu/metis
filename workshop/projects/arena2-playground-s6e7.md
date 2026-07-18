@@ -46,3 +46,7 @@ friction (kbench layering). Everything else is out unless the competition says o
   candidate ranking recorded in the session; S6E7 chosen. Charter note: this file lives in
   metis/workshop/projects/ (the 2026-07-17 charter — projects in the center-of-gravity repo,
   never brain).
+- Demand #2 filed: metis#58 — `--sample outMinN` grammar (subsample BOTH CV levels; breaking:
+  bare `--sample 3` retired). Operator-designed in the 2026-07-18 kbench#12 planning session;
+  the manual dial that de-risks metis#54 (racing). Demand #1 (balanced-accuracy metric knob)
+  files at kbench#12 plan Task 8.
