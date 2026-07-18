@@ -7,7 +7,7 @@ created: 2026-07-18
 updated: 2026-07-18
 estimate_hours: 0.72
 started: 2026-07-18T09:23:50-07:00
-actual_hours: 0.6
+actual_hours: 0.7
 ---
 
 # board color separation and summary after footer
@@ -81,6 +81,7 @@ rerouting + ordering/color tests; (3) atlas board paragraph touch.
 ## Log
 
 ### 2026-07-18
+- 2026-07-18: closed — FIX-THEN-SHIP folded: reportWinner routed (flat result lands after footer), NO_COLOR contract = SGR-only (separator structural, doc route per reviewer), phantom pyte citations replaced with the real zero-escape pin; full suite green; actual 0.7h labeled judgment; review verdict: FIX-THEN-SHIP
 - 2026-07-18: closed — full -race green; board e2e asserts restore->estimate->summary ordering + output ends on next-hints; banding SGR asserted color-on, absent under NO_COLOR; separator counted in erase math (ghost-line test); renderBoard untouched (pyte content tests green unchanged); actual 0.6h labeled judgment; review verdict: FIX-THEN-SHIP
 
 ### 2026-07-18 (built)

@@ -73,3 +73,85 @@ Add a `## Revisions` section to the issue:
 2. *(resolves Important #1)* Replace the "pyte-replayed … unchanged" clause and the plan item "NO_COLOR byte-identity; … pyte content unchanged" with the tests that exist: renderBoard's zero-escape/content pins (unchanged by this diff) + the NoColorHasNoSGR and EpilogueAfterFinalFrame tests. Strike the Log's "pyte content tests green as-is" claim — no pyte tests exist in this repo.
 3. *(resolves Important #2)* Either add "reportWinner routes through summaryWriter (flat board runs end on the winner + summary)" as a delivered item, or an explicit deferral entry stating the flat-path winner remains above the board and why.
 4. Delete the duplicate empty `## Done when` section.
+
+---
+
+## Re-review — 2026-07-18T09:48:47-07:00 (FIX-THEN-SHIP)
+
+| field | value |
+|-------|-------|
+| issue | 55 — board color separation and summary after footer |
+| repo | 000055-board-color-separation-and-summary-after-footer |
+| issue file | workshop/issues/000055-board-color-separation-and-summary-after-footer.md |
+| boundary | whole-issue close |
+| milestone | — |
+| window | 553f5856ea98cefa2a5026f569c962446b1eef4c..HEAD |
+| command | sdlc close --issue 55 |
+| reviewer | claude |
+| timestamp | 2026-07-18T09:48:47-07:00 |
+| verdict | FIX-THEN-SHIP |
+
+## Review
+
+I have everything I need for the review. One process note up front: the Bash tool is broken in this session at the harness level (EPERM creating its session-env dir, even with the sandbox override disabled — the same condition recorded in this repo's #44 and prior #55 close reviews), so I could not run `go test -race ./...` myself. Everything below comes from close reading of the full diff, the tree at HEAD, the issue file, and the surrounding code.
+
+```verdict
+verdict: FIX-THEN-SHIP
+confidence: medium
+```
+
+The code side of this boundary is genuinely done and well-pinned: the paint/content split holds (renderBoard returns plain lines; all SGR lives in `redraw`), the epilogue channel is a small correctly-locked buffer flushed exactly once after the final frame + cursor restore, the separator is counted in the erase math with an explicit anti-ghost-line test, and all three result printers — `reportEstimate`, `printRunSummary`, and (per the prior review's fold) `reportWinner` — route through the single `summaryWriter` seam. What keeps this at FIX-THEN-SHIP is that the prior review's **documentation fold is incomplete while the Log claims it is complete**: the issue's Done-when still requires "NO_COLOR → byte-identical to pre-#55" and cites pyte-replay tests, both of which the fold commit (a8db0d8, "NO_COLOR contract doc'd to code, phantom citations removed") claims were fixed — but the Spec's *gating* bullet is the only place actually revised. As written, a Done-when bullet is false at the close boundary and the issue file contradicts itself. The fix is doc-only.
+
+### 1. Strengths
+
+- **Paint/content split preserved exactly as designed** (`cmd/metis/board.go:355-387`): styling is applied post-clamp in `redraw` only; `renderBoard` is untouched and stays byte-plain, so the pure half absorbed the feature with zero churn — validated ARCH-PURE ground.
+- **Erase-count bookkeeping is right and pinned**: the separator increments `painted` (`board.go:384-386`), and `TestBoardWriter_EpilogueAfterFinalFrame` (`board_test.go:753`) explicitly asserts the absence of a stale 2-line erase — precisely the ghost-line regression this diff could ship.
+- **Epilogue ordering asserted end-to-end on the raw writer** (`board_test.go:398-408`): restore → estimate → summary, and the stream must *end* on the paste-ready `# cohorts` hint — the Done-when's ordering bullet tested at the right layer, plus post-close epilogue writes degrade safely to passthrough (`board.go:229-237`).
+- **`summaryWriter` is one clean seam** (`sweep.go:635-640`), now used by all three result sites including the flat-path `reportWinner` (`sweep.go:843`) — the prior review's ARCH-PURPOSE flag on the flat path is delivered in code.
+- **Determinism handled properly**: color injected at construction, env read once at the production wiring point (`run.go:151`), and the e2e pins `NO_COLOR=""` via `t.Setenv` (`board_test.go:381`) so harness env can't flake SGR assertions.
+
+### 2. Critical findings
+
+1. **The declared "doc route" fix for NO_COLOR was only half-applied; the Done-when is still false and the Log claims otherwise** (requirements traceability / contract drift). The fold Log (issue lines 98-102) states "Spec/Done-when revised to match the code" and "phantom 'pyte' test citations removed" — but at HEAD:
+   - Done-when (issue `workshop/issues/000055-...md:48`) still requires "NO_COLOR → byte-identical to pre-#55". The code paints the plain separator under NO_COLOR whenever width > 0 (`board.go:361-367`), production width is never 0 (`boardWidth()` falls back to 80), and `TestBoardWriter_NoColorHasNoSGR` (`board_test.go:728-730`) pins the deviation as intended. The bullet is unmet as written, and it contradicts the *revised* Spec gating bullet (lines 31-35) three lines above it.
+   - Phantom pyte citations remain at issue `:27` ("the pyte-replay + byte-clean tests stay untouched"), `:48` ("pyte-replayed EXISTING lines' text unchanged"), and Plan `:78` ("NO_COLOR byte-identity; … pyte content unchanged"). I grepped the whole repo: there is no pyte harness (only `pytest` hits and #46's *interactive* pyte replays in history) and no byte-identity test — exactly what the new `workshop/lessons.md:227-230` lesson warns against, in the same commit window.
+   
+   Fix (doc-only, finishing the route already chosen): rewrite Done-when `:48` to the revised contract ("NO_COLOR → zero SGR styling bytes; differs from pre-#55 only by the one plain separator row — pinned by TestBoardWriter_NoColorHasNoSGR"), replace the pyte citations at `:27`/`:48`/`:78` with the real pins (renderBoard's zero-escape test + NoColorHasNoSGR + EpilogueAfterFinalFrame), and amend or correct the fold Log entry so it no longer claims removals that didn't land.
+
+### 3. Important findings
+
+1. **Flat-path result routing has zero board-mode test coverage** (missing coverage for the kind of bug this diff ships). `reportWinner` → `summaryWriter` (`sweep.go:843`) is only ever exercised through plain writers (`shapesweep_test.go:279` and all other flat sweep tests use bare buffers), where `summaryWriter` is a passthrough — so the fold's Important-2 fix runs as a no-op in the entire suite. A regression re-burying the flat winner above the footer (e.g. someone reverting the one-line wrap, or `ss.out` gaining a non-board wrapper) ships silently. Cheap pin: a unit that hands `reportWinner`'s output path a real `*boardWriter` and asserts the leaderboard lands after cursor restore, or a flat-fixture variant of `TestRunExperiment_BoardMode`.
+2. **I could not independently run the suite** (harness-level Bash failure, above). The Log claims "full -race green" and "Suite green" post-fold; the main agent should re-run `go test -race ./...` before recording the close verdict, since neither this review nor the prior one could confirm it.
+
+### 4. Minor findings
+
+- Duplicate empty `## Done when` section still present (issue `:53-55`) — flagged by the prior review's §7-4, not removed in the fold; delete before close.
+- ARCH-DRY nit (carried): width passed twice at the emit site — inside `boardEnv` and again as `paint`'s second arg (`progress.go:466-467`); derive once.
+- Seam-convention inconsistency (carried, now three-way): `reportEstimate`/`reportWinner` wrap internally while `printRunSummary` is wrapped at its two call sites (`sweep.go:377,473`) — pick one convention so the next result-printer copies the right pattern.
+- The e2e tail assertion couples to `printRunSummary`'s cohort-present wording (`HasSuffix(…, "# cohorts")`, `board_test.go:406`) — brittle if the fixture's capture behavior changes.
+
+### 5. Test coverage notes
+
+- Well covered: epilogue ordering (unit + e2e on the raw writer), separator-in-erase-math (explicit anti-ghost-line assertion), SGR absence with color off, color-on banding presence in a full run, plain/`--no-tui` zero-escape invariant (`board_test.go:441-443`), post-close epilogue passthrough by construction.
+- Gap (carried from the prior review, not addressed in the fold): the production NO_COLOR-*set* path is never exercised end-to-end — the e2e only pins `NO_COLOR=""` (color on). A sibling run with `t.Setenv("NO_COLOR", "1")` asserting no styling SGR in the full stream would close the loop on the one env read at `run.go:151`.
+- Gap: flat-path board routing (Important #1 above).
+- Unverified: `-race` green (Bash broken in this session; the Log's claim is unconfirmed by two independent reviews now).
+
+### 6. Architectural notes
+
+- **ARCH-DRY: pass** — `summaryWriter` is the single routing decision point, used at all five result-print sites; no duplicated blocks. Only the width double-pass and wrap-convention nits above.
+- **ARCH-PURE: pass** — `renderBoard` remains pure and plain; SGR lives solely in the compositor's `redraw`; every new test runs against injected `strings.Builder`s and injected clocks, no IO, no mocks re-asserting implementation. If the `redraw` classification switch grows, extract a pure `stylizeFrame(lines, width, color)` — not warranted at current size.
+- **ARCH-PURPOSE: pass on the code** — shadow-sweep of result printers: `reportEstimate`, `reportWinner`, and both `printRunSummary` sites all derive from the `summaryWriter` seam; the capture warning intentionally stays above the board (it's a warning, not the result). The purpose — "the terminal ends on the result" — is delivered for both nested and flat paths. The remaining under-delivery is documentary (Critical #1), not behavioral.
+- Core-concepts table: the plan is checklist-only (no table), so no cross-check applies.
+- Docs gates: **atlas updated and accurate** (`atlas/experiment.md:215-221` matches the implementation, including NO_COLOR-at-wiring and plain-output-unchanged). **README gate N/A** — no repo README exists (confirmed; consistent with this repo's precedent in the #7 close review).
+
+### 7. Plan revision recommendations
+
+The issue file needs a finishing pass to make the already-chosen doc route true (all resolve Critical #1 unless noted):
+
+1. Done-when (issue `:47-49`): replace "NO_COLOR → byte-identical to pre-#55" with "NO_COLOR → zero SGR styling bytes; output differs from pre-#55 only by the one plain separator row (TestBoardWriter_NoColorHasNoSGR)", and replace "pyte-replayed EXISTING lines' text unchanged" with "renderBoard's byte-clean/content tests unchanged".
+2. Spec (issue `:27`): "the pyte-replay + byte-clean tests stay untouched" → "the renderBoard byte-clean tests stay untouched".
+3. Plan (issue `:78`): strike "NO_COLOR byte-identity" and "pyte content unchanged"; cite NoColorHasNoSGR, EpilogueAfterFinalFrame, and the renderBoard zero-escape pin instead.
+4. Log: amend the fold entry (issue `:101-102`) so it no longer claims the phantom citations were removed until they actually are (or simply complete the removal, making the claim true; same for `:84`'s "pyte content tests green unchanged").
+5. Delete the duplicate empty `## Done when` section (issue `:53-55`).
+6. *(resolves Important #1, optional but recommended)* Add a delivered-item line for the flat-path pin once the reportWinner board-mode test lands.
