@@ -205,6 +205,17 @@ wrapped by **thin step-executables** honoring the contract above. Hermetic via *
   `sweepPass` mutex guards the shared `configs`/`points`/`err` bookkeeping (the honest reduce stays pure
   in the sampler). Caveats (flag help): a COLD cache thundering-herds the shared upstream; clean
   per-`k/n` progress is deferred to metis#30.
+- **External-ingest identity (metis#25) — declared content pins:** the interior is input-addressed
+  (`Kpre` + transitive-D) and upstream artifacts are class-1 keyed, but a ROOT step ingesting
+  EXTERNAL data (today: `kaggle/download`, a remote fetch) has unknowable content at key time.
+  The rule (Nix fixed-output-derivation model): **the shape declares the expected content in the
+  step's `with.sha256` map** — it rides the existing `with → Kpre` channel (a pin edit re-keys
+  the whole downstream; first run after = cold + new cohort, by design), and the step VERIFIES
+  post-download (mismatch/missing/extra = loud step failure; verify lives in
+  `kaggle/cmd/kaggle-download/pins.go`, contract files excluded mirroring `collectArtifacts`).
+  Unpinned ingest is LOUD (a paste-ready pin block on stderr), never silent. Dual-use shapes
+  driven by both live CLI and the hermetic e2e's fixture data stay unpinned (one static block
+  can't satisfy two truths); a future local-file get-data root uses the same declared-pin rule.
 - **Default leaf BLAS pins (metis#48) — `cmd/metis/blaspins.go`:** the parallelism budget belongs
   to the ORCHESTRATOR (the #31 semaphore), so `runExperiment` computes the four single-thread pins
   (`OMP/OPENBLAS/VECLIB/MKL_NUM_THREADS=1`) ONCE per top-level run — minus any name the operator

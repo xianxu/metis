@@ -1,12 +1,13 @@
 ---
 id: 000025
-status: working
+status: codecomplete
 deps: []
 github_issue:
 created: 2026-07-07
 updated: 2026-07-17
 estimate_hours: 0.47
 started: 2026-07-17T16:50:53-07:00
+actual_hours: 0.9
 ---
 
 # get-data root cache gap — dataset keyed on path string, not content
@@ -88,9 +89,9 @@ citation/table-case + atlas rule.
 
 ## Plan
 
-- [ ] kaggle: `sha256` pin verify + paste-ready block + unpinned note (TDD via kagglecli fake)
-- [ ] kbench: pin titanic get-data (real hashes); metis: cite with→Kpre test for re-key
-- [ ] atlas: ingest-identity rule; issue Log evidence
+- [x] kaggle: `sha256` pin verify + paste-ready block + unpinned note (TDD via kagglecli fake)
+- [x] kbench: pin titanic get-data (real hashes); metis: cite with→Kpre test for re-key
+- [x] atlas: ingest-identity rule; issue Log evidence
 
 ## Log
 
@@ -98,7 +99,26 @@ citation/table-case + atlas rule.
 - Side-find of the metis-v2 caching prior-art survey (pensive). Not part of the algebra; a soundness fix.
 
 ### 2026-07-17 (claim + reframe)
+- 2026-07-17: closed — kaggle suite+e2e green, 8 new tests, mutation red-proofed (neutered verify fails the test); kbench e2e 3 passed with the new stderr note; pinned titanic-sweep.md parses via -dry-run (10x72x10); cross-repo commits pinned in Log (kaggle 0960f34+a9aadcf, kbench 742238c); re-key cited to existing with->Kpre tests. actual 0.9h = LABELED JUDGMENT (transcripts under brain project dir - engine cannot attribute; not a measured value); review verdict: SHIP
 - Claimed into the platform tranche (operator lane split; #24/#34 queued behind). Recon: the
   issue's local-path premise predates M1a — the live gap is remote ingest identity. Design =
   config-declared content pins (fixed-output derivation); rationale above. ARCH-DRY: no new
   identity mechanism — pins ride the existing `with → Kpre` channel.
+
+### 2026-07-17 (built — evidence)
+- **kaggle repo** (commits `0960f34` + `a9aadcf`, pushed): `pins.go` (recursive slash-relative
+  sha256, contract files excluded mirroring metis `collectArtifacts`; all failures in ONE error
+  incl. unpinned extras — declared identity is complete) + `run()` wiring (pins → verify, loud
+  fail; no pins → `UNPINNED ingest` note + paste-ready block). 8 new tests; **mutation test
+  red-proofed** (neutered the verify call → test FAILS; restored → passes). Full kaggle suite +
+  its e2e green.
+- **kbench** (commit `742238c`, pushed): `titanic-sweep.md` get-data pinned (3 files, hashes
+  from live run `best-rf-6dde4f89`'s get-data artifacts); RUNBOOK note (pin edit ⇒ cold run +
+  new cohort); baseline/features/sweep-smoke deliberately UNPINNED (e2e dual-use — plan
+  Revisions). kbench e2e suite green (3 passed, 60s) — the new stderr note breaks no assertion;
+  pinned shape parses (`metis run -dry-run`: 10×72×10 listed).
+- **Re-key citation (no new metis code):** `with` → `Kpre` sensitivity already pinned by
+  `caching_test.go:123-132` (knob change → selective MISS), `:447-452` (nested-map re-key) and
+  map-order canonicalization by `record_test.go:12-22` — a `sha256:` map is deterministic Kpre
+  material; a pin edit re-keys get-data + the transitive chain structurally.
+- Plan checkboxes all ticked; atlas ingest-identity rule added (experiment.md cache section).
