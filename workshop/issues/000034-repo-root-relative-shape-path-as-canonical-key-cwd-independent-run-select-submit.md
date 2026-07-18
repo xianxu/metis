@@ -1,12 +1,13 @@
 ---
 id: 000034
-status: working
+status: codecomplete
 deps: []
 github_issue:
 created: 2026-07-13
 updated: 2026-07-17
 estimate_hours: 0.38
 started: 2026-07-17T17:12:38-07:00
+actual_hours: 0.35
 ---
 
 # repo-root-relative shape path as canonical key (cwd-independent run/select/submit)
@@ -107,6 +108,7 @@ the brainwork, plan-quality gate judges this issue file).
   algebra → split out.
 
 ### 2026-07-17 (built — evidence)
+- 2026-07-17: closed — metis -race suite green incl. new cwd-independence net (same shape, two cwds -> same runs dir + identical point_address) + red-proofed steppath anchor test; kaggle suite green, -C foreign-cwd test + failure-mode test; kaggle commit 8addd9f pinned in Log. actual 0.35h = LABELED JUDGMENT (brain-dir session transcripts unattributable, same as #25); review verdict: SHIP
 - **Audit verdict recorded:** premise FALSE for `metis run`/`select` — identity content-addressed
   (shapeBlobHash/PointAddress/shapeRunIdentity), anchors Abs(Dir(expPath))-derived, sidecar
   next-to-shape. No canonical-path key built (Simplicity First; the invariant IS the deliverable).
