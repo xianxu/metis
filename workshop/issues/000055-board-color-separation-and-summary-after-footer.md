@@ -42,7 +42,7 @@ result.
 - Board-mode run ends with the estimate + summary AFTER the last footer line (order asserted
   on the raw writer in a board e2e).
 - Color on: separator + bold aggregate + green ✓ + dim status present as SGR in the raw
-  stream; pyte-replayed CONTENT unchanged; NO_COLOR → byte-identical to pre-#55; redirected
+  stream; pyte-replayed EXISTING lines' text unchanged (the separator is one NEW row, expected); NO_COLOR → byte-identical to pre-#55; redirected
   run → zero ESC bytes (existing invariant test extended or cited).
 - erase/painted bookkeeping counts the separator line (no ghost line on erase — the #38
   cursor-math invariant).
