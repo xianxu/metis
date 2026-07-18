@@ -45,7 +45,7 @@ Related: metis#25 (root gap — get-data path-hash) is the complementary soundne
 
 ## Plan
 
-- [ ] (spec at claim) evaluate against the current pkg/cache Kpre/Validate; prototype the plannable cache-hit map; decide + document.
+- [x] (spec at claim) evaluate against the current pkg/cache Kpre/Validate; ~~prototype the plannable cache-hit map~~ (deferred by decision — Revisions); decide + document. DONE: decided (input-addressed, #18 M1a-3b) + documented (atlas, incl. trade-off).
 
 ## Log
 
