@@ -216,6 +216,16 @@ func runShapeSweep(o runOpts, sh experiment.Shape, now func() time.Time, out io.
 	k := sh.Sweeper.Resample.CV.K
 	stratify := sh.Sweeper.Resample.CV.Stratify
 	nested := len(configPts) > 1
+	// metis#45: k is the ESTIMAND knob (outer fold count + inner default); inner_k overrides
+	// the INNER per-config CV only. A flat run's CV IS the reported estimate, so inner_k is a
+	// NESTED-only knob — flat ignores it, loudly (once), and runs at k.
+	innerK := sh.Sweeper.Resample.CV.InnerFolds()
+	splitFolds := k // the per-config CV fold count THIS run actually uses
+	if nested {
+		splitFolds = innerK
+	} else if innerK != k {
+		fmt.Fprintf(out, "metis: inner_k ignored — a flat (single-config) run has no inner level; the %d-fold CV is the estimand\n", k)
+	}
 	runFolds := k
 	switch {
 	case o.sample != 0:
@@ -239,7 +249,7 @@ func runShapeSweep(o runOpts, sh experiment.Shape, now func() time.Time, out io.
 	if o.dryRun {
 		if nested {
 			fmt.Fprintf(out, "metis: nested-CV %s — %d outer fold(s) × (%d configs × %d inner folds) (dry run):\n",
-				sh.ID, runFolds, len(configPts), k)
+				sh.ID, runFolds, len(configPts), innerK)
 			fmt.Fprintf(out, "  (measures the honest per-family estimate + records inner/outer rows; ship via `metis select --promote`)\n")
 		} else {
 			fmt.Fprintf(out, "metis: single-level CV %s — %d config × %d folds (dry run):\n", sh.ID, len(configPts), k)
@@ -256,7 +266,7 @@ func runShapeSweep(o runOpts, sh experiment.Shape, now func() time.Time, out io.
 	}
 	ss := &shapeSweep{
 		o: o, sh: sh, now: now, out: out, shapeBlobHash: sbh, codeID: sha, start: sweepStart,
-		partRef:  partitionRef(sh),
+		partRef:  partitionRef(sh, splitFolds),
 		man:      sweepManifest{ShapeRunID: shapeRunID, Shape: sh.ID, Sampler: sh.Sweeper.Sampler, Seed: sh.Seed},
 		parallel: o.maxParallel > 1, // metis#31: fan out the sweeper/resample/driver batches
 	}
@@ -264,7 +274,7 @@ func runShapeSweep(o runOpts, sh experiment.Shape, now func() time.Time, out io.
 	// metis#30: seed the sink's denominators AT WIRING TIME from the same SizeHint the
 	// levels report (stream-learned totals would arrive only with each level's first
 	// completion — for the driver level that's the first COMPLETED outer fold, too late).
-	ss.prog = newSweepProgress(out, now, sh.Sweeper.Objective.Direction, seededTotals(ctx, nested, runFolds, configPts, k))
+	ss.prog = newSweepProgress(out, now, sh.Sweeper.Objective.Direction, seededTotals(ctx, nested, runFolds, configPts, splitFolds))
 	ss.o.activity = teeActivityEmitter(ss.o.activity, ss.prog.activity)
 	// metis#38: board mode — the sink paints the pinned board instead of plain lines,
 	// and a 500ms ticker keeps the rate decay + ETA live between events (sink-first:
@@ -312,7 +322,7 @@ func runShapeSweep(o runOpts, sh experiment.Shape, now func() time.Time, out io.
 
 	// metis#32: >1 config → nested CV (records inner + per-family outer rows; the honest measure).
 	if nested {
-		return ss.runNestedCV(ctx, configPts, k, runFolds, stratify, shapeRunID)
+		return ss.runNestedCV(ctx, configPts, k, innerK, runFolds, stratify, shapeRunID)
 	}
 
 	fmt.Fprintf(out, "metis: single-level CV %s (%s) — %d config × %d folds\n", sh.ID, shapeRunID[:12], len(configPts), k)
@@ -399,9 +409,9 @@ func configStatsOf(configs []configScore) []sampler.ConfigStat {
 // flat path's manifest+ledger+code-side-ref provenance (which exists to re-select/ship a winner
 // without a re-run) has no consumer here. If a durable procedure-estimate provenance is later
 // wanted (e.g. to compare estimates across code revisions), wire a thin nested manifest then.
-func (ss *shapeSweep) runNestedCV(ctx sampler.Ctx, configPts []shape.Point, k, runFolds int, stratify bool, shapeRunID string) error {
+func (ss *shapeSweep) runNestedCV(ctx sampler.Ctx, configPts []shape.Point, k, innerK, runFolds int, stratify bool, shapeRunID string) error {
 	fmt.Fprintf(ss.out, "metis: nested-CV %s (%s) — %d outer fold(s) × (%d configs × %d inner folds)\n",
-		ss.sh.ID, shapeRunID[:12], runFolds, len(configPts), k)
+		ss.sh.ID, shapeRunID[:12], runFolds, len(configPts), innerK)
 
 	// Preamble: materialize the k outer-analysis subset dirs ONCE (unconfined — outer-split reads
 	// the full dataset to split it). Always split into k dirs (a stable partition); --fast just runs
@@ -420,7 +430,7 @@ func (ss *shapeSweep) runNestedCV(ctx sampler.Ctx, configPts []shape.Point, k, r
 			if ss.firstError() != nil {
 				return 0
 			}
-			score, ferr := ss.runOuterFold(ctx, configPts, k, stratify, analysisRefs[p.Idx], outerPart, p.Idx)
+			score, ferr := ss.runOuterFold(ctx, configPts, k, innerK, stratify, analysisRefs[p.Idx], outerPart, p.Idx)
 			if ferr != nil {
 				if ss.firstError() == nil {
 					ss.fail(fmt.Sprintf("outer fold %d", p.Idx), ferr)
@@ -502,13 +512,15 @@ func (ss *shapeSweep) materializeOuterAnalysis(outerK int, stratify bool) ([]str
 // the exp_path chokepoint — readRoot = analysis_i abs), then (b) the refit-and-score of that winner
 // on the held outer-assessment (a full-data fold run at outer-k, held=i; unconfined). Returns the
 // honest outer-fold score.
-func (ss *shapeSweep) runOuterFold(ctx sampler.Ctx, configPts []shape.Point, k int, stratify bool, analysisRef string, outerPart sampler.PartitionRef, i int) (float64, error) {
+// metis#45: k = OUTER (held-out scoring partition, cv_folds determinism — the #23 invariant);
+// innerK = the sealed sweep's per-config CV fold count.
+func (ss *shapeSweep) runOuterFold(ctx sampler.Ctx, configPts []shape.Point, k, innerK int, stratify bool, analysisRef string, outerPart sampler.PartitionRef, i int) (float64, error) {
 	analysisAbs, err := filepath.Abs(filepath.Join(filepath.Dir(ss.o.expPath), analysisRef))
 	if err != nil {
 		return 0, ss.fail(fmt.Sprintf("outer fold %d analysis path", i), err)
 	}
 	// (a) sealed selection: the sweeper's inner-CV runs entirely within analysis_i (inner k/stratify).
-	pass := &sweepPass{ss: ss, baseRef: analysisRef, readRoot: analysisAbs, splitK: k,
+	pass := &sweepPass{ss: ss, baseRef: analysisRef, readRoot: analysisAbs, splitK: innerK,
 		stratify: stratify, partRef: ss.partRef,
 		runRole: runRoleNestedInnerCV,
 		hooks:   ss.prog.forPass(i)} // metis#30/#38: outer-fold identity via closure binding
@@ -791,12 +803,14 @@ func appendUnique(needs []string, extra string) []string {
 	return append(out, extra)
 }
 
-// partitionRef is the stable identity of the materialized partition — deterministic per
-// (k, stratify, seed) so every fold-point's address is reproducible. A later boundary can
-// thread the cv-split's content-hash here; a deterministic id suffices for the told-set key.
-func partitionRef(sh experiment.Shape) sampler.PartitionRef {
+// partitionRef is the stable identity of the materialized per-config CV partition —
+// deterministic per (fold count, stratify, seed) so every fold-point's address is
+// reproducible. metis#45: the fold count is the RESOLVED one this run uses (inner_k on a
+// nested run, k on a flat run) — an absent inner_k mints the same string as ever. A later
+// boundary can thread the cv-split's content-hash here.
+func partitionRef(sh experiment.Shape, splitFolds int) sampler.PartitionRef {
 	cv := sh.Sweeper.Resample.CV
-	return sampler.PartitionRef(fmt.Sprintf("cv-k%d-strat%t-seed%d", cv.K, cv.Stratify, sh.Seed))
+	return sampler.PartitionRef(fmt.Sprintf("cv-k%d-strat%t-seed%d", splitFolds, cv.Stratify, sh.Seed))
 }
 
 // pointAddressOf pre-computes a (config, fold) run's content-address (== its run-dir id),
