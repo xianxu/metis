@@ -1,12 +1,13 @@
 ---
 id: 000059
-status: working
+status: codecomplete
 deps: []
 github_issue:
 created: 2026-07-18
 updated: 2026-07-18
 estimate_hours: 0.7
 started: 2026-07-18T13:14:30-07:00
+actual_hours: 0.30
 ---
 
 # train-step metric knob: balanced accuracy + class_weight passthrough
@@ -85,6 +86,7 @@ Durable plan: `workshop/plans/000059-metric-knob-plan.md` (fresh-eyes reviewed, 
 ## Log
 
 ### 2026-07-18
+- 2026-07-18: closed — 93 python + full Go suite green; step-level: skewed 10/2 dataset accuracy 5/6 vs balanced 0.5; unknown metric refuses eagerly on foldless ship path; class_weight reaches rf+hist_gbm (default None); absent metric key leaves addresses unchanged (Kpre hashes resolved With); review verdict: SHIP
 
 - Implemented inline (main session): 2 commits on-branch. 93 python + full Go suite green.
   Step-level proof: skewed 10/2 constant-feature dataset — accuracy fold_score 5/6, balanced
