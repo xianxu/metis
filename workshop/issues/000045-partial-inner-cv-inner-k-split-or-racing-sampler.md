@@ -5,7 +5,7 @@ deps: []
 github_issue:
 created: 2026-07-15
 updated: 2026-07-17
-estimate_hours:
+estimate_hours: 0.86
 started: 2026-07-17T23:24:31-07:00
 ---
 
@@ -70,10 +70,34 @@ cost only).
   board/progress line renders the budget kind (`k/≤n`).
 - The RUNBOOK documents the new knob(s) with the cost arithmetic.
 
+## Estimate
+
+```estimate
+model: estimate-logic-v3.1
+familiarity: 1.0
+item: smaller-go-module   design=0.08 impl=0.35
+item: smaller-go-module   design=0.04 impl=0.25
+item: atlas-docs          design=0.02 impl=0.10
+design-buffer: 0.15
+total: 0.86
+```
+
+*Produced via `brain/data/life/42shots/velocity/estimate-logic-v3.1.md` against `baseline-v3.1.md`. Method A only.*
+
+Rows: (1) CUE+shape schema/accessor/validation + threading; (2) nested e2e (inner-fold counts,
+outer-partition tooth) + totals; (3) RUNBOOK/atlas + the lever-(b) follow-up issue.
+
 ## Plan
 
-- [ ] (at claim) Decide (a)-first vs (a)+(b); design the shape-schema change with the
-  vocabulary model; then spec + change-code.
+Durable plan: `workshop/plans/000045-partial-inner-cv-plan.md`. **Decision (at claim):
+(a)-first** — the inner_k split ships now; the racing sampler (b) is filed as its own issue
+(demand-driven, next competition — the Spec itself frames (a)-alone as a valid ship, and the
+adaptive sampler is a design of its own). `k` keeps its meaning (estimand/outer + inner
+default; zero migration); `inner_k` overrides the inner only; one `InnerFolds()` accessor.
+
+- [ ] schema + accessor + validation (CUE + shape.go, TDD)
+- [ ] sweep threading (inner: splitK/totals/banners; outer: split dirs/driver/held-out UNTOUCHED — the leakage tooth asserts it) via the nested fake-exec e2e
+- [ ] RUNBOOK + atlas + file lever-(b) issue + Log/close
 
 ## Log
 
