@@ -128,10 +128,10 @@ func meanSE(xs []float64) (mean, se float64, n int) {
 // composes the aggregate denominators: configs = outer × per-pass configs,
 // folds = outer × configs × inner k (each sealed pass sweeps the full grid).
 // Flat (1 config): folds = the single pass's inner k.
-func seededTotals(ctx sampler.Ctx, nested bool, runFolds int, configPts []shape.Point, k int) progressTotals {
+func seededTotals(ctx sampler.Ctx, nested bool, runFolds int, configPts []shape.Point, foldsPerConfig int) progressTotals {
 	grid := sampler.GridConfigs{Points: configPts}
 	nConfigs, kindConfigs := grid.SizeHint(grid.Init(ctx))
-	foldsSmp := sampler.FixedKFolds{K: k}
+	foldsSmp := sampler.FixedKFolds{K: foldsPerConfig}
 	nFolds, kindFolds := foldsSmp.SizeHint(foldsSmp.Init(ctx))
 	if !nested {
 		return progressTotals{folds: nFolds, foldKind: kindFolds}

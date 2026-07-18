@@ -1,12 +1,13 @@
 ---
 id: 000058
-status: working
+status: codecomplete
 deps: []
 github_issue:
 created: 2026-07-18
 updated: 2026-07-18
 estimate_hours: 1.2
 started: 2026-07-18T12:06:53-07:00
+actual_hours: 0.50
 ---
 
 # sample grammar outMinN: subsample both CV levels
@@ -106,6 +107,7 @@ Durable plan: `workshop/plans/000058-sample-grammar-outminn-plan.md` (fresh-eyes
 ## Log
 
 ### 2026-07-18
+- 2026-07-18: closed — unit+e2e green (go test ./... all ok): parseSample table incl overflow; refusals (flat/range/fast/negative via runOpts seam); out1in2 prefix-subset ledger; cache-escalation convergence (run B spawned only fold-2 trains + outer-refit HIT, ledger exactly {0,1,2} once each per config); CLI-verified bare --sample 3 refuses with grammar error; callers swept both repos, shadow-sweep grep clean (workshop/ exempt); review verdict: FIX-THEN-SHIP
 
 - Filed from the arena2/kbench#12 planning session (brain repo conversation): operator
   proposed the grammar; the cache-continuity and ledger-dedupe analysis above was verified
@@ -125,3 +127,8 @@ Durable plan: `workshop/plans/000058-sample-grammar-outminn-plan.md` (fresh-eyes
 - Plan deltas (fix-forward): bare `go build ./cmd/metis` fails (pkg-dir collision) → `-o
   bin/metis`; two residual `--sample 3` mentions document the retirement itself (accepted);
   one stale test error-string fixed in 8e46d80. Lessons persisted to workshop/lessons.md.
+- FIX-THEN-SHIP fixes bundled into the close commit: atlas select-fairness sentence (the
+  Important finding — Spec-mandated reasoning now recorded), seededTotals param renamed
+  `k` → `foldsPerConfig`, new `TestSample_FastBannerRendersSampled` pins the `1/k` --fast
+  banner. Accepted-not-fixed (minor, logged): cfKey test-helper duplication (test-tier
+  nicety), no in<N>-only e2e (code path ≡ covered out1in2 minus runFolds override; low risk).

@@ -173,3 +173,25 @@ func TestSample_CacheEscalationConverges(t *testing.T) {
 		}
 	}
 }
+
+// TestSample_FastBannerRendersSampled pins the explicit #58 decision that --fast — being
+// --sample out1 — renders as a SAMPLED level (`1/k`), not the plain unsampled count. Without
+// this pin a silent regression to "1 outer fold(s)" would fail nothing (close-review minor).
+func TestSample_FastBannerRendersSampled(t *testing.T) {
+	ws := t.TempDir()
+	expPath := writeShapeFile(t, ws, sampleShapeMD())
+
+	var out strings.Builder
+	_, err := runExperiment(runOpts{
+		expPath: expPath, now: fixedNow(),
+		git:  fakeGitProbe{name: "metis", sha: "sha", dirty: false},
+		exec: foldFakeExec{}, out: &out,
+		fast: true,
+	})
+	if err != nil {
+		t.Fatalf("--fast run should succeed: %v", err)
+	}
+	if s := out.String(); !strings.Contains(s, "1/2 outer fold(s)") {
+		t.Errorf("--fast banner should render the outer level as sampled 1/k, got:\n%s", s)
+	}
+}

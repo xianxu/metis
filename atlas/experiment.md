@@ -160,7 +160,8 @@ wrapped by **thin step-executables** honoring the contract above. Hermetic via *
   (sweep.go): splitK feeds the partition + leaf content-addresses, runK bounds `FixedKFolds` —
   so an `in2` iteration run's leaves are byte-identical addresses to a full run's first 2 folds
   and CACHE-ESCALATE into it (the ledger's point-address dedupe absorbs re-emitted rows; e2e
-  `TestSample_CacheEscalationConverges`). `--fast` ≡ `--sample out1` (bare `--sample 3` is retired,
+  `TestSample_CacheEscalationConverges`). select needs NO raggedness guard — residual ledger
+  raggedness exists only after an INTERRUPTED run, and any completed re-run heals it (#58). `--fast` ≡ `--sample out1` (bare `--sample 3` is retired,
   loudly), and misuse (M>k, N>inner_k, single-config flat run, combined with `--fast`) fails
   loudly). `runNestedCV` wraps
   the black-box sweeper in an OUTER resample (the pure `sampler.CVDriver` over the unchanged `Run`
