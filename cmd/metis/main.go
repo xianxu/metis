@@ -41,8 +41,8 @@ func cmdRun(args []string) error {
 	runID := fs.String("run", "", "run id (default: run-<UTC timestamp>; ignored for a multi-point sweep — each point keys off its content-address)")
 	cache := fs.Bool("cache", true, "use the metis#2 validating-trace step cache (<expDir>/.metis-cache); --cache=false to disable")
 	dryRun := fs.Bool("dry-run", false, "metis#18 sweep: list the swept configs without running them")
-	fast := fs.Bool("fast", false, "metis#32: run ONE outer fold instead of the full k (a ~1/k-cost honest single-point per-family holdout) — for iteration; the full nested run (default) gives mean±SE. Shorthand for --sample 1. Only affects a nested (multi-config) run.")
-	sampleN := fs.Int("sample", 0, "metis#42: run m of the k outer folds (sparse fold sampling; 0/omitted = all k). k stays the estimand (each fold trains on (k-1)/k of the rows); m only trades precision for cost — use to probe a higher k (e.g. k=10, --sample 3) without the full k× bill. The SE over m<k folds is noisy (m-1 df): probe with it, don't re-select what ships on it. Errors on m>k, on a single-config (flat) run, and combined with --fast.")
+	fast := fs.Bool("fast", false, "metis#32: run ONE outer fold instead of the full k (a ~1/k-cost honest single-point per-family holdout) — for iteration; the full nested run (default) gives mean±SE. Shorthand for --sample out1. Only affects a nested (multi-config) run.")
+	sampleStr := fs.String("sample", "", "metis#58: run a subset of the declared CV folds — out<M> (M of the k outer folds), in<N> (N of the inner_k per-config inner folds), or out<M>in<N>. Deterministic prefix subsets of the SAME partitions, so subset runs cache-escalate into full runs. k/inner_k stay the estimand; sampling only trades precision for cost (probe with it, don't re-select what ships on it). Nested (multi-config) runs only; errors loudly out of range or with --fast.")
 	forkserver := fs.Bool("forkserver", true, "metis#44: run convention-conforming step wrappers through a warm per-root fork-server (pre-imported pandas/sklearn; ~1s spawn tax removed per leaf). --forkserver=false = legacy per-step uv/python spawn (the escape hatch); non-conforming wrappers and failed servers fall back to legacy automatically (loud, once).")
 	noTUI := fs.Bool("no-tui", false, "metis#38: force the plain progress lines even on a TTY (the live board is default for a sweep when stdout is a terminal; piped/redirected output always gets plain lines)")
 	parallel := fs.Int("parallel", defaultParallel(), "metis#31: max concurrent step subprocesses across ALL sweep levels (driver×sweeper×resample share one global cap); <=1 = serial (exact pre-#31 behavior). Default runtime.NumCPU(), overridable by METIS_MAX_PARALLEL. Leaf BLAS is pinned single-thread by default (metis#48; export a *_NUM_THREADS value yourself to override), so n is the ONE parallelism knob. On a COLD cache the first batch's ≤n points may each recompute the shared upstream (a bounded thundering herd).")
@@ -53,16 +53,20 @@ func cmdRun(args []string) error {
 	if len(rest) != 1 {
 		return fmt.Errorf("run: want exactly one <experiment.md>, got %d", len(rest))
 	}
+	sample, err := parseSample(*sampleStr)
+	if err != nil {
+		return fmt.Errorf("run: %v", err)
+	}
 	// cmdRun just passes maxParallel; runExperiment establishes the parallel invariant
 	// (leafSem + syncWriter) in one home so no runOpts caller can forget it (#31).
-	_, err := runExperiment(runOpts{
+	_, err = runExperiment(runOpts{
 		expPath:     rest[0],
 		runID:       *runID,
 		stepPath:    stepPath(rest[0]),
 		cache:       *cache,
 		dryRun:      *dryRun,
 		fast:        *fast,
-		sample:      *sampleN,
+		sample:      sample,
 		forkserver:  *forkserver,
 		tui:         !*noTUI && isCharDevice(os.Stdout), // metis#38: board iff a real terminal
 		out:         os.Stdout,

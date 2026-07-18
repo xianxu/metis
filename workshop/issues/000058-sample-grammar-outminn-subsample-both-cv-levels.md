@@ -5,7 +5,7 @@ deps: []
 github_issue:
 created: 2026-07-18
 updated: 2026-07-18
-estimate_hours:
+estimate_hours: 1.2
 started: 2026-07-18T12:06:53-07:00
 ---
 
@@ -66,6 +66,24 @@ estimand intact and lets iteration runs escalate into decision runs via the cach
 adaptive version over the same budget. Ship this first — it de-risks whether #54 is needed at
 all (measure before rebuild).
 
+## Estimate
+
+```estimate
+model: estimate-logic-v3.1
+familiarity: 1.0
+item: smaller-go-module   design=0.1 impl=0.1
+item: smaller-go-module   design=0.2 impl=0.2
+item: smaller-go-module   design=0.1 impl=0.15
+item: atlas-docs          design=0.0 impl=0.1
+item: milestone-review    design=0.0 impl=0.2
+design-buffer: 0.15
+total: 1.21
+```
+
+(Items in plan order: parseSample+flag · splitK/runK plumb+validation+legacy-test rework ·
+new e2e · docs/caller sweep · close review. Design buffer 0.15: thorough plan doc, 2× reviewed.
+v3.1 impl values = 40% of v2 ranges, AI-paired ship wall-clock.)
+
 ## Done when
 
 - `metis run --sample out1in2 <shape>` runs 1 outer × 2-inner-fold subsets per config; a
@@ -77,7 +95,13 @@ all (measure before rebuild).
 
 ## Plan
 
-- [ ]
+Durable plan: `workshop/plans/000058-sample-grammar-outminn-plan.md` (fresh-eyes reviewed 2× ✅ 2026-07-18).
+
+- [x] parseSample (pure, TDD) — grammar + overflow-loud
+- [x] flag/runOpts retype + validation (`< 1` guards stay: runOpts seam) + splitK/runK split + banners (`--fast` → `1/k`) + legacy nestedcv test rework — one green commit
+- [x] new-surface e2e: inner refusals, out1in2 subset ledger, cache-escalation convergence
+- [x] caller sweep (metis docs/atlas + kbench runbooks/plan) + shadow-sweep grep (workshop/ exempt)
+- [ ] pr → merge → close (single boundary)
 
 ## Log
 
@@ -88,3 +112,16 @@ all (measure before rebuild).
   against `cmd/metis/ledger.go` (`writeSweepLedger` idempotent, dedups by point-address;
   fold coordinate in the row + address) before filing. Demand #2 on the arena2 demand list
   (demand #1 = the balanced-accuracy metric knob, filed separately).
+
+### 2026-07-18 (implementation)
+
+- Tasks 1-5 done on-branch (fork agent): 7f35c7a parseSample · 3e63fce grammar/validation/
+  splitK-runK (one green commit; legacy nestedcv tests reworked, `< 1` guards kept for the
+  runOpts seam, `runInnerK := splitFolds` flat fix, `--fast` renders 1/k) · c4b2bc2 e2e
+  (refusals + out1in2 subset ledger + cache-escalation: run B spawned 2 trains + 1 features,
+  outer-refit HIT, ledger converged to {0,1,2} once each per config) · 8e46d80 docs sweep.
+  kbench docs commit 30a0b06 (RUNBOOK/shape/atlas/plan text → out3, +out1in2 iteration line).
+- Full `go test ./...` green; CLI-verified: bare `--sample 3` → grammar error, out1in2 parses.
+- Plan deltas (fix-forward): bare `go build ./cmd/metis` fails (pkg-dir collision) → `-o
+  bin/metis`; two residual `--sample 3` mentions document the retirement itself (accepted);
+  one stale test error-string fixed in 8e46d80. Lessons persisted to workshop/lessons.md.

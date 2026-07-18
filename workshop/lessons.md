@@ -228,3 +228,31 @@ the thrash: starts ≫ completions with the process alive (throughput ≈ 0) —
 - **Cite only tests that exist in the tree.** A diagnosis-time tool (pyte terminal replay,
   used interactively in #46) is not a checked-in harness — referencing it in Done-when/Log
   asserts coverage the suite doesn't have. Before writing "X test stays green," grep for X.
+
+## Plan-review lessons (metis#58, 2026-07-18)
+
+- **`go build ./...` never compiles `*_test.go` — it cannot find all consumers of a type
+  change.** A rename/retype plan must also grep `_test.go` and name each affected test as a
+  REWORK item: tests asserting old CLI surface (banner substrings, error text) need design
+  decisions (which assertions survive), not mechanical compile fixes.
+- **"The parser rejects X" only guards the CLI path.** `runOpts` is a direct-construction
+  seam (every e2e builds it without flag parsing) — an invariant a plan relies on ("< 1 can't
+  occur") must hold at the validation layer too. Before deleting a guard, check whether an
+  existing test (e.g. "negative m") exists precisely for that seam.
+- **When splitting a conflated variable (splitK → splitK+runK), trace BOTH code paths through
+  every display/totals consumer.** The flat path shared `seededTotals`; a wrong denominator
+  there is silent (display-only, untested). Enumerate consumers per-path and state which
+  value each path passes.
+
+## Implementation lessons (metis#58, 2026-07-18)
+
+- **Escalation/cache tests need subset-stable fakes.** Exact spawn-count assertions (run B =
+  2 trains + outer-refit HIT) only pin down because the fake's winner is invariant under any
+  fold subset (`b` 0.90 > `a` 0.80 + nudge ≤ 0.04). If the fake's argmax could flip between a
+  2-fold and 3-fold mean, the refit's HIT/MISS goes nondeterministic and the test flakes.
+  Check winner stability before pinning counts.
+- **A "zero hits" doc-sweep gate must exempt text documenting the removal itself.** Retirement
+  notes legitimately quote the retired form; scope the gate accordingly or it's unsatisfiable.
+- **`go build ./cmd/metis` bare fails here** ("output metis already exists and is a
+  directory" — the package-dir/binary name collision). Always `-o bin/metis`; plans should
+  carry the flag.
