@@ -1,6 +1,7 @@
 package experiment
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -255,5 +256,103 @@ func TestCUE_ClosednessPreservedBySingleSource(t *testing.T) {
 	}
 	if err := exec.Command("cue", "vet", "-d", "#ExperimentShape", p2, cueFile).Run(); err == nil {
 		t.Error("#ExperimentShape must REJECT an unknown field (closedness lost)")
+	}
+}
+
+// --- metis#45: inner_k (the partial-inner-CV cost knob) ---
+
+const innerKShape = `---
+type: experiment-shape
+id: ik
+seed: 1
+status: active
+data:
+  - id: get-data
+    uses: test/download
+pipeline:
+  - id: train
+    uses: test/train
+    needs: [get-data]
+    with: {dataset: get-data, model: {$any: [a, b]}}
+sweeper:
+  sampler: grid
+  resample: {cv: {k: 10, inner_k: 5, stratify: true}}
+  objective: {metric: train.fold_score, direction: maximize, select: {argmax-mean: {}}}
+---
+`
+
+func TestParseShape_InnerK(t *testing.T) {
+	sh, err := ParseShape(innerKShape)
+	if err != nil {
+		t.Fatalf("ParseShape: %v", err)
+	}
+	if got := sh.Sweeper.Resample.CV.InnerFolds(); got != 5 {
+		t.Errorf("InnerFolds() = %d, want 5 (inner_k set)", got)
+	}
+	if sh.Sweeper.Resample.CV.K != 10 {
+		t.Errorf("K = %d, want 10 (outer/estimand unchanged)", sh.Sweeper.Resample.CV.K)
+	}
+	if err := ValidateShape(sh); err != nil {
+		t.Errorf("inner_k:5 must validate: %v", err)
+	}
+}
+
+func TestParseShape_InnerKAbsentDefaultsToK(t *testing.T) {
+	sh, err := ParseShape(strings.Replace(innerKShape, "inner_k: 5, ", "", 1))
+	if err != nil {
+		t.Fatalf("ParseShape: %v", err)
+	}
+	if got := sh.Sweeper.Resample.CV.InnerFolds(); got != 10 {
+		t.Errorf("InnerFolds() = %d, want 10 (defaults to k)", got)
+	}
+}
+
+func TestValidateShape_InnerKOneRejected(t *testing.T) {
+	sh, err := ParseShape(strings.Replace(innerKShape, "inner_k: 5", "inner_k: 1", 1))
+	if err != nil {
+		t.Fatalf("ParseShape: %v", err)
+	}
+	if err := ValidateShape(sh); err == nil || !strings.Contains(err.Error(), "inner_k") {
+		t.Errorf("inner_k:1 must fail validation naming the field; got %v", err)
+	}
+}
+
+// TestSweeper_InnerKAbsentMarshalsIdenticallyToToday (plan review Important 1): the Sweeper
+// struct reaches record.CanonicalHash (shapeRunIdentity) — an inner_k-ABSENT shape must
+// marshal byte-identically to the pre-#45 struct, or every existing shape's run identity
+// churns. json omitempty on the new field is the load-bearing tag.
+func TestSweeper_InnerKAbsentMarshalsIdenticallyToToday(t *testing.T) {
+	sh, err := ParseShape(strings.Replace(innerKShape, "inner_k: 5, ", "", 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := json.Marshal(sh.Sweeper)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), "InnerK") || strings.Contains(string(b), "inner_k") {
+		t.Errorf("inner_k-absent Sweeper must not leak the field into its JSON (identity churn): %s", b)
+	}
+}
+
+// TestShapeConformsToCUE_InnerK (metis#45, plan-review minor 5): the drift guard's main
+// fixture omits inner_k, so a typo'd CUE key would pass green — vet an inner_k-BEARING
+// frontmatter explicitly.
+func TestShapeConformsToCUE_InnerK(t *testing.T) {
+	if _, err := exec.LookPath("cue"); err != nil {
+		t.Skip("cue not on PATH; skipping #ExperimentShape drift guard")
+	}
+	root := repoRoot(t)
+	fm, _, err := frontmatter.Split(innerKShape)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmp := filepath.Join(t.TempDir(), "shape.yaml")
+	if err := os.WriteFile(tmp, []byte(fm), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cueFile := filepath.Join(root, "construct", "vocabulary", "experiment.cue")
+	if out, err := exec.Command("cue", "vet", "-d", "#ExperimentShape", tmp, cueFile).CombinedOutput(); err != nil {
+		t.Fatalf("cue vet rejected an inner_k shape against #ExperimentShape: %v\n%s", err, out)
 	}
 }

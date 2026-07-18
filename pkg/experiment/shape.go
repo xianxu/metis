@@ -42,10 +42,25 @@ type Resample struct {
 	CV CVResample `yaml:"cv"`
 }
 
-// CVResample is k-fold cross-validation config.
+// CVResample is k-fold cross-validation config. K is the ESTIMAND knob — the outer
+// driver's fold count (train fraction each outer fold simulates, metis#42's principle) AND
+// the inner default. InnerK (metis#45, optional) overrides the INNER per-config CV only —
+// the selection-precision/cost knob; a flat (single-config) run has no inner level and
+// ignores it (loudly). json omitempty is LOAD-BEARING: the Sweeper struct reaches
+// record.CanonicalHash (shapeRunIdentity) — an absent inner_k must not enter the hash.
 type CVResample struct {
 	K        int  `yaml:"k"`
+	InnerK   int  `yaml:"inner_k,omitempty" json:"inner_k,omitempty"` // metis#45: inner-CV override (0 = use K)
 	Stratify bool `yaml:"stratify,omitempty"`
+}
+
+// InnerFolds is the inner per-config CV's fold count — inner_k if declared, else k. The ONE
+// derivation (metis#45); no consumer reads InnerK directly.
+func (c CVResample) InnerFolds() int {
+	if c.InnerK > 0 {
+		return c.InnerK
+	}
+	return c.K
 }
 
 // Objective names the metric to optimize, the direction, and the select rule that
@@ -150,6 +165,9 @@ func ValidateShape(sh Shape) error {
 	}
 	if sh.Sweeper.Resample.CV.K < 2 {
 		return fmt.Errorf("shape %q: sweeper.resample.cv.k must be >= 2, got %d", sh.ID, sh.Sweeper.Resample.CV.K)
+	}
+	if ik := sh.Sweeper.Resample.CV.InnerK; ik != 0 && ik < 2 {
+		return fmt.Errorf("shape %q: sweeper.resample.cv.inner_k must be >= 2 when set (or absent to use k), got %d", sh.ID, ik)
 	}
 	// Match CUE's required objective (metric + direction present); Go was looser (empty
 	// direction / absent metric passed) — a semantic validator should not be laxer than

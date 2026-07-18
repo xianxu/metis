@@ -73,7 +73,10 @@ _pipeline: {
 	ship:     _phase       // winner-only (predict/submission)
 	sweeper: {
 		sampler: string                     // "grid" (M1a); the ask/tell seam is metis#7
-		resample: {cv: {k: int, stratify?: bool}} // the inner CV — how each config is scored
+		// the inner CV — how each config is scored. k = the ESTIMAND knob (outer fold count +
+		// inner default, metis#42's principle); inner_k (metis#45, optional, >=2) overrides the
+		// INNER per-config CV only (selection precision/cost) — flat runs ignore it loudly.
+		resample: {cv: {k: int, inner_k?: int, stratify?: bool}}
 		objective: {
 			metric:    string
 			direction: "maximize" | "minimize"
