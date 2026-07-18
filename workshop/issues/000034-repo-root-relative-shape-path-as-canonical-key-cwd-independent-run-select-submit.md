@@ -93,10 +93,10 @@ regression test + Log/atlas line.
 Recon table = the design (no separate plan doc — two one-file fixes + one test; the audit did
 the brainwork, plan-quality gate judges this issue file).
 
-- [ ] metis: cwd-independence regression test (runExperiment from two cwds → same id + dir)
-- [ ] metis: steppath fallback anchored on shape dir (test: cwd elsewhere)
-- [ ] kaggle: `-C` flag on submit --run + fake-CLI test from foreign cwd
-- [ ] Log evidence + atlas one-liner (path is location, never identity)
+- [x] metis: cwd-independence regression test (runExperiment from two cwds → same id + dir)
+- [x] metis: steppath fallback anchored on shape dir (test: cwd elsewhere)
+- [x] kaggle: `-C` flag on submit --run + fake-CLI test from foreign cwd
+- [x] Log evidence + atlas one-liner (path is location, never identity)
 
 ## Log
 
@@ -105,3 +105,14 @@ the brainwork, plan-quality gate judges this issue file).
   the user can `metis run titanic-sweep.md` from inside the pipeline dir and `metis select titanic-sweep.md
   --best` consistently, and kaggle submit stays rooted in the pipelines dir." Orthogonal to #32's selection
   algebra → split out.
+
+### 2026-07-17 (built — evidence)
+- **Audit verdict recorded:** premise FALSE for `metis run`/`select` — identity content-addressed
+  (shapeBlobHash/PointAddress/shapeRunIdentity), anchors Abs(Dir(expPath))-derived, sidecar
+  next-to-shape. No canonical-path key built (Simplicity First; the invariant IS the deliverable).
+- **metis** (this branch): steppath bare-repo fallback now anchors on the shape's repo (was
+  os.Getwd; red-proofed — reverting fails the new test) + `TestRun_CwdIndependentIdentityAndLocation`
+  (two cwds, same shape → same physical runs/ dir + identical point_address). Full `-race` green.
+- **kaggle** (commit `8addd9f`, pushed): `submit -C <pipeline-dir>` anchors `runs/<id>` from any
+  cwd (the audit's one true drift); default `.` keeps #50's paste-lines unchanged; miss error
+  names the anchor; usage updated; foreign-cwd test + failure-mode test. Full kaggle suite green.
