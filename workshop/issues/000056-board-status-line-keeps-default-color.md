@@ -7,7 +7,7 @@ created: 2026-07-18
 updated: 2026-07-18
 estimate_hours: 0.1
 started: 2026-07-18T09:59:55-07:00
-actual_hours: 0.1
+actual_hours: 0.25
 ---
 
 # board status line keeps default color
@@ -36,6 +36,7 @@ banding). Reconcile the #55 wording in atlas + the archived issue's claims where
 ## Log
 
 ### 2026-07-18
+- 2026-07-18: closed — full -race green; e2e pins: status line never dimmed, closing rule present between restore and estimate; all stale restatements reconciled incl. archived #55; actual 0.25h labeled judgment; review verdict: FIX-THEN-SHIP
 - 2026-07-18: closed — one-case removal; full cmd/metis suite green; atlas reconciled; actual 0.1h labeled judgment; review verdict: FIX-THEN-SHIP
 
 ### 2026-07-18
