@@ -21,9 +21,14 @@ only, so the --point handle can only be scraped from the raw CSV. Operator hit i
 
 ## Spec
 
-Add a short (8-char, git-style — #39 prefixes already resolve) `point` column to
-`metis ledger show`; consider also printing the winner's point_addr in `metis select`'s
-board line (the natural place to grab a handle for a near-winner --point override).
+Add a short (8-char, git-style) `point` column to `metis ledger show`, placed after `code`
+in `renderLedger`'s header and rows — the value is `short(r.PointAddr)`, resolvable back
+through the existing `resolvePointRows` prefix matcher (select_cmd.go:386, the #41 path the
+flag help already documents as "git-style prefix ok"). Round-trip pinned by a fixture test:
+a rendered short handle fed to the resolver returns exactly its source row. The Spec's
+second half ("winner's point_addr in select's board line") SHIPPED separately via metis#52
+(`· point <addr>` handles on every pick line) — out of scope here; this issue closes the
+one remaining discovery gap (`ledger show`).
 
 
 ## Done when
