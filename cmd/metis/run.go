@@ -69,10 +69,12 @@ type runOpts struct {
 	git      gitProbe
 	cache    bool // enable the metis#2 validating-trace cache (<expDir>/.metis-cache)
 	dryRun   bool // metis#18: list the swept configs without running them
-	fast     bool // metis#32: nested run does ONE outer fold (a ~1/k-cost honest single-point) instead of k
-	sample   int  // metis#42: nested run does m of the k outer folds (0 = all k). k stays the
-	//               estimand knob (train fraction); m is the precision/cost knob — each fold is an
-	//               unbiased sample of the k-fold estimand. --fast ≡ --sample 1 (kept as shorthand).
+	fast   bool       // metis#32: nested run does ONE outer fold (a ~1/k-cost honest single-point) instead of k
+	sample sampleSpec // metis#58: prefix-subsample the CV levels — Out of the k outer folds, In of the
+	//               inner_k per-config inner folds (0 = all). k/inner_k stay the estimand knobs
+	//               (train fraction / partition); sampling is the precision/cost knob, and prefix
+	//               subsets of the SAME partitions cache-escalate into full runs.
+	//               --fast ≡ --sample out1 (kept as shorthand).
 	inSweep bool // metis#14: this run is a sweep point — suppress per-point single-run
 	//               capture (the sweep captures once per shape-run in captureSweepCode)
 	out  io.Writer
