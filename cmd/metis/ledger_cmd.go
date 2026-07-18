@@ -135,7 +135,8 @@ func hoistShapePath(args []string) (shapePath string, flags []string, err error)
 	return shapePath, flags, nil
 }
 
-// renderLedger prints rows as a table (a header row + code-fingerprint short, status,
+// renderLedger prints rows as a table (a header row + code-fingerprint short, the metis#51
+// point handle (short point_addr — feeds select --point <prefix>), status,
 // free-params, metrics) to any io.Writer.
 func renderLedger(out io.Writer, rows []ledger.Row) {
 	if len(rows) == 0 {
@@ -153,9 +154,9 @@ func renderLedger(out io.Writer, rows []ledger.Row) {
 		mCols = append(mCols, k)
 	}
 	sort.Strings(mCols)
-	fmt.Fprintln(out, strings.Join(append([]string{"code", "status", "free_params"}, mCols...), "  "))
+	fmt.Fprintln(out, strings.Join(append([]string{"code", "point", "status", "free_params"}, mCols...), "  "))
 	for _, r := range rows {
-		parts := []string{short(r.CodeFingerprint), r.Status, freeParamTuple(r)}
+		parts := []string{short(r.CodeFingerprint), short(r.PointAddr), r.Status, freeParamTuple(r)}
 		for _, c := range mCols {
 			if v, ok := r.Metrics[c]; ok {
 				parts = append(parts, fmt.Sprintf("%s=%g", c, v))

@@ -208,3 +208,36 @@ func TestLedgerShow_FingerprintPrefix(t *testing.T) {
 		t.Errorf("no-match prefix must error with the cohort listing, got: %v", err)
 	}
 }
+
+// TestRenderLedger_PointColumnRoundTrips (metis#51): every row carries a short point
+// handle, and the rendered handle resolves back to exactly its source row through the
+// REAL --point prefix path (resolvePointRows) — the discovery surface for #41's flow.
+func TestRenderLedger_PointColumnRoundTrips(t *testing.T) {
+	rows := []ledger.Row{
+		{PointAddr: "aaaa1111bbbb2222cccc", CodeFingerprint: "f1f1f1f1f1", Status: "ok",
+			FreeParams: map[string]any{"train.model": "a"}, Metrics: map[string]float64{"cv_score": 0.8}},
+		{PointAddr: "dddd3333eeee4444ffff", CodeFingerprint: "f1f1f1f1f1", Status: "ok",
+			FreeParams: map[string]any{"train.model": "b"}, Metrics: map[string]float64{"cv_score": 0.7}},
+	}
+	var out strings.Builder
+	renderLedger(&out, rows)
+	got := out.String()
+	if !strings.Contains(strings.SplitN(got, "\n", 2)[0], "point") {
+		t.Fatalf("header missing point column:\n%s", got)
+	}
+	for _, r := range rows {
+		handle := r.PointAddr[:8]
+		if !strings.Contains(got, handle) {
+			t.Errorf("row handle %s not rendered:\n%s", handle, got)
+			continue
+		}
+		resolved, err := resolvePointRows(ledger.Ledger{Rows: rows}, handle)
+		if err != nil {
+			t.Errorf("rendered handle %s must resolve via the --point path: %v", handle, err)
+			continue
+		}
+		if len(resolved) == 0 || resolved[0].PointAddr != r.PointAddr {
+			t.Errorf("handle %s resolved to %+v, want its source row %s", handle, resolved, r.PointAddr)
+		}
+	}
+}
