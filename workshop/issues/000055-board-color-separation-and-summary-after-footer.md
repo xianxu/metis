@@ -1,12 +1,13 @@
 ---
 id: 000055
-status: working
+status: codecomplete
 deps: []
 github_issue:
 created: 2026-07-18
 updated: 2026-07-18
 estimate_hours: 0.72
 started: 2026-07-18T09:23:50-07:00
+actual_hours: 0.6
 ---
 
 # board color separation and summary after footer
@@ -27,9 +28,11 @@ result.
   classifies frame lines and wraps AFTER truncation: a new full-width DIM `─` separator line
   above the frame (the band boundary), the aggregate line BOLD, `✓` green / `▸` yellow on the
   fold-row glyphs, the status line DIM. Scrolling log stays unstyled (pristine copy-paste).
-- **Gating:** board mode only (already TTY-gated) AND `NO_COLOR` unset (the standard env
-  convention). With NO_COLOR set, output is byte-identical to today. Redirected/`--no-tui`
-  runs: zero SGR anywhere (the existing byte-clean invariant).
+- **Gating:** board mode only (already TTY-gated). `NO_COLOR` (non-empty, per no-color.org)
+  disables SGR styling ONLY — the separator rule is STRUCTURAL separation, not color, and
+  paints regardless (close-review Critical 1, doc route: NO_COLOR by convention governs
+  color; the operator's ask was separation). Redirected/`--no-tui` runs: zero SGR and no
+  separator (no board at all — the existing byte-clean invariant).
 - **Result after the footer:** boardWriter gains an epilogue buffer (`epilogueWriter()
   io.Writer`); `close()` paints the final frame, restores the cursor, THEN flushes the
   epilogue. `reportEstimate` + `printRunSummary` route through a `summaryWriter(out)` helper:
@@ -78,6 +81,7 @@ rerouting + ordering/color tests; (3) atlas board paragraph touch.
 ## Log
 
 ### 2026-07-18
+- 2026-07-18: closed — full -race green; board e2e asserts restore->estimate->summary ordering + output ends on next-hints; banding SGR asserted color-on, absent under NO_COLOR; separator counted in erase math (ghost-line test); renderBoard untouched (pyte content tests green unchanged); actual 0.6h labeled judgment; review verdict: FIX-THEN-SHIP
 
 ### 2026-07-18 (built)
 - Painter-owned banding (redraw classifies post-clamp; renderBoard untouched — pyte content
@@ -89,3 +93,12 @@ rerouting + ordering/color tests; (3) atlas board paragraph touch.
   unchanged. Board e2e now asserts restore → estimate → summary ordering and that output
   ENDS with the next-hints; NO_COLOR SGR-free test; epilogue ordering + ghost-line test.
   Full -race suite green.
+
+### 2026-07-18 (close review FIX-THEN-SHIP → fixed in the close)
+- Critical 1 (doc route, per reviewer recommendation): the separator is STRUCTURAL, not color
+  — NO_COLOR strips SGR only; Spec/Done-when revised to match the code, and the SGR-absence
+  test is the correct pin (the prior "byte-identical" claim was wrong-as-written).
+- Important 1: phantom "pyte" test citations removed — pyte was the #46 diagnosis tool, never
+  a checked-in harness; the real pin is renderBoard's zero-escape test. Lesson recorded.
+- Important 2: `reportWinner` now routes through summaryWriter — a FLAT board run's result
+  (the winner leaderboard) lands after the footer too, same as the nested estimate. Suite green.
