@@ -101,7 +101,7 @@ Durable plan: `workshop/plans/000058-sample-grammar-outminn-plan.md` (fresh-eyes
 - [x] flag/runOpts retype + validation (`< 1` guards stay: runOpts seam) + splitK/runK split + banners (`--fast` → `1/k`) + legacy nestedcv test rework — one green commit
 - [x] new-surface e2e: inner refusals, out1in2 subset ledger, cache-escalation convergence
 - [x] caller sweep (metis docs/atlas + kbench runbooks/plan) + shadow-sweep grep (workshop/ exempt)
-- [ ] pr → merge → close (single boundary)
+- [x] pr → merge → close (single boundary)
 
 ## Log
 
