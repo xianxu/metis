@@ -5,7 +5,7 @@ deps: []
 github_issue:
 created: 2026-07-18
 updated: 2026-07-18
-estimate_hours:
+estimate_hours: 3
 started: 2026-07-18T12:06:53-07:00
 ---
 
@@ -77,7 +77,13 @@ all (measure before rebuild).
 
 ## Plan
 
-- [ ]
+Durable plan: `workshop/plans/000058-sample-grammar-outminn-plan.md` (fresh-eyes reviewed 2× ✅ 2026-07-18).
+
+- [ ] parseSample (pure, TDD) — grammar + overflow-loud
+- [ ] flag/runOpts retype + validation (`< 1` guards stay: runOpts seam) + splitK/runK split + banners (`--fast` → `1/k`) + legacy nestedcv test rework — one green commit
+- [ ] new-surface e2e: inner refusals, out1in2 subset ledger, cache-escalation convergence
+- [ ] caller sweep (metis docs/atlas + kbench runbooks/plan) + shadow-sweep grep (workshop/ exempt)
+- [ ] pr → merge → close (single boundary)
 
 ## Log
 
