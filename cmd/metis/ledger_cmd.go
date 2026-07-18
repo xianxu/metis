@@ -135,9 +135,10 @@ func hoistShapePath(args []string) (shapePath string, flags []string, err error)
 	return shapePath, flags, nil
 }
 
-// renderLedger prints rows as a table (a header row + code-fingerprint short, the metis#51
-// point handle (short point_addr — feeds select --point <prefix>), status,
-// free-params, metrics) to any io.Writer.
+// renderLedger prints rows as a table to any io.Writer: code-fingerprint short, the
+// metis#51 point handle — a short REAL point_addr, directly usable as select --point
+// <prefix> (aggregate rows carry a representative member addr) — status, free-params,
+// and metric columns.
 func renderLedger(out io.Writer, rows []ledger.Row) {
 	if len(rows) == 0 {
 		fmt.Fprintln(out, "(no rows)")
