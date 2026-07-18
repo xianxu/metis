@@ -1,11 +1,12 @@
 ---
 id: 000059
-status: open
+status: working
 deps: []
 github_issue:
 created: 2026-07-18
 updated: 2026-07-18
 estimate_hours:
+started: 2026-07-18T13:14:30-07:00
 ---
 
 # train-step metric knob: balanced accuracy + class_weight passthrough
