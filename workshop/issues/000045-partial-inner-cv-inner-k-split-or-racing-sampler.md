@@ -1,12 +1,13 @@
 ---
 id: 000045
-status: working
+status: codecomplete
 deps: []
 github_issue:
 created: 2026-07-15
 updated: 2026-07-17
 estimate_hours: 0.86
 started: 2026-07-17T23:24:31-07:00
+actual_hours: 1.1
 ---
 
 # partial inner CV — split inner_k from outer k, and/or an adaptive racing sampler
@@ -110,6 +111,7 @@ default; zero migration); `inner_k` overrides the inner only; one `InnerFolds()`
   10×72×10 grid is where the pressure comes from.
 
 ### 2026-07-17 (built — lever (a) shipped; lever (b) filed as metis#54)
+- 2026-07-17: closed — nested e2e (banner/fold-sets/outer-rows/leakage tooth via decoded records) + flat inert-knob test + marshal-identity pin + CUE vet case; threading red-proofed (4 failures on revert); full -race green; RUNBOOK+atlas; lever (b) filed as metis#54; actual 1.1h labeled judgment; review verdict: FIX-THEN-SHIP
 - Schema: `sweeper.resample.cv.inner_k` (CUE + Go, KnownFields-clean); `InnerFolds()` is the one
   derivation. **json omitempty pinned by a marshal-identity regression test** (Sweeper reaches
   shapeRunIdentity's CanonicalHash — plan review caught the would-be churn of every existing
@@ -122,6 +124,6 @@ default; zero migration); `inner_k` overrides the inner only; one `InnerFolds()`
   {0,1,2}, outer rows {0,1}, and BOTH split steps' recorded `with.k`==2 via decoded records
   (outer-split + every outer scoring cv-split — the leakage tooth); threading red-proofed
   (revert → 4 assertion failures); flat×inner_k test; full `-race` suite green.
-- Docs: RUNBOOK cost arithmetic (10×72×5 = 3,600 vs 7,200), atlas paragraph; **metis#54 filed**
+- Docs: RUNBOOK cost arithmetic (10×72×5 = 3,600 vs 7,200) — **kbench commit `bbfc3e3`** (peer pinned per lessons.md rule), atlas paragraph; **metis#54 filed**
   (racing/successive-halving sampler — Spec(b) carried verbatim, demand-driven per the
   next-arena rule).

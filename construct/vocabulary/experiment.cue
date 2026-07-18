@@ -76,7 +76,7 @@ _pipeline: {
 		// the inner CV — how each config is scored. k = the ESTIMAND knob (outer fold count +
 		// inner default, metis#42's principle); inner_k (metis#45, optional, >=2) overrides the
 		// INNER per-config CV only (selection precision/cost) — flat runs ignore it loudly.
-		resample: {cv: {k: int, inner_k?: int, stratify?: bool}}
+		resample: {cv: {k: int, inner_k?: int & >=2, stratify?: bool}}
 		objective: {
 			metric:    string
 			direction: "maximize" | "minimize"
