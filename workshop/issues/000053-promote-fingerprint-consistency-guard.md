@@ -5,7 +5,7 @@ deps: []
 github_issue:
 created: 2026-07-16
 updated: 2026-07-17
-estimate_hours:
+estimate_hours: 0.48
 started: 2026-07-17T23:05:12-07:00
 ---
 
@@ -47,10 +47,36 @@ Detection only (restore stays metis#28):
 - The refusal message round-trips: following its checkout hint then re-promoting succeeds.
 - Atlas: the promote seam's guard documented beside the #32 cohort guard.
 
+## Estimate
+
+```estimate
+model: estimate-logic-v3.1
+familiarity: 1.0
+item: smaller-go-module   design=0.06 impl=0.35
+item: atlas-docs          design=0.01 impl=0.05
+design-buffer: 0.15
+total: 0.48
+```
+
+*Produced via `brain/data/life/42shots/velocity/estimate-logic-v3.1.md` against `baseline-v3.1.md`. Method A only.*
+
+**Design refinement at claim (same signal, better message):** compare PER-PATH blob hashes
+instead of re-minting the run fingerprint — the record's step `Code.D` refs already carry
+`{Repo, Path, BlobHash}`; rehash the union (dedup repo+path) of the cohort record's D against
+the working tree with the SAME `gitBlobHashes` capture uses (normalization identical by
+construction, answering the plan's confirm item) and any differing/missing path IS the drift +
+the diff line. Re-minting would require replicating the mint's exact input assembly (dedup/
+order) — a needless equivalence risk (ARCH-DRY: reuse the hasher, not a parallel mint).
+Records are read via the existing `loadLedgerRecords` (runs/<addr>/record.json); the capture
+commit for the restore hint comes from `Steps[].Code.Commit`.
+
 ## Plan
 
-- [ ] (at claim) Confirm D-path blob hashing against the working tree matches capture's
-  hashing (same normalization); TDD the compare + refusal; wire both promote paths.
+- [x] (at claim) hashing-normalization confirm: reuse `gitBlobHashes` — identical by construction
+- [ ] pure guard core `promoteDrift(records, cohortFP, hasher) ([]driftedPath, hint, ok)` + unit tests (fake hasher: drift / clean / legacy-no-D)
+- [ ] wire BOTH promote sites pre-exec; `--no-fingerprint-check` flag (loud proceed); warn-and-proceed on absent provenance
+- [ ] fixture e2e: prepared ledger+record+mini git repo → edit closure file → REFUSE names path+old/new+commit hint; checkout-hint round-trip re-promotes clean; unchanged tree no false positive; override loud
+- [ ] atlas: promote-seam guard beside the #32 cohort guard; Log evidence
 
 ## Log
 
