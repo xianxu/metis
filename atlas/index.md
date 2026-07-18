@@ -222,7 +222,14 @@ identical on a non-Kaggle platform?* — if yes, it lives here.
   `K_pre`-term change orphans non-root entries, and a legacy entry (nil `TransitiveD`) MISSes. The record-
   provenance path (`buildRecord`) is separate and still OUTPUT-addressed — post-#24 the two deliberately
   diverge (input-addressed key vs output-addressed provenance). The **leaf policy**
-  (`with: {cache: {leaf: immutable}}`) HITs on the K_pre match alone (pinned external fetch). Proven
+  (`with: {cache: {leaf: immutable}}`) HITs on the K_pre match alone (pinned external fetch).
+  **The decided trade-off (metis#24, recorded):** input-addressing GIVES UP early-cutoff (a code
+  edit yielding byte-identical upstream output still re-keys downstream) — deliberately cheap in
+  ML, where training outputs are rarely byte-reproducible so early-cutoff almost never fires;
+  what it BUYS is static plannability (keys computable before any step runs) + robustness to
+  upstream output non-determinism (an FP/RNG-noisy model file no longer spuriously re-keys the
+  world). The pre-run cache-hit-map printout that plannability enables is deliberately UNBUILT —
+  demand-driven, next competition (metis#24 Revisions). Proven
   by two e2es: identical re-run HITs every step; a one-knob change HITs the shared upstream + re-runs
   only downstream ("cheap sweeps"). (The #3 record's `Code.D` provenance population is deferred to #8
   with the git-side-ref durability.) `record.CanonicalHash` is the shared hashing primitive. [metis#2]

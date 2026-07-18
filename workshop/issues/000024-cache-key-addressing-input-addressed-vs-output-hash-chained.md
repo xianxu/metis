@@ -71,3 +71,19 @@ Related: metis#25 (root gap — get-data path-hash) is the complementary soundne
   (MISS) from output nondeterminism (HIT — the win we want). Needs an `Entry`-schema field (`TransitiveD`).
   Plan + real-executor soundness-gate test in `workshop/plans/000018-*-plan.md` (M1a-3, Tasks 11-13).
   Lessons in `workshop/lessons.md`.
+
+## Revisions
+
+### 2026-07-17 — closed as decision-complete (the machinery shipped in #18 M1a-3b)
+- **Done-when clause 1 (the purpose): SATISFIED** — decision = input-addressed, made 2026-07-07,
+  implemented + hardened in #18 M1a-3b (`Kpre` on upstream K_pres + the transitive-D soundness
+  snapshot; e2e-proven), recorded WITH rationale + trade-off in `atlas/index.md` (pkg/cache
+  section; trade-off lines added at this close).
+- **Done-when clause 2 (conditional elaboration): partially by-events** — interior keys on the
+  input recipe ✓; nondeterministic upstream no longer re-keys ✓; the **pre-run cache-hit-map
+  printout stays UNBUILT by decision** (the Spec's own framing: "Decision issue (not a
+  feature)"; the next arena's rule is zero new workbench features until a competition demands
+  them — a cost-preview command gets filed THEN if the pain is real).
+- metis#25 closed the complementary root gap same day (declared content pins) — the
+  content-addressed interior is now end-to-end trustworthy, which is what this issue's Problem
+  statement asked the pair to deliver.
