@@ -55,3 +55,7 @@ friction (kbench layering). Everything else is out unless the competition says o
 - Demand #2 SHIPPED same-day: metis#58 closed (FIX-THEN-SHIP; actual 0.49h vs 1.21h est).
   `--sample out<M>in<N>` live — iteration runs cache-escalate into decision runs. The
   splitK/runK seam is the natural substrate for metis#54 (racing) if it's ever demanded.
+- Demand #1 filed: metis#59 — train-step metric knob (balanced_accuracy) + class_weight
+  passthrough. (The project header's "likely AUC" guess was corrected at kbench#12 recon:
+  the S6E7 metric is balanced accuracy over an 85.9/8.4/5.8 3-class skew.) Gates kbench#12
+  M2; kbench#12 M1 (workspace bring-up) is in flight on its branch.
