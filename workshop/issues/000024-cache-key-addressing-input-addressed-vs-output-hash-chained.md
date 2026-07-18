@@ -1,12 +1,13 @@
 ---
 id: 000024
-status: working
+status: codecomplete
 deps: []
 github_issue:
 created: 2026-07-07
 updated: 2026-07-17
 estimate_hours:
 started: 2026-07-17T17:31:17-07:00
+actual_hours: 0.15
 ---
 
 # cache key addressing — input-addressed vs output-hash-chained (interior identity)
@@ -75,6 +76,7 @@ Related: metis#25 (root gap — get-data path-hash) is the complementary soundne
 ## Revisions
 
 ### 2026-07-17 — closed as decision-complete (the machinery shipped in #18 M1a-3b)
+- 2026-07-17: closed — decision-record close, docs-only: decision+rationale+trade-off in atlas/index.md pkg/cache section; machinery shipped+e2e-proven in #18 M1a-3b (cited); hit-map deferred by decision (Revisions); actual 0.15h labeled judgment (docs window); review verdict: SHIP
 - **Done-when clause 1 (the purpose): SATISFIED** — decision = input-addressed, made 2026-07-07,
   implemented + hardened in #18 M1a-3b (`Kpre` on upstream K_pres + the transitive-D soundness
   snapshot; e2e-proven), recorded WITH rationale + trade-off in `atlas/index.md` (pkg/cache
