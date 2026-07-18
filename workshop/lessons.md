@@ -243,3 +243,16 @@ the thrash: starts ≫ completions with the process alive (throughput ≈ 0) —
   every display/totals consumer.** The flat path shared `seededTotals`; a wrong denominator
   there is silent (display-only, untested). Enumerate consumers per-path and state which
   value each path passes.
+
+## Implementation lessons (metis#58, 2026-07-18)
+
+- **Escalation/cache tests need subset-stable fakes.** Exact spawn-count assertions (run B =
+  2 trains + outer-refit HIT) only pin down because the fake's winner is invariant under any
+  fold subset (`b` 0.90 > `a` 0.80 + nudge ≤ 0.04). If the fake's argmax could flip between a
+  2-fold and 3-fold mean, the refit's HIT/MISS goes nondeterministic and the test flakes.
+  Check winner stability before pinning counts.
+- **A "zero hits" doc-sweep gate must exempt text documenting the removal itself.** Retirement
+  notes legitimately quote the retired form; scope the gate accordingly or it's unsatisfiable.
+- **`go build ./cmd/metis` bare fails here** ("output metis already exists and is a
+  directory" — the package-dir/binary name collision). Always `-o bin/metis`; plans should
+  carry the flag.
