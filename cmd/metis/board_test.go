@@ -268,9 +268,9 @@ func steppingClock(step time.Duration) func() time.Time {
 // (metis#46: a stepping clock keeps each write on the quiet inline-flush path.)
 func TestBoardWriter_PinBottom(t *testing.T) {
 	var term strings.Builder
-	bw := newBoardWriter(&term, steppingClock(300*time.Millisecond))
+	bw := newBoardWriter(&term, steppingClock(300*time.Millisecond), false)
 
-	bw.paint([]string{"AGG line", "fold 0 ▸"})
+	bw.paint([]string{"AGG line", "fold 0 ▸"}, 0)
 	first := term.String()
 	if !strings.HasPrefix(first, "\x1b[?25l") {
 		t.Errorf("first paint must hide the cursor: %q", first)
@@ -309,7 +309,7 @@ func TestBoardWriter_PinBottom(t *testing.T) {
 	}
 
 	// A fresh paint replaces the frame.
-	bw.paint([]string{"AGG line", "fold 0 ✓"})
+	bw.paint([]string{"AGG line", "fold 0 ✓"}, 0)
 	if !strings.Contains(term.String(), "fold 0 ✓") {
 		t.Error("paint must draw the new frame")
 	}
@@ -335,8 +335,8 @@ func TestBoardWriter_PinBottom(t *testing.T) {
 // final frame — no output is ever swallowed.
 func TestBoardWriter_CloseFlushesPending(t *testing.T) {
 	var term strings.Builder
-	bw := newBoardWriter(&term, steppingClock(300*time.Millisecond))
-	bw.paint([]string{"B"})
+	bw := newBoardWriter(&term, steppingClock(300*time.Millisecond), false)
+	bw.paint([]string{"B"}, 0)
 	bw.Write([]byte("tail-no-newline"))
 	bw.close()
 	if !strings.Contains(term.String(), "tail-no-newline\n") {
@@ -346,8 +346,8 @@ func TestBoardWriter_CloseFlushesPending(t *testing.T) {
 
 func TestBoardWriter_DiscardFrameErasesWithoutRedraw(t *testing.T) {
 	var term strings.Builder
-	bw := newBoardWriter(&term, steppingClock(300*time.Millisecond))
-	bw.paint([]string{"folds 2/8", "31.2 folds/min · ETA 12s"})
+	bw := newBoardWriter(&term, steppingClock(300*time.Millisecond), false)
+	bw.paint([]string{"folds 2/8", "31.2 folds/min · ETA 12s"}, 0)
 	offset := term.Len()
 
 	bw.discardFrame()
@@ -378,6 +378,7 @@ func TestBoardWriter_DiscardFrameErasesWithoutRedraw(t *testing.T) {
 func TestRunExperiment_BoardMode(t *testing.T) {
 	ws := t.TempDir()
 	expPath := writeShapeFile(t, ws, foldShapeCVMD("[a, b]"))
+	t.Setenv("NO_COLOR", "") // metis#55: empty = color ON (no-color.org: only non-empty disables) — deterministic banding
 	var term strings.Builder
 	_, err := runExperiment(runOpts{
 		expPath: expPath,
@@ -394,14 +395,26 @@ func TestRunExperiment_BoardMode(t *testing.T) {
 	if !strings.Contains(s, "\x1b[?25l") || !strings.Contains(s, "\x1b[J") {
 		t.Errorf("board mode must paint (cursor hide + erase sequences):\n%q", s[:min(len(s), 400)])
 	}
-	if !strings.HasSuffix(s, "\x1b[?25h") {
-		t.Errorf("the deferred close must restore the cursor LAST: %q", s[len(s)-40:])
+	// metis#55: the RESULT (estimate + #50 summary) flushes AFTER cursor restore — the
+	// terminal ends on the paste-ready commands, not the board. Restore precedes it.
+	restoreIdx := strings.LastIndex(s, "\x1b[?25h")
+	sumIdx := strings.LastIndex(s, "metis: nested-CV estimate")
+	doneIdx := strings.LastIndex(s, "metis: done in")
+	if restoreIdx < 0 || sumIdx < restoreIdx || doneIdx < sumIdx {
+		t.Errorf("want cursor-restore THEN estimate THEN summary last (restore=%d est=%d done=%d)", restoreIdx, sumIdx, doneIdx)
+	}
+	if !strings.HasSuffix(strings.TrimRight(s, "\n"), "# cohorts") {
+		t.Errorf("output must END with the summary's next-hints: %q", s[max(0, len(s)-60):])
 	}
 	if strings.Contains(s, "metis: progress") {
 		t.Errorf("the board REPLACES the plain progress lines")
 	}
-	if !strings.Contains(s, "outer folds 2/2") || !strings.Contains(s, "outer fold 0 ✓") || !strings.Contains(s, "outer fold 1 ✓") {
-		t.Errorf("the final frame must show completed folds:\n%s", s)
+	if !strings.Contains(s, "outer folds 2/2") || !strings.Contains(s, "outer fold 0 \x1b[32m✓") || !strings.Contains(s, "outer fold 1 \x1b[32m✓") {
+		t.Errorf("the final frame must show completed folds (green ticks — color on, no NO_COLOR in this env):\n%s", s)
+	}
+	// metis#55: the banding — dim separator rule + bold aggregate + dim status line.
+	if !strings.Contains(s, "\x1b[2m──") || !strings.Contains(s, "\x1b[1mouter folds") {
+		t.Errorf("board banding missing (separator/bold aggregate):\n%q", s[:min(len(s), 300)])
 	}
 	// The bypass route: the fake-exec fixture has no traced closure → captureSweepCode
 	// notes "no first-party code closure" via o.out — which after the runExperiment
@@ -531,8 +544,8 @@ func TestCmdRun_NoTUIFlagParses(t *testing.T) {
 // Important — the route is guarded by construction order; this pins it directly).
 func TestServerPool_NoticeRoutesThroughBoard(t *testing.T) {
 	var term strings.Builder
-	bw := newBoardWriter(&term, steppingClock(300*time.Millisecond))
-	bw.paint([]string{"BOARD"})
+	bw := newBoardWriter(&term, steppingClock(300*time.Millisecond), false)
+	bw.paint([]string{"BOARD"}, 0)
 	pool := newServerPool(bw, nil) // what runExperiment does post-reorder: pool captures the compositor
 	pool.noticeOnce("k", "server died; falling back to legacy exec")
 	s := term.String()
@@ -563,8 +576,8 @@ func TestBoardWriter_BurstCoalesces(t *testing.T) {
 	for i := 1; i <= 100; i++ {
 		times = append(times, at(i*5))
 	}
-	bw := newBoardWriter(&term, scriptedClock(times...))
-	bw.paint([]string{"AGG", "fold 0 ▸"})
+	bw := newBoardWriter(&term, scriptedClock(times...), false)
+	bw.paint([]string{"AGG", "fold 0 ▸"}, 0)
 	for i := 0; i < 100; i++ {
 		bw.Write([]byte(fmt.Sprintf("⚡ step %d (cache hit)\n", i)))
 	}
@@ -593,8 +606,8 @@ func TestBoardWriter_BurstCoalesces(t *testing.T) {
 // operator watching a slow sweep sees lines the moment they happen.
 func TestBoardWriter_QuietWritesFlushInline(t *testing.T) {
 	var term strings.Builder
-	bw := newBoardWriter(&term, scriptedClock(at(0), at(300), at(600), at(900)))
-	bw.paint([]string{"B"})
+	bw := newBoardWriter(&term, scriptedClock(at(0), at(300), at(600), at(900)), false)
+	bw.paint([]string{"B"}, 0)
 	pre := term.Len()
 	bw.Write([]byte("slow line 1\n"))
 	if !strings.Contains(term.String()[pre:], "slow line 1") {
@@ -611,8 +624,8 @@ func TestBoardWriter_QuietWritesFlushInline(t *testing.T) {
 // flushes at the size cap rather than growing without limit.
 func TestBoardWriter_PendingSizeCap(t *testing.T) {
 	var term strings.Builder
-	bw := newBoardWriter(&term, func() time.Time { return at(0) }) // frozen: budget never elapses
-	bw.paint([]string{"B"})
+	bw := newBoardWriter(&term, func() time.Time { return at(0) }, false) // frozen: budget never elapses
+	bw.paint([]string{"B"}, 0)
 	line := strings.Repeat("x", 1024) + "\n"
 	for i := 0; i < 100; i++ { // ~100KB > the 64KB cap
 		bw.Write([]byte(line))
@@ -627,8 +640,8 @@ func TestBoardWriter_PendingSizeCap(t *testing.T) {
 // a stranded-pending regression here would ship silently without this pin).
 func TestBoardWriter_ForceFlushDrainsPending(t *testing.T) {
 	var term strings.Builder
-	bw := newBoardWriter(&term, func() time.Time { return at(0) }) // frozen: budget never elapses
-	bw.paint([]string{"BOARD"})                                    // first flush (zero lastFlush) paints; budget now frozen shut
+	bw := newBoardWriter(&term, func() time.Time { return at(0) }, false) // frozen: budget never elapses
+	bw.paint([]string{"BOARD"}, 0)                                    // first flush (zero lastFlush) paints; budget now frozen shut
 	pre := term.Len()
 	bw.Write([]byte("mid-budget line\n"))
 	if strings.Contains(term.String()[pre:], "mid-budget") {
@@ -646,7 +659,7 @@ func TestBoardWriter_ForceFlushDrainsPending(t *testing.T) {
 	var term2 strings.Builder
 	prog := newSweepProgress(&term2, func() time.Time { return at(0) }, "maximize",
 		progressTotals{nested: true, outer: 1, outerKind: sampler.SizeExact})
-	bw2 := newBoardWriter(&term2, func() time.Time { return at(0) })
+	bw2 := newBoardWriter(&term2, func() time.Time { return at(0) }, false)
 	prog.bw, prog.width = bw2, 100
 	prog.tick()
 	if !strings.Contains(term2.String(), "outer folds 0/1") {
@@ -659,8 +672,8 @@ func TestBoardWriter_ForceFlushDrainsPending(t *testing.T) {
 // the erase+redraw atomically — no flash; others ignore the private mode (safe no-op).
 func TestBoardWriter_SynchronizedOutputBrackets(t *testing.T) {
 	var term strings.Builder
-	bw := newBoardWriter(&term, steppingClock(300*time.Millisecond))
-	bw.paint([]string{"AGG", "fold 0 ▸"})
+	bw := newBoardWriter(&term, steppingClock(300*time.Millisecond), false)
+	bw.paint([]string{"AGG", "fold 0 ▸"}, 0)
 	bw.Write([]byte("⚡ step x\n"))
 	bw.forceFlush()
 	bw.close()
@@ -696,5 +709,48 @@ func TestBoardWriter_SynchronizedOutputBrackets(t *testing.T) {
 			break
 		}
 		i += 1 + j
+	}
+}
+
+// metis#55: NO_COLOR (color=false) paints the separator PLAIN — zero SGR styling bytes
+// anywhere (cursor/erase control sequences are not styling and remain).
+func TestBoardWriter_NoColorHasNoSGR(t *testing.T) {
+	var term strings.Builder
+	bw := newBoardWriter(&term, steppingClock(300*time.Millisecond), false)
+	bw.paint([]string{"AGG", "fold 0 ✓ held", "~slots"}, 40)
+	bw.close()
+	s := term.String()
+	for _, sgr := range []string{sgrBold, sgrDim, sgrGreen, sgrYellow} {
+		if strings.Contains(s, sgr) {
+			t.Errorf("color=false must emit no SGR %q:\n%q", sgr, s)
+		}
+	}
+	if !strings.Contains(s, strings.Repeat("─", 40)) {
+		t.Error("the separator rule paints (plain) even with color off")
+	}
+}
+
+// metis#55: the epilogue flushes once, AFTER the final frame + cursor restore; the erase
+// count includes the separator (no ghost line on the next erase).
+func TestBoardWriter_EpilogueAfterFinalFrame(t *testing.T) {
+	var term strings.Builder
+	bw := newBoardWriter(&term, steppingClock(300*time.Millisecond), true)
+	bw.paint([]string{"AGG", "row"}, 20)
+	fmt.Fprintln(bw.epilogueWriter(), "RESULT: est 0.84")
+	bw.paint([]string{"AGG2", "row2"}, 20) // repaint after epilogue registered — erase must count separator
+	bw.close()
+	s := term.String()
+	resIdx := strings.LastIndex(s, "RESULT: est 0.84")
+	frameIdx := strings.LastIndex(s, "AGG2")
+	restoreIdx := strings.LastIndex(s, "\x1b[?25h")
+	if frameIdx < 0 || resIdx < frameIdx || (restoreIdx > 0 && resIdx < restoreIdx) {
+		t.Errorf("epilogue must print after the final frame + restore (frame=%d restore=%d result=%d):\n%q", frameIdx, restoreIdx, resIdx, s)
+	}
+	if strings.Contains(s[:resIdx], "RESULT") {
+		t.Error("epilogue must not leak into the scroll region before close")
+	}
+	// erase math: each erase's cursor-up count must equal lines painted (frame+separator=3)
+	if strings.Contains(s, "\x1b[2A\x1b[J") {
+		t.Error("erase used 2-line count — the separator line was not counted (ghost line)")
 	}
 }

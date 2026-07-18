@@ -374,7 +374,7 @@ func runShapeSweep(o runOpts, sh experiment.Shape, now func() time.Time, out io.
 	}
 	ss.whileHealthy(func() {
 		ss.reportWinner(res)
-		printRunSummary(out, o.expPath, now().Sub(sweepStart), len(ss.man.Points), cohort)
+		printRunSummary(summaryWriter(out), o.expPath, now().Sub(sweepStart), len(ss.man.Points), cohort)
 	})
 	return ss.firstError()
 }
@@ -470,7 +470,7 @@ func (ss *shapeSweep) runNestedCV(ctx sampler.Ctx, configPts []shape.Point, k, i
 	}
 	ss.whileHealthy(func() {
 		ss.reportEstimate(est, runFolds)
-		printRunSummary(ss.out, ss.o.expPath, ss.now().Sub(ss.start), len(ss.man.Points), cohort)
+		printRunSummary(summaryWriter(ss.out), ss.o.expPath, ss.now().Sub(ss.start), len(ss.man.Points), cohort)
 	})
 	return ss.firstError()
 }
@@ -623,9 +623,20 @@ func sortedFamilies(perFamily map[string]sampler.Winner) []string {
 // reportEstimate prints the honest procedure estimate — mean±SE over the outer folds — and the
 // standing reminder that driver:cv produces NO shippable winner (estimation ≠ selection).
 func (ss *shapeSweep) reportEstimate(est sampler.MeanSE, outerK int) {
-	fmt.Fprintf(ss.out, "metis: nested-CV estimate — mean %.4f (SE %.4f) over %d outer fold(s) — the HONEST procedure estimate (argmax-mean family)\n",
+	out := summaryWriter(ss.out) // metis#55: the RESULT lands after the footer in board mode
+	fmt.Fprintf(out, "metis: nested-CV estimate — mean %.4f (SE %.4f) over %d outer fold(s) — the HONEST procedure estimate (argmax-mean family)\n",
 		est.Mean, est.SE, outerK)
-	fmt.Fprintf(ss.out, "  (per-family honest estimates recorded to the ledger; choose + ship via `metis select --best --promote`)\n")
+	fmt.Fprintf(out, "  (per-family honest estimates recorded to the ledger; choose + ship via `metis select --best --promote`)\n")
+}
+
+// summaryWriter routes run-RESULT prints (metis#55): in board mode they land in the
+// epilogue (flushed after the final frame at close — the terminal ends on the result);
+// plain/redirected mode already prints last, so the writer passes through unchanged.
+func summaryWriter(out io.Writer) io.Writer {
+	if bw, ok := out.(*boardWriter); ok {
+		return bw.epilogueWriter()
+	}
+	return out
 }
 
 // runPipelineFold runs ONE (config, fold) point: build its per-fold experiment (data +

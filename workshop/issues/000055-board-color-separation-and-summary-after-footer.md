@@ -70,11 +70,22 @@ rerouting + ordering/color tests; (3) atlas board paragraph touch.
 
 ## Plan
 
-- [ ] painter color: classify-and-wrap in redraw (post-truncation), separator line, painted-count fix, NO_COLOR gate
-- [ ] epilogue: buffer + close-flush; summaryWriter routing for reportEstimate + printRunSummary
-- [ ] tests: order-on-raw-writer e2e; SGR presence/absence (NO_COLOR byte-identity; redirected zero-ESC); pyte content unchanged
-- [ ] atlas + Log; close
+- [x] painter color: classify-and-wrap in redraw (post-truncation), separator line, painted-count fix, NO_COLOR gate
+- [x] epilogue: buffer + close-flush; summaryWriter routing for reportEstimate + printRunSummary
+- [x] tests: order-on-raw-writer e2e; SGR presence/absence (NO_COLOR byte-identity; redirected zero-ESC); pyte content unchanged
+- [x] atlas + Log; close
 
 ## Log
 
 ### 2026-07-18
+
+### 2026-07-18 (built)
+- Painter-owned banding (redraw classifies post-clamp; renderBoard untouched — pyte content
+  tests green as-is): dim separator rule (erase math counts it — pinned), bold aggregate,
+  green ✓ / yellow ▸ glyphs, dim status. Color injected at construction; production wiring
+  reads NO_COLOR once (empty ≠ set, per no-color.org). paint() carries width for the rule.
+- Epilogue channel: reportEstimate + both printRunSummary sites route via summaryWriter →
+  board epilogue, flushed after final frame + cursor restore; plain/redirect passthrough
+  unchanged. Board e2e now asserts restore → estimate → summary ordering and that output
+  ENDS with the next-hints; NO_COLOR SGR-free test; epilogue ordering + ghost-line test.
+  Full -race suite green.

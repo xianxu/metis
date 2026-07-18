@@ -212,6 +212,13 @@ wrapped by **thin step-executables** honoring the contract above. Hermetic via *
   `sweepPass` mutex guards the shared `configs`/`points`/`err` bookkeeping (the honest reduce stays pure
   in the sampler). Caveats (flag help): a COLD cache thundering-herds the shared upstream; clean
   per-`k/n` progress is deferred to metis#30.
+- **Board banding + result-last (metis#55):** color lives in the PAINTER only (renderBoard
+  stays plain — the paint/content split): `redraw` adds a dim full-width `─` separator rule
+  above the frame (counted in the erase math), bolds the aggregate line, colors ✓/▸ glyphs,
+  dims the status line — gated on `NO_COLOR` (env read at the one production wiring point;
+  tests inject). The run RESULT (estimate + #50 summary) routes through `summaryWriter` into
+  the board's EPILOGUE, flushed after the final frame + cursor restore — the terminal ends on
+  the paste-ready commands, not the board. Plain/redirected output is unchanged (zero SGR).
 - **inner_k — the partial-inner-CV cost knob (metis#45):** `sweeper.resample.cv.k` is the
   ESTIMAND knob (outer fold count + inner default — the #42 principle); optional `inner_k`
   (>=2) overrides the INNER per-config CV only (selection precision/cost — `10×72×inner_k:5`
