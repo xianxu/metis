@@ -5,7 +5,7 @@ deps: []
 github_issue:
 created: 2026-07-18
 updated: 2026-07-18
-estimate_hours: 3
+estimate_hours: 1.2
 started: 2026-07-18T12:06:53-07:00
 ---
 
@@ -65,6 +65,24 @@ estimand intact and lets iteration runs escalate into decision runs via the cach
 **Relation to metis#54 (racing/successive-halving):** this is the MANUAL dial; #54 is the
 adaptive version over the same budget. Ship this first — it de-risks whether #54 is needed at
 all (measure before rebuild).
+
+## Estimate
+
+```estimate
+model: estimate-logic-v3.1
+familiarity: 1.0
+item: smaller-go-module   design=0.1 impl=0.1
+item: smaller-go-module   design=0.2 impl=0.2
+item: smaller-go-module   design=0.1 impl=0.15
+item: atlas-docs          design=0.0 impl=0.1
+item: milestone-review    design=0.0 impl=0.2
+design-buffer: 0.15
+total: 1.21
+```
+
+(Items in plan order: parseSample+flag · splitK/runK plumb+validation+legacy-test rework ·
+new e2e · docs/caller sweep · close review. Design buffer 0.15: thorough plan doc, 2× reviewed.
+v3.1 impl values = 40% of v2 ranges, AI-paired ship wall-clock.)
 
 ## Done when
 
