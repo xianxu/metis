@@ -130,3 +130,52 @@ def test_step_context_requires_env(monkeypatch):
         monkeypatch.delenv(v, raising=False)
     with pytest.raises(RuntimeError, match="not set"):
         io.step_context()
+
+
+def _save_skewed_dataset(run_dir):
+    """A 12-row 10/2-skewed captured dataset (metis#59) — the step-level counterpart of the
+    unit tests' skewed frame (testdata/dataset/toy is 33/27 balanced, useless here). Saved
+    into a fake upstream step dir and referenced as `dataset: skewed` (the captured-artifact
+    pattern of test_ship_refit_reads_captured_features_no_folds)."""
+    from metis.dataset import Dataset
+    from metis.schema import Schema
+
+    train_df = pd.DataFrame({
+        "id": range(12),
+        "x": [1.0] * 12,  # constant feature → the model predicts the majority class
+        "y": [0] * 10 + [1] * 2,
+    })
+    schema = Schema(columns={"id": "id", "x": "feature", "y": "target"},
+                    dtypes={"id": "int64", "x": "float64", "y": "int64"})
+    io.save_dataset(Dataset(schema=schema, train=train_df, test=None), str(run_dir / "skewed" / "dataset"))
+
+
+def test_train_step_metric_knob_changes_fold_score(tmp_path, monkeypatch):
+    """with.metric reaches the per-fold scorer (metis#59): on a 10/2 skew with a constant
+    feature, accuracy = 5/6 per stratified k=2 fold while balanced_accuracy = 0.5."""
+    from metis.split import cv_folds
+
+    run = tmp_path / "runs" / "r-metric"
+    _save_skewed_dataset(run)
+    folds = cv_folds(pd.DataFrame({"y": [0] * 10 + [1] * 2}), 2, 42, stratify_col="y")
+    split_dir = run / "split"
+    split_dir.mkdir(parents=True)
+    (split_dir / "folds.json").write_text(json.dumps(folds))
+
+    base = {"dataset": "skewed", "folds": "split", "model": "logreg", "_fold": {"idx": 0}}
+    ts = _run_step(monkeypatch, run, "train-acc", base, train.main)
+    acc = json.loads((ts / "metrics.json").read_text())["fold_score"]
+    ts = _run_step(monkeypatch, run, "train-bal", {**base, "metric": "balanced_accuracy"}, train.main)
+    bal = json.loads((ts / "metrics.json").read_text())["fold_score"]
+    assert acc == pytest.approx(5 / 6)
+    assert bal == pytest.approx(0.5)
+
+
+def test_train_step_unknown_metric_fails_loud_on_foldless_ship_path(tmp_path, monkeypatch):
+    """Eager validation (metis#59): the foldless ship refit never scores, so without the
+    eager resolve_scorer at entry an unknown metric would be SILENTLY accepted there."""
+    run = tmp_path / "runs" / "r-badmetric"
+    _save_skewed_dataset(run)
+    with pytest.raises(ValueError, match="balanced_accuracy"):
+        _run_step(monkeypatch, run, "train",
+                  {"dataset": "skewed", "model": "logreg", "metric": "auc"}, train.main)

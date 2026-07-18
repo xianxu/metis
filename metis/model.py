@@ -1,7 +1,7 @@
 """train / predict / cv_score — the pure modeling core (metis#1 M3).
 
 Thin, deterministic wrappers over sklearn estimators (logreg / random forest) plus
-a cross-validated scorer. All deterministic given a seed and IO-free, so they are
+a cross-validated scorer (metric-parameterized, metis#59: accuracy | balanced_accuracy). All deterministic given a seed and IO-free, so they are
 unit-tested directly on in-memory arrays (ARCH-PURE); the train/predict step
 entrypoints (metis.steps.*) are the only place these meet the filesystem.
 """
@@ -11,9 +11,22 @@ from __future__ import annotations
 import numpy as np
 from sklearn.ensemble import HistGradientBoostingClassifier, RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score
+from sklearn.metrics import accuracy_score, balanced_accuracy_score
 
 MODELS = frozenset({"logreg", "rf", "hist_gbm"})
+
+# The closed scorer set (metis#59). The ONE place a metric name resolves to a scorer —
+# fold_fit consumes it; the train step ALSO resolves eagerly at entry so an unknown
+# metric fails loudly on every path (incl. the foldless ship refit, which never scores).
+_SCORERS = {"accuracy": accuracy_score, "balanced_accuracy": balanced_accuracy_score}
+
+
+def resolve_scorer(metric: str):
+    """Resolve a metric name to its sklearn scorer; loud on unknown (parse_model_config pattern)."""
+    scorer = _SCORERS.get(metric)
+    if scorer is None:
+        raise ValueError(f"unknown metric {metric!r}; want one of {sorted(_SCORERS)}")
+    return scorer
 
 
 def parse_model_config(raw) -> tuple[str, dict]:
@@ -50,11 +63,13 @@ def make_model(kind: str, seed: int, params: dict | None = None):
     if kind == "rf":
         return RandomForestClassifier(
             n_estimators=p.get("n_estimators", 100), max_depth=p.get("max_depth"),
+            class_weight=p.get("class_weight"),
             random_state=seed)
     if kind == "hist_gbm":
         return HistGradientBoostingClassifier(
             learning_rate=p.get("learning_rate", 0.1), max_iter=p.get("max_iter", 100),
             max_leaf_nodes=p.get("max_leaf_nodes", 31), max_depth=p.get("max_depth"),
+            class_weight=p.get("class_weight"),
             random_state=seed)
     raise ValueError(f"unknown model {kind!r}; want one of {sorted(MODELS)}")
 
@@ -102,7 +117,8 @@ def complexity(fitted, kind: str) -> float:
     raise ValueError(f"complexity: unknown model kind {kind!r}; want one of {sorted(MODELS)}")
 
 
-def fold_fit(X, y, folds, fold_idx: int, kind: str, seed: int, params: dict | None = None):
+def fold_fit(X, y, folds, fold_idx: int, kind: str, seed: int, params: dict | None = None,
+             metric: str = "accuracy"):
     """Fit ONE fold and return `(score, fitted_model)` — pure, deterministic (metis#18 M1a).
 
     Train on the analysis rows (fold != fold_idx), score on the assessment rows
@@ -116,11 +132,12 @@ def fold_fit(X, y, folds, fold_idx: int, kind: str, seed: int, params: dict | No
     val = fa == fold_idx
     trn = ~val
     model = train(Xa[trn], ya[trn], kind, seed, params)
-    score = float(accuracy_score(ya[val], predict(model, Xa[val])))
+    score = float(resolve_scorer(metric)(ya[val], predict(model, Xa[val])))
     return score, model
 
 
-def fold_score(X, y, folds, fold_idx: int, kind: str, seed: int, params: dict | None = None) -> float:
+def fold_score(X, y, folds, fold_idx: int, kind: str, seed: int, params: dict | None = None,
+               metric: str = "accuracy") -> float:
     """Validation accuracy for ONE fold (pure, deterministic) — metis#18 M1a.
 
     The single-fold body cv_score loops over, LIFTED OUT so the engine drives the fold
@@ -128,11 +145,12 @@ def fold_score(X, y, folds, fold_idx: int, kind: str, seed: int, params: dict | 
     Sampler's Done reduces the k fold-scores → (mean, SE) (the ledger keeps the raw fold
     rows, so metis#19's select is a free re-reduction). Delegates to fold_fit (DRY).
     """
-    score, _ = fold_fit(X, y, folds, fold_idx, kind, seed, params)
+    score, _ = fold_fit(X, y, folds, fold_idx, kind, seed, params, metric=metric)
     return score
 
 
-def cv_score(X, y, folds, kind: str, seed: int, params: dict | None = None) -> float:
+def cv_score(X, y, folds, kind: str, seed: int, params: dict | None = None,
+             metric: str = "accuracy") -> float:
     """Mean validation accuracy over the fold assignment (pure, deterministic).
 
     The v1 whole-CV reducer, now expressed over fold_score (ARCH-DRY) — retained for
@@ -140,5 +158,5 @@ def cv_score(X, y, folds, kind: str, seed: int, params: dict | None = None) -> f
     per (config, fold) and reduces in the resample Sampler's Done.
     """
     fa = np.asarray(folds)
-    scores = [fold_score(X, y, folds, f, kind, seed, params) for f in sorted(set(fa.tolist()))]
+    scores = [fold_score(X, y, folds, f, kind, seed, params, metric=metric) for f in sorted(set(fa.tolist()))]
     return float(np.mean(scores))

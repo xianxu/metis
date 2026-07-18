@@ -4,7 +4,8 @@ import numpy as np
 import pytest
 from sklearn.datasets import make_classification
 
-from metis.model import complexity, cv_score, make_model, parse_model_config, predict, train
+from metis.model import (complexity, cv_score, fold_score, make_model, parse_model_config,
+                         predict, resolve_scorer, train)
 from metis.split import cv_folds
 
 
@@ -163,3 +164,45 @@ def test_fold_score_is_single_fold_and_cv_score_is_their_mean():
     assert np.isclose(float(np.mean(per_fold)), cv_score(X, y, folds, "logreg", seed=3))
     # fold_score is deterministic per fold
     assert fold_score(X, y, folds, 0, "logreg", seed=3) == fold_score(X, y, folds, 0, "logreg", seed=3)
+
+
+# --- metis#59: metric knob + class_weight passthrough ---
+
+
+def test_balanced_accuracy_scorer_on_skewed_labels():
+    # majority-argmax: accuracy looks great (0.9), balanced accuracy exposes it (0.5).
+    y_true = np.array([0] * 9 + [1])
+    y_pred = np.zeros(10, dtype=int)
+    assert resolve_scorer("accuracy")(y_true, y_pred) == pytest.approx(0.9)
+    assert resolve_scorer("balanced_accuracy")(y_true, y_pred) == pytest.approx(0.5)
+
+
+def test_unknown_metric_rejected():
+    with pytest.raises(ValueError, match="balanced_accuracy"):  # message names the closed set
+        resolve_scorer("auc")
+
+
+def test_fold_score_metric_kwarg_changes_the_score_and_cv_threads():
+    import pandas as pd
+
+    # Constant feature + 10/2 skew → the model predicts the majority class everywhere.
+    # STRATIFIED k=2 puts one minority row in each assessment fold (unstratified could leave
+    # a single-class fold where balanced accuracy degenerates to accuracy).
+    X = np.ones((12, 1))
+    y = np.array([0] * 10 + [1] * 2)
+    folds = cv_folds(pd.DataFrame({"y": y}), 2, 0, stratify_col="y")
+    acc = fold_score(X, y, folds, 0, "logreg", 0)
+    bal = fold_score(X, y, folds, 0, "logreg", 0, metric="balanced_accuracy")
+    assert acc == pytest.approx(5 / 6)
+    assert bal == pytest.approx(0.5)
+    # cv_score threads the metric to fold_score: it IS the mean of the balanced fold scores.
+    per_fold = [fold_score(X, y, folds, f, "logreg", 0, metric="balanced_accuracy") for f in (0, 1)]
+    assert cv_score(X, y, folds, "logreg", 0, metric="balanced_accuracy") == pytest.approx(
+        float(np.mean(per_fold)))
+
+
+def test_make_model_class_weight_reaches_estimators():
+    for kind in ("rf", "hist_gbm"):
+        m = make_model(kind, seed=0, params={"class_weight": "balanced"})
+        assert m.class_weight == "balanced"
+        assert make_model(kind, seed=0).class_weight is None  # default unchanged

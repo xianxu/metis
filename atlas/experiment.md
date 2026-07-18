@@ -124,9 +124,12 @@ wrapped by **thin step-executables** honoring the contract above. Hermetic via *
   - `split.py` `cv_folds(df, k, seed, stratify_col?)` — deterministic (Stratified)KFold
     fold assignment.
   - `model.py` `train`/`predict`/`cv_score` — sklearn `logreg`/`rf`/`hist_gbm`, deterministic by seed;
-    `cv_score` averages per-fold validation accuracy. `make_model(kind, seed, params)` **applies
-    the swept hyperparams** (`logreg` C; `rf` n_estimators/max_depth; `hist_gbm`
-    learning_rate/max_iter/max_leaf_nodes/max_depth — metis#21); `params` threads through
+    `cv_score` averages per-fold validation scores under a **metric knob** (metis#59:
+    `accuracy` default | `balanced_accuracy`; `resolve_scorer` is the ONE name→scorer site,
+    loud on unknown; `metric=` threads keyword-default through `fold_fit`/`fold_score`/`cv_score`).
+    `make_model(kind, seed, params)` **applies
+    the swept hyperparams** (`logreg` C; `rf` n_estimators/max_depth/class_weight; `hist_gbm`
+    learning_rate/max_iter/max_leaf_nodes/max_depth/class_weight — metis#21, #59); `params` threads through
     `train`/`cv_score` (default `{}` = sklearn defaults). Adding a model kind is Python-only (`MODELS`
     + `make_model` + `complexity`); the Go layer derives the family structurally (`FamilyOf`), zero edits.
   - **Model-config contract (`parse_model_config`, metis#12):** the `with["model"]` value is EITHER
@@ -285,6 +288,10 @@ wrapped by **thin step-executables** honoring the contract above. Hermetic via *
 - **Step entrypoints — `metis/steps/{cv_split,train,predict,outer_split}.py`:** thin `io → pure core → io`.
   - `cv-split`: load Dataset (`with.dataset`, exp-relative) → `cv_folds` → `folds.json` + `{k,n}`.
   - `train`: load Dataset + upstream `folds.json` → `cv_score` + fit-on-all → `model.pkl` + `{cv_score}`.
+    `with.metric` (metis#59, optional, default `accuracy`) picks the scorer on BOTH paths; validated
+    EAGERLY at entry so an unknown metric fails loudly even on the foldless ship refit (which never
+    scores). Setting the key re-keys the leaf address (Kpre hashes the resolved With); absent key =
+    existing cohorts untouched.
   - `predict`: load Dataset + upstream `model.pkl` → predict test rows → `predictions.csv` + `{n_predictions}`.
   - `outer-split` (metis#23, L1 structural seal): read the FULL dataset (**unconfined** — it must
     see all rows to split them) → `cv_folds` → k `analysis_i/` **subset dataset dirs** (train where

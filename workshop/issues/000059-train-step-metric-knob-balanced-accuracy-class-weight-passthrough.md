@@ -5,7 +5,7 @@ deps: []
 github_issue:
 created: 2026-07-18
 updated: 2026-07-18
-estimate_hours:
+estimate_hours: 0.7
 started: 2026-07-18T13:14:30-07:00
 ---
 
@@ -40,14 +40,53 @@ submission).
   `atlas/experiment.md` step-type table. kbench's s6e7 shapes adopt the knob in kbench#12 M2
   (not this issue).
 
+## Estimate
+
+```estimate
+model: estimate-logic-v3.1
+familiarity: 1.0
+item: smaller-go-module   design=0.1 impl=0.15
+item: smaller-go-module   design=0.05 impl=0.1
+item: atlas-docs          design=0.0 impl=0.05
+item: milestone-review    design=0.0 impl=0.2
+design-buffer: 0.15
+total: 0.67
+```
+
+(Items: pure core (scorer+threading+class_weight)+unit tests · train-step wiring+step tests ·
+atlas both bullets · close review. Buffer 0.15: reviewed plan doc.
+
+Produced via `brain/data/life/42shots/velocity/estimate-logic-v3.1.md` against
+`baseline-v3.1.md`. Method A only.)
+
 ## Done when
 
--
+- `with.metric ∈ {accuracy, balanced_accuracy}` honored on BOTH train paths (per-fold and
+  all-rows), default `accuracy`; unknown metric → eager `ValueError` naming the closed set on
+  EVERY path, including the foldless ship refit (which never scores).
+- Balanced-accuracy behavior proven on a skewed frame at unit AND step level (majority-argmax:
+  high accuracy, ~1/n_classes balanced); `cv_score` threading pinned (== mean of per-fold
+  balanced fold_scores).
+- `class_weight` reaches rf + hist_gbm constructors via the params bundle; defaults unchanged
+  (`None`).
+- Absent `metric` key → leaf addresses unchanged (existing titanic cohorts un-re-keyed —
+  Kpre hashes the resolved With map).
+- `train.py` `with:` table + BOTH atlas/experiment.md bullets (model.py + train step) updated.
+- `uv run pytest -q` and `go test ./cmd/metis` green.
 
 ## Plan
 
-- [ ]
+Durable plan: `workshop/plans/000059-metric-knob-plan.md` (fresh-eyes reviewed, findings folded).
+
+- [x] pure core: resolve_scorer + metric threading + class_weight (TDD)
+- [x] train step eager validation + step tests (in-test skewed dataset) + atlas both bullets
+- [ ] pr → merge → close
 
 ## Log
 
 ### 2026-07-18
+
+- Implemented inline (main session): 2 commits on-branch. 93 python + full Go suite green.
+  Step-level proof: skewed 10/2 constant-feature dataset — accuracy fold_score 5/6, balanced
+  0.5; unknown metric refuses eagerly on the foldless ship path. class_weight verified reaching
+  both estimators (default None unchanged).

@@ -256,3 +256,16 @@ the thrash: starts ≫ completions with the process alive (throughput ≈ 0) —
 - **`go build ./cmd/metis` bare fails here** ("output metis already exists and is a
   directory" — the package-dir/binary name collision). Always `-o bin/metis`; plans should
   carry the flag.
+
+## Plan-review lessons (metis#59, 2026-07-18)
+
+- **Verify referenced fixtures exist.** A plan test invoking a noun like "the skewed fixture"
+  must be checked against the tree — specs mint nouns that were never built. One `ls testdata/`
+  at plan time prevents an implement-time scramble.
+- **Pin the failure site for threaded validation knobs.** A knob threaded through N layers
+  with at-use validation silently accepts garbage on any path that never consumes it (the
+  foldless ship refit). State WHERE the loud error fires; eager validation at the entrypoint
+  is usually the answer.
+- **An empty Done-when at plan time is a finding.** Synthesize it from the Spec when planning —
+  it's the acceptance contract the close gate demands; writing it late invites post-hoc
+  rationalization.
