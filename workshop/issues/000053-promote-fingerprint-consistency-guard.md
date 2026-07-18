@@ -73,10 +73,10 @@ commit for the restore hint comes from `Steps[].Code.Commit`.
 ## Plan
 
 - [x] (at claim) hashing-normalization confirm: reuse `gitBlobHashes` — identical by construction
-- [ ] pure guard core `promoteDrift(records, cohortFP, hasher) ([]driftedPath, hint, ok)` + unit tests (fake hasher: drift / clean / legacy-no-D)
-- [ ] wire BOTH promote sites pre-exec; `--no-fingerprint-check` flag (loud proceed); warn-and-proceed on absent provenance
-- [ ] fixture e2e: prepared ledger+record+mini git repo → edit closure file → REFUSE names path+old/new+commit hint; checkout-hint round-trip re-promotes clean; unchanged tree no false positive; override loud
-- [ ] atlas: promote-seam guard beside the #32 cohort guard; Log evidence
+- [x] pure guard core `promoteDrift(records, cohortFP, hasher) ([]driftedPath, hint, ok)` + unit tests (fake hasher: drift / clean / legacy-no-D)
+- [x] wire BOTH promote sites pre-exec; `--no-fingerprint-check` flag (loud proceed); warn-and-proceed on absent provenance
+- [x] fixture e2e: prepared ledger+record+mini git repo → edit closure file → REFUSE names path+old/new+commit hint; checkout-hint round-trip re-promotes clean; unchanged tree no false positive; override loud
+- [x] atlas: promote-seam guard beside the #32 cohort guard; Log evidence
 
 ## Log
 
@@ -85,3 +85,10 @@ commit for the restore hint comes from `Steps[].Code.Commit`.
   state (restore); THIS = cheap detection at the one seam where drift silently invalidates the
   selection (promote). Detection needs no restore machinery — hash the current tree over the
   cohort's D paths and compare.
+
+### 2026-07-17 (built)
+- Design refinement held: per-path blob compare (no re-mint) — promoteDrift is pure with an
+  injected hasher; guardPromoteFingerprint wires both promote paths pre-exec. 6 tests: 3 unit
+  (drift/clean/legacy-unchecked incl. wrong-cohort) + 3 through the REAL runSelect (refuse
+  names path+commit-hint; restore-content round-trip re-promotes clean; --point path guarded;
+  legacy cohort warns nothing-to-compare and proceeds; override loud). Full -race suite green.
