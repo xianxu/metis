@@ -208,3 +208,98 @@ func TestLedgerShow_FingerprintPrefix(t *testing.T) {
 		t.Errorf("no-match prefix must error with the cohort listing, got: %v", err)
 	}
 }
+
+// TestLedgerShow_SortedPointHandleRoundTrips (metis#51): the Done-when's literal flow —
+// `ledger show <shape> --sort <metric>` on a PER-FOLD ledger (the aggregation path, where a
+// synthetic group key used to render as the handle) — every rendered point cell is a REAL
+// member addr that resolves through resolvePointRows against the RAW ledger to the same
+// config the row displays.
+func TestLedgerShow_SortedPointHandleRoundTrips(t *testing.T) {
+	shapePath := writePerFoldLedger(t, t.TempDir())
+	var out strings.Builder
+	if err := showLedger(shapePath, "", "train.fold_score", "desc", 0, &out); err != nil {
+		t.Fatalf("showLedger: %v", err)
+	}
+	got := out.String()
+	if !strings.Contains(strings.SplitN(got, "\n", 2)[0], "point") {
+		t.Fatalf("header missing point column:\n%s", got)
+	}
+	raw, err := loadLedger(shapePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// each aggregate row's point cell = short() of one of ITS OWN config's member addrs,
+	// and resolving it returns rows of exactly that config
+	wantByModel := map[string][]string{"a": {"a0", "a1"}, "b": {"b0", "b1"}}
+	seen := 0
+	for _, line := range strings.Split(got, "\n")[1:] {
+		if line == "" {
+			continue
+		}
+		cols := strings.Fields(line)
+		if len(cols) < 2 {
+			continue
+		}
+		handle := cols[1] // point column sits after code
+		var model string
+		if strings.Contains(line, "train.model=a") {
+			model = "a"
+		} else if strings.Contains(line, "train.model=b") {
+			model = "b"
+		} else {
+			continue
+		}
+		seen++
+		members := wantByModel[model]
+		if handle != short(members[0]) && handle != short(members[1]) {
+			t.Errorf("model %s row's point cell %q is not one of its member addrs %v", model, handle, members)
+			continue
+		}
+		resolved, err := resolvePointRows(raw, handle)
+		if err != nil {
+			t.Errorf("rendered handle %q must resolve against the raw ledger: %v", handle, err)
+			continue
+		}
+		for _, rr := range resolved {
+			if rr.FreeParams["train.model"] != model {
+				t.Errorf("handle %q resolved into config %v, want model %s", handle, rr.FreeParams, model)
+			}
+		}
+	}
+	if seen != 2 {
+		t.Errorf("expected 2 aggregate config rows, matched %d:\n%s", seen, got)
+	}
+}
+
+// TestRenderLedger_PointColumnRoundTrips (metis#51): every row carries a short point
+// handle, and the rendered handle resolves back to exactly its source row through the
+// REAL --point prefix path (resolvePointRows) — the discovery surface for #41's flow.
+func TestRenderLedger_PointColumnRoundTrips(t *testing.T) {
+	rows := []ledger.Row{
+		{PointAddr: "aaaa1111bbbb2222cccc", CodeFingerprint: "f1f1f1f1f1", Status: "ok",
+			FreeParams: map[string]any{"train.model": "a"}, Metrics: map[string]float64{"cv_score": 0.8}},
+		{PointAddr: "dddd3333eeee4444ffff", CodeFingerprint: "f1f1f1f1f1", Status: "ok",
+			FreeParams: map[string]any{"train.model": "b"}, Metrics: map[string]float64{"cv_score": 0.7}},
+	}
+	var out strings.Builder
+	renderLedger(&out, rows)
+	got := out.String()
+	if !strings.Contains(strings.SplitN(got, "\n", 2)[0], "point") {
+		t.Fatalf("header missing point column:\n%s", got)
+	}
+	for _, r := range rows {
+		handle := short(r.PointAddr)
+		if !strings.Contains(got, handle) {
+			t.Errorf("row handle %s not rendered:\n%s", handle, got)
+			continue
+		}
+		resolved, err := resolvePointRows(ledger.Ledger{Rows: rows}, handle)
+		if err != nil {
+			t.Errorf("rendered handle %s must resolve via the --point path: %v", handle, err)
+			continue
+		}
+		if len(resolved) == 0 || resolved[0].PointAddr != r.PointAddr {
+			t.Errorf("handle %s resolved to %+v, want its source row %s", handle, resolved, r.PointAddr)
+		}
+	}
+}

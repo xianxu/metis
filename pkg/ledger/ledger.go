@@ -255,12 +255,16 @@ func AggregateView(l Ledger, metric string) Ledger {
 		// metis#32: Level is part of the key — an inner and an outer row sharing (fingerprint,
 		// free-params) must NOT merge (a v1 row's Level is "", so a fold-only ledger keys
 		// identically to before — back-compatible).
-		key := r.CodeFingerprint + "|" + r.Level + "|" + string(fpb) // NUL-free: an aggregate row is not a
-		//   content-address (no single point ran it) — the key is a (level, config)-grouping id, kept
-		//   printable (a \x00 separator would corrupt any consumer that renders PointAddr, e.g. promote).
+		key := r.CodeFingerprint + "|" + r.Level + "|" + string(fpb) // internal (level, config)-grouping
+		//   id only — NOT stored on the row. The aggregate row's PointAddr is the FIRST member's
+		//   REAL addr (metis#51): resolvePointRows documents "any of a config's fold rows works as
+		//   a handle" and expands to the whole config, so a representative member addr is a valid,
+		//   resolvable handle — the single source both `ledger show`'s point column and select's
+		//   #52 pick-line handles derive from (a synthetic key here rendered as garbage and could
+		//   never resolve).
 		g := groups[key]
 		if g == nil {
-			g = &agg{row: Row{FreeParams: r.FreeParams, CodeFingerprint: r.CodeFingerprint, PointAddr: key, Level: r.Level, Status: "ok"}, byMetric: map[string][]float64{}}
+			g = &agg{row: Row{FreeParams: r.FreeParams, CodeFingerprint: r.CodeFingerprint, PointAddr: r.PointAddr, Level: r.Level, Status: "ok"}, byMetric: map[string][]float64{}}
 			groups[key] = g
 			order = append(order, key)
 		}

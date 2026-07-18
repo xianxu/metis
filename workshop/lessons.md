@@ -196,3 +196,11 @@ the thrash: starts ≫ completions with the process alive (throughput ≈ 0) —
 - **When hashing "everything in a directory," mirror the runner's existing exclusion set.** Step
   dirs mix artifacts with contract files (with.json etc.); any scheme where a config file would
   pin its own hash is a self-reference red flag to check for explicitly.
+
+## Close-review lesson (metis#51)
+- **A new column/read on a struct field must be checked against EVERY producer of that field —
+  including aggregation/view layers that repurpose it.** PointAddr was overwritten with a
+  synthetic group key by AggregateView; the new `ledger show` column rendered it verbatim on
+  the --sort path (the operator's actual flow) while the direct-render test stayed green. When
+  a Done-when names a specific invocation form, the round-trip test must drive THAT form
+  end-to-end, not the nearest pure function.
