@@ -95,9 +95,9 @@ Durable plan: `workshop/plans/000045-partial-inner-cv-plan.md`. **Decision (at c
 adaptive sampler is a design of its own). `k` keeps its meaning (estimand/outer + inner
 default; zero migration); `inner_k` overrides the inner only; one `InnerFolds()` accessor.
 
-- [ ] schema + accessor + validation (CUE + shape.go, TDD)
-- [ ] sweep threading (inner: splitK/totals/banners; outer: split dirs/driver/held-out UNTOUCHED — the leakage tooth asserts it) via the nested fake-exec e2e
-- [ ] RUNBOOK + atlas + file lever-(b) issue + Log/close
+- [x] schema + accessor + validation (CUE + shape.go, TDD)
+- [x] sweep threading (inner: splitK/totals/banners; outer: split dirs/driver/held-out UNTOUCHED — the leakage tooth asserts it) via the nested fake-exec e2e
+- [x] RUNBOOK + atlas + file lever-(b) issue + Log/close
 
 ## Log
 
@@ -108,3 +108,20 @@ default; zero migration); `inner_k` overrides the inner only; one `InnerFolds()`
   render paths are ready for an adaptive sampler. Sibling knob already live: `--sample m`
   (outer). The k5→k10 move (kbench#9, attenuation-driven) doubled inner cost — the
   10×72×10 grid is where the pressure comes from.
+
+### 2026-07-17 (built — lever (a) shipped; lever (b) filed as metis#54)
+- Schema: `sweeper.resample.cv.inner_k` (CUE + Go, KnownFields-clean); `InnerFolds()` is the one
+  derivation. **json omitempty pinned by a marshal-identity regression test** (Sweeper reaches
+  shapeRunIdentity's CanonicalHash — plan review caught the would-be churn of every existing
+  shape's identity). CUE drift guard gained an inner_k-bearing vet case.
+- Threading: nested inner passes + partitionRef (minted from the RESOLVED fold count — review
+  Important 2) + seeded totals + banners at innerK; outer split dirs/driver/held-out scoring
+  UNTOUCHED at k. **Flat runs ignore inner_k with one loud note** (review Important 3: the flat
+  CV IS the reported estimate — inner_k there would silently change the estimand).
+- Evidence: nested e2e (k:2, inner_k:3) asserts banner, per-(config,outer) inner fold sets
+  {0,1,2}, outer rows {0,1}, and BOTH split steps' recorded `with.k`==2 via decoded records
+  (outer-split + every outer scoring cv-split — the leakage tooth); threading red-proofed
+  (revert → 4 assertion failures); flat×inner_k test; full `-race` suite green.
+- Docs: RUNBOOK cost arithmetic (10×72×5 = 3,600 vs 7,200), atlas paragraph; **metis#54 filed**
+  (racing/successive-halving sampler — Spec(b) carried verbatim, demand-driven per the
+  next-arena rule).
