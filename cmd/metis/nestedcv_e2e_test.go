@@ -164,7 +164,7 @@ func TestNestedCV_SampleRunsMOfKFolds(t *testing.T) {
 	}
 	// 2 sampled outer folds × 1 family (a,b share the scalar `model` knob) = 2 held-out lines.
 	if n := strings.Count(s, "→ held-out "); n != 2 {
-		t.Errorf("expected 2 outer-fold held-out scores (--sample 2 × 1 family), got %d:\n%s", n, s)
+		t.Errorf("expected 2 outer-fold held-out scores (--sample out2 × 1 family), got %d:\n%s", n, s)
 	}
 	if !strings.Contains(s, "over 2 outer fold(s)") {
 		t.Errorf("estimate should aggregate over the 2 SAMPLED folds, got:\n%s", s)

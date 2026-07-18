@@ -152,10 +152,17 @@ wrapped by **thin step-executables** honoring the contract above. Hermetic via *
   syscall sensor swap. Pairs with the **L1 structural** seal (`outer-split` subset dirs).
 - **Nested-CV (metis#23; derived, records — metis#32) — `cmd/metis/sweep.go`:** `metis run` on a
   `>1`-config sweep runs nested CV (the mode is now DERIVED by config-count — the shape `driver:` field
-  was removed in #32; outer folds = `sweeper.resample.cv.k`, or 1 under `--fast`, or m under
-  `--sample m` — metis#42's m-of-k sparse sampling: the partition is ALWAYS split k ways (k = the
-  estimand, the train fraction each fold simulates; m = precision/cost only), `--fast` ≡ `--sample 1`,
-  and misuse (m>k, single-config flat run, combined with `--fast`) fails loudly). `runNestedCV` wraps
+  was removed in #32; outer folds = `sweeper.resample.cv.k`, or 1 under `--fast`, or M under
+  `--sample out<M>` — metis#42's m-of-k sparse sampling, grammar metis#58: `--sample out<M>`,
+  `in<N>`, or `out<M>in<N>` prefix-subsamples the OUTER and/or INNER fold enumeration (the
+  partitions are ALWAYS split at the declared k / inner_k — the estimand, the train fraction each
+  fold simulates; sampling = precision/cost only). The seam is `sweepPass.splitK` vs `runK`
+  (sweep.go): splitK feeds the partition + leaf content-addresses, runK bounds `FixedKFolds` —
+  so an `in2` iteration run's leaves are byte-identical addresses to a full run's first 2 folds
+  and CACHE-ESCALATE into it (the ledger's point-address dedupe absorbs re-emitted rows; e2e
+  `TestSample_CacheEscalationConverges`). `--fast` ≡ `--sample out1` (bare `--sample 3` is retired,
+  loudly), and misuse (M>k, N>inner_k, single-config flat run, combined with `--fast`) fails
+  loudly). `runNestedCV` wraps
   the black-box sweeper in an OUTER resample (the pure `sampler.CVDriver` over the unchanged `Run`
   loop). Preamble (`materializeOuterAnalysis`) runs `{data + outer-split(k=outerK)}` once →
   `analysis_i/` dirs. Per outer fold (`runOuterFold`): (a) a **sealed** sweep (`runSweeper` repointed
@@ -194,9 +201,10 @@ wrapped by **thin step-executables** honoring the contract above. Hermetic via *
   by the inner CV (`SelectConfigs.PerFamily`, the metis#19 rule). `--promote` reconstructs the winner
   (`promotedExperiment`) and runs it on ALL data → `runs/best-{family}-{hash}/submission.csv`. A multi-family
   ledger with no `outer` rows is a sharp error (never a silent inner-argmax). `metis run --fast` = one outer
-  fold (a ~1/k honest single-point for iteration); `--sample m` = m of the k folds (metis#42 — probe-cost
-  control; an m<k SE has m−1 df: probe with it, never re-select what ships on it). Retired
-  `metis ledger select` + `metis promote`.
+  fold (a ~1/k honest single-point for iteration); `--sample out<M>[in<N>]` = M of the k outer folds
+  and/or N of the inner_k per-config folds (metis#42/#58 — probe-cost control; an M<k SE has M−1 df
+  and an in<N run selects on a noisier N-fold mean: probe with it, never re-select what ships on
+  it). Retired `metis ledger select` + `metis promote`.
 - **Parallel batch executor (metis#31) — `pkg/sampler/exec.go` + `cmd/metis/{exec,run,sweep}.go`:**
   `Run` takes an injected `exec(batch, runPoint) []O` that runs one `Ask` batch and returns outputs
   **in batch order** (`SeqExec` serial default · `ParExec` goroutine fan-out · `ExecFor(parallel)`
@@ -226,8 +234,10 @@ wrapped by **thin step-executables** honoring the contract above. Hermetic via *
   halves the decision grid vs k:10 inner). One accessor (`CVResample.InnerFolds()`) feeds the
   nested inner passes, the partition ref, totals, and banners; the OUTER level (split dirs,
   driver, held-out scoring partition — the #23 determinism invariant) never reads it. FLAT
-  runs ignore it loudly (their CV IS the reported estimate). `--sample m`/`--fast` stay
-  outer-only. The adaptive racing sampler over the same budget is the filed follow-up.
+  runs ignore it loudly (their CV IS the reported estimate). `--sample in<N>` (metis#58)
+  prefix-subsamples this inner enumeration WITHOUT touching the inner_k partition (splitK/runK
+  seam — cache-continuous escalation); `--fast` stays outer-only. The adaptive racing sampler
+  over the same budget is the filed follow-up.
 - **Path is location, never identity (metis#34):** run ids, point-addresses, and the sweep
   identity are content-addressed (`shapeBlobHash`/`PointAddress`/`shapeRunIdentity` — no
   path-string term); output anchors are `Abs(Dir(expPath))`-derived and the ledger sidecar sits
