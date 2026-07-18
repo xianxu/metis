@@ -78,10 +78,15 @@ Produced via `brain/data/life/42shots/velocity/estimate-logic-v3.1.md` against
 
 Durable plan: `workshop/plans/000059-metric-knob-plan.md` (fresh-eyes reviewed, findings folded).
 
-- [ ] pure core: resolve_scorer + metric threading + class_weight (TDD)
-- [ ] train step eager validation + step tests (in-test skewed dataset) + atlas both bullets
+- [x] pure core: resolve_scorer + metric threading + class_weight (TDD)
+- [x] train step eager validation + step tests (in-test skewed dataset) + atlas both bullets
 - [ ] pr → merge → close
 
 ## Log
 
 ### 2026-07-18
+
+- Implemented inline (main session): 2 commits on-branch. 93 python + full Go suite green.
+  Step-level proof: skewed 10/2 constant-feature dataset — accuracy fold_score 5/6, balanced
+  0.5; unknown metric refuses eagerly on the foldless ship path. class_weight verified reaching
+  both estimators (default None unchanged).
