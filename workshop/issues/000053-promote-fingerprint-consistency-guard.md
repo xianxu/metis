@@ -1,11 +1,12 @@
 ---
 id: 000053
-status: open
+status: working
 deps: []
 github_issue:
 created: 2026-07-16
-updated: 2026-07-16
+updated: 2026-07-17
 estimate_hours:
+started: 2026-07-17T23:05:12-07:00
 ---
 
 # promote fingerprint-consistency guard — refuse when the working tree is not the cohort's code
