@@ -52,3 +52,6 @@ friction (kbench layering). Everything else is out unless the competition says o
   bare `--sample 3` retired). Operator-designed in the 2026-07-18 kbench#12 planning session;
   the manual dial that de-risks metis#54 (racing). Demand #1 (balanced-accuracy metric knob)
   files at kbench#12 plan Task 8.
+- Demand #2 SHIPPED same-day: metis#58 closed (FIX-THEN-SHIP; actual 0.49h vs 1.21h est).
+  `--sample out<M>in<N>` live — iteration runs cache-escalate into decision runs. The
+  splitK/runK seam is the natural substrate for metis#54 (racing) if it's ever demanded.
