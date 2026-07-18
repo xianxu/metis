@@ -1,12 +1,13 @@
 ---
 id: 000034
-status: working
+status: codecomplete
 deps: []
 github_issue:
 created: 2026-07-13
 updated: 2026-07-17
-estimate_hours: 0.44
+estimate_hours: 0.38
 started: 2026-07-17T17:12:38-07:00
+actual_hours: 0.35
 ---
 
 # repo-root-relative shape path as canonical key (cwd-independent run/select/submit)
@@ -80,7 +81,7 @@ familiarity: 1.0
 item: smaller-go-module   design=0.04 impl=0.18
 item: smaller-go-module   design=0.03 impl=0.12
 design-buffer: 0.15
-total: 0.44
+total: 0.38
 ```
 
 *Produced via `brain/data/life/42shots/velocity/estimate-logic-v3.1.md` against `baseline-v3.1.md`. Method A only.*
@@ -93,10 +94,10 @@ regression test + Log/atlas line.
 Recon table = the design (no separate plan doc — two one-file fixes + one test; the audit did
 the brainwork, plan-quality gate judges this issue file).
 
-- [ ] metis: cwd-independence regression test (runExperiment from two cwds → same id + dir)
-- [ ] metis: steppath fallback anchored on shape dir (test: cwd elsewhere)
-- [ ] kaggle: `-C` flag on submit --run + fake-CLI test from foreign cwd
-- [ ] Log evidence + atlas one-liner (path is location, never identity)
+- [x] metis: cwd-independence regression test (runExperiment from two cwds → same id + dir)
+- [x] metis: steppath fallback anchored on shape dir (test: cwd elsewhere)
+- [x] kaggle: `-C` flag on submit --run + fake-CLI test from foreign cwd
+- [x] Log evidence + atlas one-liner (path is location, never identity)
 
 ## Log
 
@@ -105,3 +106,15 @@ the brainwork, plan-quality gate judges this issue file).
   the user can `metis run titanic-sweep.md` from inside the pipeline dir and `metis select titanic-sweep.md
   --best` consistently, and kaggle submit stays rooted in the pipelines dir." Orthogonal to #32's selection
   algebra → split out.
+
+### 2026-07-17 (built — evidence)
+- 2026-07-17: closed — metis -race suite green incl. new cwd-independence net (same shape, two cwds -> same runs dir + identical point_address) + red-proofed steppath anchor test; kaggle suite green, -C foreign-cwd test + failure-mode test; kaggle commit 8addd9f pinned in Log. actual 0.35h = LABELED JUDGMENT (brain-dir session transcripts unattributable, same as #25); review verdict: SHIP
+- **Audit verdict recorded:** premise FALSE for `metis run`/`select` — identity content-addressed
+  (shapeBlobHash/PointAddress/shapeRunIdentity), anchors Abs(Dir(expPath))-derived, sidecar
+  next-to-shape. No canonical-path key built (Simplicity First; the invariant IS the deliverable).
+- **metis** (this branch): steppath bare-repo fallback now anchors on the shape's repo (was
+  os.Getwd; red-proofed — reverting fails the new test) + `TestRun_CwdIndependentIdentityAndLocation`
+  (two cwds, same shape → same physical runs/ dir + identical point_address). Full `-race` green.
+- **kaggle** (commit `8addd9f`, pushed): `submit -C <pipeline-dir>` anchors `runs/<id>` from any
+  cwd (the audit's one true drift); default `.` keeps #50's paste-lines unchanged; miss error
+  names the anchor; usage updated; foreign-cwd test + failure-mode test. Full kaggle suite green.

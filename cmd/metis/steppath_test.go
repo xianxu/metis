@@ -165,3 +165,37 @@ func TestStepPath_EnvOverride(t *testing.T) {
 		t.Fatalf("stepPath override = %v; want %v (verbatim SplitList)", got, want)
 	}
 }
+
+// TestStepPath_BareRepoFallbackAnchorsOnShapeDir (metis#34): with no construct
+// workspace, the fallback anchors on the SHAPE's repo — never on cwd. Two bare
+// go.mod repos; cwd in B; a shape in A/sub must resolve A/steps.
+func TestStepPath_BareRepoFallbackAnchorsOnShapeDir(t *testing.T) {
+	a := t.TempDir()
+	for _, d := range []string{"steps", "sub"} {
+		if err := os.MkdirAll(filepath.Join(a, d), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(a, "go.mod"), []byte("module a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	shape := filepath.Join(a, "sub", "exp.md")
+	if err := os.WriteFile(shape, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	b := t.TempDir()
+	if err := os.WriteFile(filepath.Join(b, "go.mod"), []byte("module b\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(b)
+
+	sp := stepPath(shape)
+	want, _ := filepath.EvalSymlinks(filepath.Join(a, "steps"))
+	if len(sp) != 1 {
+		t.Fatalf("stepPath = %v, want exactly the shape repo's steps", sp)
+	}
+	got, _ := filepath.EvalSymlinks(sp[0])
+	if got != want {
+		t.Errorf("stepPath anchored at %s, want %s (cwd must not win)", sp[0], want)
+	}
+}

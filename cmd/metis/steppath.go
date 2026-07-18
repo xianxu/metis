@@ -20,7 +20,10 @@ import (
 //     base-first order: a workspace step now shadows a base-layer step of the same
 //     name (the correct layer-override semantics; harmless today — namespaces are
 //     disjoint). METIS_STEP_PATH stays the override.
-//  3. else (no construct marker — a bare repo) fall back to <repo.Root(cwd)>/steps.
+//  3. else (no construct marker — a bare repo) fall back to <repo.Root(shape dir)>/steps —
+//     anchored on the SHAPE's own repo, never cwd (metis#34: the house rule from the #11
+//     close-review — anchor on the resolved path; cwd is where the operator happens to
+//     stand, not where the work lives).
 func stepPath(expPath string) []string {
 	if v := os.Getenv("METIS_STEP_PATH"); v != "" {
 		return filepath.SplitList(v)
@@ -39,8 +42,8 @@ func stepPath(expPath string) []string {
 			}
 		}
 	}
-	if wd, err := os.Getwd(); err == nil {
-		if root, err := repo.Root(wd); err == nil {
+	if abs, err := filepath.Abs(expPath); err == nil {
+		if root, err := repo.Root(filepath.Dir(abs)); err == nil {
 			return []string{filepath.Join(root, "steps")}
 		}
 	}

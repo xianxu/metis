@@ -205,6 +205,12 @@ wrapped by **thin step-executables** honoring the contract above. Hermetic via *
   `sweepPass` mutex guards the shared `configs`/`points`/`err` bookkeeping (the honest reduce stays pure
   in the sampler). Caveats (flag help): a COLD cache thundering-herds the shared upstream; clean
   per-`k/n` progress is deferred to metis#30.
+- **Path is location, never identity (metis#34):** run ids, point-addresses, and the sweep
+  identity are content-addressed (`shapeBlobHash`/`PointAddress`/`shapeRunIdentity` — no
+  path-string term); output anchors are `Abs(Dir(expPath))`-derived and the ledger sidecar sits
+  next to the shape file — so `metis run`/`select` are cwd-independent by construction (pinned
+  by `TestRun_CwdIndependentIdentityAndLocation`). The bare-repo steppath fallback anchors on
+  the SHAPE's repo, never cwd; `kaggle submit -C <pipeline-dir>` anchors `runs/` from any cwd.
 - **External-ingest identity (metis#25) — declared content pins:** the interior is input-addressed
   (`Kpre` + transitive-D) and upstream artifacts are class-1 keyed, but a ROOT step ingesting
   EXTERNAL data (today: `kaggle/download`, a remote fetch) has unknowable content at key time.
