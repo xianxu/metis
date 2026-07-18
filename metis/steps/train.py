@@ -24,6 +24,14 @@ with:
            metis.model.parse_model_config → (kind, params).
   _fold:   {partition, idx} — engine-injected fold-context; present in  (per-fold)
            the per-fold run, absent for the all-rows ship refit.
+  metric:  "accuracy" (default) | "balanced_accuracy" (metis#59) —       (optional)
+           the scorer fold_score/cv_score compute. Validated EAGERLY at
+           entry (resolve_scorer) so an unknown metric fails loudly on
+           every path — including the foldless ship refit, which never
+           scores. Setting the key re-keys the leaf address (new With
+           key); absent = existing cohorts untouched. NOTE: the shape's
+           objective.metric ("train.fold_score") is a ledger NAME, not
+           this scorer.
 Outputs: metrics.json{fold_score, complexity} (per-fold) OR model.pkl + metrics.json{cv_score}.
 """
 
@@ -33,7 +41,7 @@ import json
 import pickle
 
 from metis import io
-from metis.model import complexity, cv_score, fold_fit, parse_model_config, train
+from metis.model import complexity, cv_score, fold_fit, parse_model_config, resolve_scorer, train
 
 
 def main() -> None:
@@ -46,6 +54,10 @@ def main() -> None:
     X, y = ds.X(ds.train), ds.y(ds.train)
     # `model` is a kind string ("logreg") OR the $any-map bundle ({"rf": {n_estimators…}}).
     kind, params = parse_model_config(w["model"])
+    # metis#59: resolve EAGERLY — every path validates (incl. the foldless ship refit,
+    # which never scores), and before any fit is wasted.
+    metric = w.get("metric", "accuracy")
+    resolve_scorer(metric)
 
     fold = w.get("_fold")
     if isinstance(fold, dict) and "idx" in fold:
@@ -54,7 +66,8 @@ def main() -> None:
         # Fit ONCE (fold_fit) and read both the score AND the fitted model's realized
         # complexity (metis#19) — the parsimony axis the select rule consumes. Bare metric
         # names; the ledger namespaces them to train.fold_score / train.complexity.
-        score, model = fold_fit(X, y, _load_folds(ctx, w), int(fold["idx"]), kind, ctx.seed, params)
+        score, model = fold_fit(X, y, _load_folds(ctx, w), int(fold["idx"]), kind, ctx.seed, params,
+                                 metric=metric)
         io.write_metrics(ctx, {"fold_score": score, "complexity": complexity(model, kind)})
         return
 
@@ -66,7 +79,7 @@ def main() -> None:
         pickle.dump(model, f)
     metrics: dict[str, float] = {}
     if "folds" in w:
-        metrics["cv_score"] = cv_score(X, y, _load_folds(ctx, w), kind, ctx.seed, params)
+        metrics["cv_score"] = cv_score(X, y, _load_folds(ctx, w), kind, ctx.seed, params, metric=metric)
     io.write_metrics(ctx, metrics)
 
 
