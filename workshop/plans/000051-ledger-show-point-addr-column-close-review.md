@@ -61,3 +61,67 @@ confidence: high
 Add a `## Revisions` entry to `workshop/issues/000051-ledger-show-point-addr-column.md`:
 
 - *Revision:* the round-trip plan item ("rendered short handle resolves via the --point prefix path") was delivered against `renderLedger` on raw rows only; under `--sort` (the Done-when's form) `AggregateView` replaces `PointAddr` with its synthetic group key, so the rendered handle neither looks like nor resolves as a point addr. Un-tick both the column and round-trip items until the aggregate rows carry a representative real member addr (fix in `AggregateView`, or a `showLedger`-local remap) and the fixture test round-trips through `showLedger --sort` against the raw ledger.
+
+---
+
+## Re-review — 2026-07-17T23:04:45-07:00 (SHIP)
+
+| field | value |
+|-------|-------|
+| issue | 51 — ledger show — add a point_addr column (the --point handle has no surface) |
+| repo | 000051-ledger-show-point-addr-column |
+| issue file | workshop/issues/000051-ledger-show-point-addr-column.md |
+| boundary | whole-issue close |
+| milestone | — |
+| window | 07d97e9d0e92ee61827d73e4b9bb29d5498b9611..HEAD |
+| command | sdlc close --issue 51 |
+| reviewer | claude |
+| timestamp | 2026-07-17T23:04:45-07:00 |
+| verdict | SHIP |
+
+## Review
+
+```verdict
+verdict: SHIP
+confidence: high
+```
+
+**Summary.** This window is the rework of the prior REWORK verdict, and it fixes both blocking findings at the right place. `AggregateView` now stamps the first member row's **real** `PointAddr` on each aggregate row while keeping the synthetic `fingerprint|level|json` string as a map-internal grouping key only (`pkg/ledger/ledger.go:258-267`), so the sorted leaderboard — the Done-when's literal flow — renders a resolvable handle. The new `TestLedgerShow_SortedPointHandleRoundTrips` drives the real end-to-end path (`showLedger` with `--sort` over a per-fold ledger on disk → extract the rendered point cell → resolve it via the real `resolvePointRows` against the **raw** ledger → assert the resolved config matches the row). I ran the shadow-sweep over every consumer of aggregate-row `PointAddr` (`SortAll`, `configStatsFromLedger`, `runPointSelect`, `FamilyEstimate`, all pkg/ledger tests) and none depended on the old synthetic key — the semantic change is safe. The fix is sound against the resolver's documented contract ("any of its fold rows works as a handle", `select_cmd.go:386-388`). One caveat on process: the Bash tool cannot initialize in this review environment, so I could not execute the suite; I verified the new tests by tracing their logic against `SortAll`/`betterThan`/`resolvePointRows` and found no failure path. Remaining findings are Minor only.
+
+## 1. Strengths
+
+- **Fixed at the source, not patched at the surface** (`pkg/ledger/ledger.go:267`): the prior review offered a `showLedger`-local remap as the small-blast-radius alternative; the implementor took the preferred single-source fix instead, so any future consumer of `AggregateView` gets a usable handle for free. ARCH-PURPOSE delivered.
+- **The end-to-end test is the Done-when, literally** (`ledger_cmd_test.go:217-272`): per-fold ledger on disk → `showLedger --sort` → rendered cell → `resolvePointRows` against the raw ledger → config identity asserted. It also asserts the cell is one of *that config's own* member addrs, which would catch a cross-config mix-up, not just a resolve failure. It reuses the existing `writePerFoldLedger` helper as the prior review directed (ARCH-DRY).
+- **Idempotence preserved**: pass-through (`Fold==nil`) rows keep their own addrs untouched, and `TestAggregateView_NonFoldRowPassesThrough` (`ledger_test.go:281-293`) still pins the fixpoint.
+- Both prior Minor findings addressed: the test uses `short()` instead of hand-slicing `[:8]`, and the `renderLedger` doc comment was rewritten cleanly (`ledger_cmd.go:138-141`).
+
+## 2. Critical findings
+
+None.
+
+## 3. Important findings
+
+None.
+
+## 4. Minor findings
+
+- `cmd/metis/ledger_cmd_test.go:220`: `showLedger(…, "desc", …)` passes a direction token the CLI never produces (`--dir` documents `maximize | minimize`); it only works because `betterThan` treats anything non-`minimize` as maximize (`ledger.go:399-404`). Use `"maximize"` so the test doesn't read as if `desc` were supported.
+- `pkg/ledger/ledger.go:262-263`: the comment claims the aggregate `PointAddr` is "the single source both `ledger show`'s point column **and select's #52 pick-line handles** derive from" — but the pick lines still derive from `pointHandleFor`'s independent raw-ledger scan (`select_cmd.go:262-269`), which was not changed. The values coincide (both take the first append-order member), but the comment overclaims; soften it to "…and a valid handle select's #52 pick lines could derive from" or actually consolidate (see §6).
+- No pkg/ledger unit test pins the new contract ("aggregate row carries a real member addr") — it's pinned only via the cmd-level round-trip. One assertion in `TestAggregateView_ReducesPerConfig` (`ledger_test.go:244-250`, e.g. `byModel["a"].PointAddr` ∈ {`a0`,`a1`}) would pin it at the unit seam where the comment makes the promise.
+
+## 5. Test coverage notes
+
+- Coverage is now correct at both seams the prior review flagged: `renderLedger` in isolation (`TestRenderLedger_PointColumnRoundTrips`, pure buffer, no IO — ARCH-PURE pass) and the aggregation path end-to-end. The unit-level `AggregateView` pin above is the one small remaining hole.
+- The test's `cols[1]` extraction assumes a non-empty `PointAddr`; true for this fixture. A legacy empty-addr row would shift `strings.Fields` columns — worth remembering if a legacy-row rendering test is ever added, but no action needed here.
+- Suite execution was not possible in this environment (Bash tool failure); logic-traced instead as noted in the summary. The main agent should confirm `go test ./...` green before committing the close — the Log claims suite + `-race` green and nothing I read contradicts it.
+
+## 6. Architectural notes
+
+- **ARCH-DRY: pass, with one consolidation left on the table.** Two "representative addr for a config" derivations now coexist: `AggregateView`'s first-member stamp and `pointHandleFor`'s raw scan. They agree today by construction (both first-append-order). A future issue could retire `pointHandleFor` by deriving pick-line handles from the aggregate rows select already computes — then the ledger.go comment's "single source" claim becomes true rather than aspirational. Not blocking; #52 shipped and works.
+- **ARCH-PURE: pass.** `AggregateView` stays pure and order-deterministic; `renderLedger` pure over `io.Writer`; `showLedger` remains the thin injected-writer core.
+- **ARCH-PURPOSE: pass.** The purpose — the `--point` handle has a discovery surface — is now delivered on the sorted leaderboard, the flow the operator was actually in. Shadow-sweep of consumers found no remaining hand-maintained restatement; the one stale *claim* (the comment) is noted above as Minor.
+- **Docs gate: pass.** There is no `README.md` in this repo, so no README gap is possible; atlas documents `ledger show` at flow level (`atlas/index.md:33-39`), not per-column — the `--no-atlas` justification recorded in the plan holds.
+
+## 7. Plan revision recommendations
+
+None — the plan's three ticked items are all actually delivered, and the Log's rework entry honestly records both the original defect and the fix. The issue is ready to close.

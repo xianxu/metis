@@ -1,12 +1,13 @@
 ---
 id: 000051
-status: working
+status: codecomplete
 deps: []
 github_issue:
 created: 2026-07-16
 updated: 2026-07-17
 estimate_hours: 0.17
 started: 2026-07-17T22:50:40-07:00
+actual_hours: 0.35
 ---
 
 # ledger show — add a point_addr column (the --point handle has no surface)
@@ -67,6 +68,7 @@ this issue closes the remaining `ledger show` gap only.
   would supersede parts of this; the column is the cheap immediate fix.
 
 ### 2026-07-17 (built)
+- 2026-07-17: closed — REWORK findings fixed at source: AggregateView carries real member addr; end-to-end test drives the literal Done-when flow (showLedger --sort per-fold -> cell -> resolvePointRows vs raw ledger); full -race suite green; actual 0.35h labeled judgment; review verdict: SHIP
 - point column after code (short 8-char); round-trip test drives the REAL resolvePointRows
   prefix path — discovery: the resolver expands to the matched CONFIG (all its rows), so the
   fixture needs distinct free-params per row. Full suite green. Docs untouched by design:
