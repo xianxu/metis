@@ -13,13 +13,17 @@ import (
 
 // --- promoteDrift unit tests (pure core, fake hasher) ---
 
+// fakeHasher mirrors gitBlobHashes' BATCH semantics faithfully (close-review finding): any
+// unknown path fails the WHOLE call — per-path recovery is promoteDrift's job, not the hasher's.
 func fakeHasher(m map[string]record.Hash) func(string, []string) (map[string]record.Hash, error) {
 	return func(repo string, paths []string) (map[string]record.Hash, error) {
 		out := map[string]record.Hash{}
 		for _, p := range paths {
-			if h, ok := m[repo+":"+p]; ok {
-				out[p] = h
+			h, ok := m[repo+":"+p]
+			if !ok {
+				return nil, fmt.Errorf("fatal: could not hash %s", p)
 			}
+			out[p] = h
 		}
 		return out, nil
 	}
@@ -49,8 +53,13 @@ func TestPromoteDrift_EditAndMissingDetected(t *testing.T) {
 	if !checked || len(drifted) != 2 {
 		t.Fatalf("want 2 drifted, got %v (checked=%v)", drifted, checked)
 	}
-	if drifted[0].Path != "code.py" || drifted[0].New != "hX" || drifted[1].Path != "gone.py" || drifted[1].New != "" {
-		t.Errorf("drift detail wrong: %+v", drifted)
+	// batch fails (gone.py) → per-path retry: code.py still gets its REAL new hash (the
+	// message must not lie about unchanged-but-batched siblings), gone.py carries the error.
+	if drifted[0].Path != "code.py" || drifted[0].New != "hX" || drifted[0].Err != "" {
+		t.Errorf("edited sibling must verify via per-path retry: %+v", drifted[0])
+	}
+	if drifted[1].Path != "gone.py" || drifted[1].New != "" || drifted[1].Err == "" {
+		t.Errorf("missing path must carry the hasher error, not swallow it: %+v", drifted[1])
 	}
 }
 
@@ -82,11 +91,16 @@ func writeGuardRecord(t *testing.T, dir, addr string) (repoDir, codePath string)
 	if err := os.WriteFile(codePath, []byte("original\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	h, err := gitBlobHashes(repoDir, []string{"train.py"})
+	if err := os.WriteFile(filepath.Join(repoDir, "util.py"), []byte("helpers\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h, err := gitBlobHashes(repoDir, []string{"train.py", "util.py"})
 	if err != nil {
 		t.Fatalf("gitBlobHashes: %v", err)
 	}
-	rec := recWith("cf", record.CodeRef{Repo: repoDir, Path: "train.py", BlobHash: h["train.py"]})
+	rec := recWith("cf",
+		record.CodeRef{Repo: repoDir, Path: "train.py", BlobHash: h["train.py"]},
+		record.CodeRef{Repo: repoDir, Path: "util.py", BlobHash: h["util.py"]})
 	b, _ := json.Marshal(rec)
 	rdir := filepath.Join(dir, "runs", addr)
 	if err := os.MkdirAll(rdir, 0o755); err != nil {
@@ -181,4 +195,27 @@ func TestPromoteGuard_LegacyCohortWarnsAndProceeds(t *testing.T) {
 	}
 }
 
-var _ = fmt.Sprintf // keep fmt if assertions change
+// TestPromoteGuard_DeletedFileDoesNotPoisonSiblings (close-review Important): deleting ONE
+// closure file must name ONLY that file — the batch hash-object failure is retried per-path,
+// so the unchanged sibling still verifies and the refusal doesn't lie.
+func TestPromoteGuard_DeletedFileDoesNotPoisonSiblings(t *testing.T) {
+	dir := t.TempDir()
+	shapePath := writeSelectLedger(t, dir, taggedShipShapeForSelect, true)
+	repoDir, _ := writeGuardRecord(t, dir, "i-lr1-0")
+	if err := os.Remove(filepath.Join(repoDir, "util.py")); err != nil {
+		t.Fatal(err)
+	}
+	var out strings.Builder
+	err := runSelect(selectOpts{shapePath: shapePath, best: true, promote: true,
+		exec: foldFakeExec{}, git: fakeGitProbe{name: "metis", sha: "sha"}, now: fixedNow(), out: &out})
+	if err == nil {
+		t.Fatal("deleted closure file must refuse the promote")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "util.py") {
+		t.Errorf("refusal must name the deleted file:\n%s", msg)
+	}
+	if strings.Contains(msg, "train.py") {
+		t.Errorf("unchanged sibling must NOT read as drifted (batch poisoning):\n%s", msg)
+	}
+}

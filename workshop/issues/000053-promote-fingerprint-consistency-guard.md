@@ -1,12 +1,13 @@
 ---
 id: 000053
-status: working
+status: codecomplete
 deps: []
 github_issue:
 created: 2026-07-16
 updated: 2026-07-17
 estimate_hours: 0.48
 started: 2026-07-17T23:05:12-07:00
+actual_hours: 0.5
 ---
 
 # promote fingerprint-consistency guard — refuse when the working tree is not the cohort's code
@@ -87,8 +88,19 @@ commit for the restore hint comes from `Steps[].Code.Commit`.
   cohort's D paths and compare.
 
 ### 2026-07-17 (built)
+- 2026-07-17: closed — 6 tests green through real runSelect (refuse/round-trip/point-path/legacy/override); full -race suite green; atlas promote-seam guard documented beside the #32 cohort guard; actual 0.5h labeled judgment; review verdict: FIX-THEN-SHIP
 - Design refinement held: per-path blob compare (no re-mint) — promoteDrift is pure with an
   injected hasher; guardPromoteFingerprint wires both promote paths pre-exec. 6 tests: 3 unit
   (drift/clean/legacy-unchecked incl. wrong-cohort) + 3 through the REAL runSelect (refuse
   names path+commit-hint; restore-content round-trip re-promotes clean; --point path guarded;
   legacy cohort warns nothing-to-compare and proceeds; override loud). Full -race suite green.
+
+### 2026-07-17 (close review FIX-THEN-SHIP → fixed in the close)
+- Important finding (real): one missing closure file poisoned the whole repo batch
+  (gitBlobHashes errors on any absent path; the error was swallowed → every path rendered
+  `<missing>`), and the fake hasher's per-path semantics certified the fiction. Fixed: on
+  batch error, per-path retry (unchanged siblings still verify; the failing path carries the
+  first line of the hasher error — surfaced as `<unhashable: …>`); fake hasher now mirrors the
+  batch semantics; new e2e deletes one of two closure files and asserts the sibling does NOT
+  read as drifted. Minors folded: guardPromote helper (one shared call), deterministic
+  restore-hint (sorted record pick), stale loadLedgerRecords comment, dropped fmt pin.

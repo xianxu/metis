@@ -19,6 +19,8 @@ import (
 type driftedPath struct {
 	Repo, Path string
 	Old, New   record.Hash
+	Err        string // non-empty when the working-tree hash FAILED for this path (missing file
+	//                   or an environmental git failure) — surfaced in the refusal, never swallowed
 }
 
 // promoteDrift compares the cohort's captured D closure against the current working tree.
@@ -37,7 +39,13 @@ func promoteDrift(records map[string]record.RunRecord, cohortFP string,
 	// closure content by construction (the fingerprint IS the {path, blob} manifest hash).
 	type key struct{ repo, path string }
 	want := map[key]record.Hash{}
-	for _, rec := range records {
+	addrs := make([]string, 0, len(records))
+	for a := range records {
+		addrs = append(addrs, a)
+	}
+	sort.Strings(addrs) // deterministic record pick → deterministic restore hint
+	for _, a := range addrs {
+		rec := records[a]
 		if string(rec.CodeFingerprint) != cohortFP {
 			continue
 		}
@@ -65,14 +73,25 @@ func promoteDrift(records map[string]record.RunRecord, cohortFP string,
 	for repo, paths := range byRepo {
 		sort.Strings(paths)
 		got, err := hash(repo, paths)
+		perr := map[string]string{}
+		if err != nil {
+			// git hash-object batches: ONE missing path fails the whole call. Retry
+			// per-path so unchanged files still verify and only the genuinely
+			// missing/unhashable ones read as drift — with the error kept, not swallowed.
+			got = map[string]record.Hash{}
+			for _, p := range paths {
+				if h1, err1 := hash(repo, []string{p}); err1 == nil {
+					got[p] = h1[p]
+				} else {
+					perr[p] = strings.SplitN(err1.Error(), "\n", 2)[0]
+				}
+			}
+		}
 		for _, p := range paths {
 			old := want[key{repo, p}]
-			var now record.Hash
-			if err == nil {
-				now = got[p]
-			}
+			now := got[p]
 			if now != old {
-				drifted = append(drifted, driftedPath{Repo: repo, Path: p, Old: old, New: now})
+				drifted = append(drifted, driftedPath{Repo: repo, Path: p, Old: old, New: now, Err: perr[p]})
 			}
 		}
 	}
@@ -92,10 +111,13 @@ func promoteDriftError(drifted []driftedPath, captureCommit, cohortFP string) er
 	fmt.Fprintf(&b, "select --promote: the working tree is NOT the selected cohort's code (fingerprint %s) — the promoted run would ship code that never produced the honest estimate you selected on:\n", short(cohortFP))
 	for _, d := range drifted {
 		now := string(d.New)
-		if now == "" {
+		switch {
+		case now != "":
+			now = short(now)
+		case d.Err != "":
+			now = "<unhashable: " + d.Err + ">"
+		default:
 			now = "<missing>"
-		} else {
-			now = short(string(d.New))
 		}
 		fmt.Fprintf(&b, "  %s: %s (captured %s → working %s)\n", d.Repo, d.Path, short(string(d.Old)), now)
 	}
@@ -137,4 +159,10 @@ func cohortFingerprintOf(led ledger.Ledger) string {
 		}
 	}
 	return ""
+}
+
+// guardPromote adapts selectOpts to the guard — the ONE call both promote paths share.
+func guardPromote(o selectOpts, led ledger.Ledger) error {
+	return guardPromoteFingerprint(o.shapePath, led, cohortFingerprintOf(led), o.noFPCheck,
+		func(m string) { fmt.Fprintln(o.out, m) })
 }

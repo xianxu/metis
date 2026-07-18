@@ -346,7 +346,7 @@ func promoteSelected(o selectOpts, sh experiment.Shape, led ledger.Ledger, picks
 	}
 	// metis#53: refuse to execute the promoted run when the working tree is not the
 	// selected cohort's code (post-pin the ledger is single-cohort — any row's fingerprint).
-	if err := guardPromoteFingerprint(o.shapePath, led, cohortFingerprintOf(led), o.noFPCheck, func(m string) { fmt.Fprintln(o.out, m) }); err != nil {
+	if err := guardPromote(o, led); err != nil {
 		return err
 	}
 	now := o.now
@@ -531,7 +531,7 @@ func runPointSelect(o selectOpts, sh experiment.Shape, led ledger.Ledger, metric
 	}
 	// metis#53: same guard on the operator-chosen path — a --point promote still promises
 	// that the selected cohort's code ships.
-	if err := guardPromoteFingerprint(o.shapePath, led, cohortFingerprintOf(led), o.noFPCheck, func(m string) { fmt.Fprintln(o.out, m) }); err != nil {
+	if err := guardPromote(o, led); err != nil {
 		return err
 	}
 	exp, err := promotedExperiment(sh, config)
