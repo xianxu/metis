@@ -3,7 +3,9 @@ type: project
 name: arena2-playground-s6e7
 goal: "Second arena: run Kaggle Playground Series S6E7 (Predicting Student Health Risk) through the metis workbench end-to-end — prove the workbench GENERALIZES beyond titanic with zero new features until the competition demands them (the v1→v2 pattern's next turn)."
 done_when: "A live S6E7 submission produced entirely by the honest flow (metis run → select --best --promote → kaggle submit -C), on a content-pinned dataset, with the nested-CV honest estimate recorded — and a Log entry stating which workbench features the competition actually DEMANDED (possibly none). Leaderboard position is evidence, not the goal (the tight ~0.953 pack makes flips noise; the deliverable is the generalization proof + the demand list)."
-status: active
+status: executing
+deadline: 2026-07-31
+planned_finish: 2026-07-24
 operator: xianxu
 explicitly_out: [new workbench features built speculatively]
 created: 2026-07-18
