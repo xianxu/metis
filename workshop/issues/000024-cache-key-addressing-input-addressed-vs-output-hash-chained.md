@@ -1,11 +1,12 @@
 ---
 id: 000024
-status: open
+status: working
 deps: []
 github_issue:
 created: 2026-07-07
-updated: 2026-07-07
+updated: 2026-07-17
 estimate_hours:
+started: 2026-07-17T17:31:17-07:00
 ---
 
 # cache key addressing — input-addressed vs output-hash-chained (interior identity)
