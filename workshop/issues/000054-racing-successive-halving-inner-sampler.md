@@ -42,7 +42,8 @@ Demand-driven: pick up when the next competition's grid cost makes it worth buil
 
 ## Plan
 
-- [ ]
+- [ ] (at claim) Brainstorm the racing contract over the ask/tell edge (band rule, promotion
+  schedule, partial-config selection semantics incl. GuardComplexity); then spec + change-code.
 
 ## Log
 
