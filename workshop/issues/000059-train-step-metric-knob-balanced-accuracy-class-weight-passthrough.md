@@ -80,7 +80,7 @@ Durable plan: `workshop/plans/000059-metric-knob-plan.md` (fresh-eyes reviewed, 
 
 - [x] pure core: resolve_scorer + metric threading + class_weight (TDD)
 - [x] train step eager validation + step tests (in-test skewed dataset) + atlas both bullets
-- [ ] pr → merge → close
+- [x] pr → merge → close
 
 ## Log
 
