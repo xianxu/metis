@@ -224,7 +224,7 @@ func TestSweepProgressOccupancySamplesOnlyOnTick(t *testing.T) {
 	busy := 0
 	prog := newSweepProgress(&out, func() time.Time { return at(20000) }, "maximize",
 		progressTotals{nested: true, folds: 32, foldKind: sampler.SizeExact})
-	prog.bw = newBoardWriter(&out, func() time.Time { return at(20000) })
+	prog.bw = newBoardWriter(&out, func() time.Time { return at(20000) }, false)
 	prog.gauge = func() (int, int) { return busy, 12 }
 
 	for _, v := range []int{1, 2, 3, 4} {

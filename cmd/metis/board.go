@@ -140,6 +140,15 @@ func fmtETA(d time.Duration) string {
 // cursor-up at the screen top and desyncs the erase count — the board caps at ~15
 // lines; terminals that small are out of scope, same accepted trade as resize.)
 
+// SGR fragments for the metis#55 paint-side banding.
+const (
+	sgrReset  = "\x1b[0m"
+	sgrBold   = "\x1b[1m"
+	sgrDim    = "\x1b[2m"
+	sgrGreen  = "\x1b[32m"
+	sgrYellow = "\x1b[33m"
+)
+
 // clampLine truncates to width runes with a trailing … (a wrapped physical line
 // would desync the compositor's cursor-up erase count — width is load-bearing).
 func clampLine(s string, width int) string {
@@ -182,11 +191,15 @@ type boardWriter struct {
 	w         io.Writer
 	now       func() time.Time
 	frame     []string // the stored last frame (drawn on each flush)
+	width     int      // metis#55: last paint's terminal width (sizes the separator rule)
 	painted   int      // physical lines currently on screen (the erase count)
 	closed    bool
 	pending   []byte // coalesced passthrough awaiting the next flush
 	lastFlush time.Time
 	hidden    bool // cursor-hide emitted (once, at the first flush that paints)
+	color     bool   // metis#55: SGR banding on (board mode is TTY; NO_COLOR opts out)
+	epi       []byte // metis#55: the run RESULT (estimate + summary) — flushed AFTER the
+	//                  final frame at close, so the terminal ends on the result, not the board
 }
 
 // flushBudget bounds the erase/repaint rate: under a flood the terminal gets one
@@ -196,11 +209,31 @@ const flushBudget = 250 * time.Millisecond
 // pendingCap force-flushes a frozen-budget flood so pending can't grow unbounded.
 const pendingCap = 64 << 10
 
-func newBoardWriter(w io.Writer, now func() time.Time) *boardWriter {
+// color enables the metis#55 SGR banding — the PRODUCTION wiring passes
+// `os.Getenv("NO_COLOR") == ""` (https://no-color.org); tests inject explicitly so frame
+// bytes stay deterministic regardless of the harness env.
+func newBoardWriter(w io.Writer, now func() time.Time, color bool) *boardWriter {
 	if now == nil {
 		now = time.Now
 	}
-	return &boardWriter{w: w, now: now}
+	return &boardWriter{w: w, now: now, color: color}
+}
+
+// epilogueWriter is the run-RESULT channel (metis#55): bytes written here are held until
+// close() paints the final frame + restores the cursor, then flushed LAST — the summary and
+// its paste-ready commands end the terminal output instead of drowning above the board.
+func (b *boardWriter) epilogueWriter() io.Writer { return epilogueSink{b} }
+
+type epilogueSink struct{ b *boardWriter }
+
+func (e epilogueSink) Write(p []byte) (int, error) {
+	e.b.mu.Lock()
+	defer e.b.mu.Unlock()
+	if e.b.closed { // post-close writes go straight through (nothing left to order around)
+		return e.b.w.Write(p)
+	}
+	e.b.epi = append(e.b.epi, p...)
+	return len(p), nil
 }
 
 // Write is the passthrough seam: everything the sweep prints lands above the board.
@@ -218,13 +251,16 @@ func (b *boardWriter) Write(p []byte) (int, error) {
 }
 
 // paint stores a fresh frame (the sink's emit target) and flushes under the budget.
-func (b *boardWriter) paint(lines []string) {
+// width sizes the metis#55 separator rule (0 = no separator — width is load-bearing for
+// the cursor-up erase math, so an unknown width paints no extra line).
+func (b *boardWriter) paint(lines []string, width int) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.closed {
 		return
 	}
 	b.frame = lines
+	b.width = width
 	if now := b.now(); now.Sub(b.lastFlush) >= flushBudget {
 		b.flushLocked(now)
 	}
@@ -299,6 +335,10 @@ func (b *boardWriter) close() {
 	if b.hidden {
 		fmt.Fprint(b.w, "\x1b[?25h")
 	}
+	if len(b.epi) > 0 { // metis#55: the RESULT prints after the final frame — last wins the eye
+		b.w.Write(b.epi)
+		b.epi = nil
+	}
 	b.closed = true
 }
 
@@ -313,11 +353,37 @@ func (b *boardWriter) erase() {
 }
 
 // redraw paints the stored frame. Caller holds b.mu (and has erased).
+// metis#55: PAINT-side decoration only (the #38 paint/content split — renderBoard stays
+// plain): a dim separator rule bands the footer off the scrolling log, the aggregate line
+// is bold, ✓/▸ glyphs get state color, the status line is dim. SGR wraps AFTER clamping
+// (escape bytes occupy no cells — the width math is untouched).
 func (b *boardWriter) redraw() {
-	for _, l := range b.frame {
+	if len(b.frame) > 0 && b.width > 0 {
+		rule := strings.Repeat("─", b.width)
+		if b.color {
+			rule = sgrDim + rule + sgrReset
+		}
+		fmt.Fprintln(b.w, rule)
+	}
+	for i, l := range b.frame {
+		if b.color {
+			switch {
+			case i == 0:
+				l = sgrBold + l + sgrReset
+			case i == len(b.frame)-1:
+				l = sgrDim + l + sgrReset
+			case strings.Contains(l, "✓"):
+				l = strings.Replace(l, "✓", sgrGreen+"✓"+sgrReset, 1)
+			case strings.Contains(l, "▸"):
+				l = strings.Replace(l, "▸", sgrYellow+"▸"+sgrReset, 1)
+			}
+		}
 		fmt.Fprintln(b.w, l)
 	}
 	b.painted = len(b.frame)
+	if len(b.frame) > 0 && b.width > 0 {
+		b.painted++ // the separator rule is a painted physical line — the erase count sees it
+	}
 }
 
 func lastNewline(p []byte) int {

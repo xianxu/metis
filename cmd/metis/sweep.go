@@ -374,7 +374,7 @@ func runShapeSweep(o runOpts, sh experiment.Shape, now func() time.Time, out io.
 	}
 	ss.whileHealthy(func() {
 		ss.reportWinner(res)
-		printRunSummary(out, o.expPath, now().Sub(sweepStart), len(ss.man.Points), cohort)
+		printRunSummary(summaryWriter(out), o.expPath, now().Sub(sweepStart), len(ss.man.Points), cohort)
 	})
 	return ss.firstError()
 }
@@ -470,7 +470,7 @@ func (ss *shapeSweep) runNestedCV(ctx sampler.Ctx, configPts []shape.Point, k, i
 	}
 	ss.whileHealthy(func() {
 		ss.reportEstimate(est, runFolds)
-		printRunSummary(ss.out, ss.o.expPath, ss.now().Sub(ss.start), len(ss.man.Points), cohort)
+		printRunSummary(summaryWriter(ss.out), ss.o.expPath, ss.now().Sub(ss.start), len(ss.man.Points), cohort)
 	})
 	return ss.firstError()
 }
@@ -623,9 +623,20 @@ func sortedFamilies(perFamily map[string]sampler.Winner) []string {
 // reportEstimate prints the honest procedure estimate — mean±SE over the outer folds — and the
 // standing reminder that driver:cv produces NO shippable winner (estimation ≠ selection).
 func (ss *shapeSweep) reportEstimate(est sampler.MeanSE, outerK int) {
-	fmt.Fprintf(ss.out, "metis: nested-CV estimate — mean %.4f (SE %.4f) over %d outer fold(s) — the HONEST procedure estimate (argmax-mean family)\n",
+	out := summaryWriter(ss.out) // metis#55: the RESULT lands after the footer in board mode
+	fmt.Fprintf(out, "metis: nested-CV estimate — mean %.4f (SE %.4f) over %d outer fold(s) — the HONEST procedure estimate (argmax-mean family)\n",
 		est.Mean, est.SE, outerK)
-	fmt.Fprintf(ss.out, "  (per-family honest estimates recorded to the ledger; choose + ship via `metis select --best --promote`)\n")
+	fmt.Fprintf(out, "  (per-family honest estimates recorded to the ledger; choose + ship via `metis select --best --promote`)\n")
+}
+
+// summaryWriter routes run-RESULT prints (metis#55): in board mode they land in the
+// epilogue (flushed after the final frame at close — the terminal ends on the result);
+// plain/redirected mode already prints last, so the writer passes through unchanged.
+func summaryWriter(out io.Writer) io.Writer {
+	if bw, ok := out.(*boardWriter); ok {
+		return bw.epilogueWriter()
+	}
+	return out
 }
 
 // runPipelineFold runs ONE (config, fold) point: build its per-fold experiment (data +
@@ -829,11 +840,13 @@ func pointAddressOf(exp experiment.Experiment, shapeBlobHash string) (string, er
 // by the objective), the per-family robust winners (metis#19), and the cross-family ship
 // pick. Ship (refit + submission) is metis#18 M1a-5; here we report the selection.
 func (ss *shapeSweep) reportWinner(res sampler.SweepResult) {
-	fmt.Fprintf(ss.out, "metis: sweep %s done — %d configs scored (manifest %s)\n", ss.sh.ID, len(ss.configs), ss.man.ShapeRunID[:12])
+	out := summaryWriter(ss.out) // metis#55: the flat run's RESULT is the winner board — lands after the footer
+
+	fmt.Fprintf(out, "metis: sweep %s done — %d configs scored (manifest %s)\n", ss.sh.ID, len(ss.configs), ss.man.ShapeRunID[:12])
 	best := betterFirst(ss.configs, ss.sh.Sweeper.Objective.Direction)
-	fmt.Fprintln(ss.out, "  config                          mean      SE       cx")
+	fmt.Fprintln(out, "  config                          mean      SE       cx")
 	for _, cs := range best {
-		fmt.Fprintf(ss.out, "  %-30s  %.4f  %.4f  %6.1f\n", freeParamStr(cs.point), cs.meanSE.Mean, cs.meanSE.SE, cs.meanSE.MeanComplexity)
+		fmt.Fprintf(out, "  %-30s  %.4f  %.4f  %6.1f\n", freeParamStr(cs.point), cs.meanSE.Mean, cs.meanSE.SE, cs.meanSE.MeanComplexity)
 	}
 	if len(res.PerFamily) > 1 {
 		fams := make([]string, 0, len(res.PerFamily))
@@ -841,14 +854,14 @@ func (ss *shapeSweep) reportWinner(res sampler.SweepResult) {
 			fams = append(fams, fam)
 		}
 		sort.Strings(fams)
-		fmt.Fprintln(ss.out, "  per-family winners (metis#19):")
+		fmt.Fprintln(out, "  per-family winners (metis#19):")
 		for _, fam := range fams {
 			w := res.PerFamily[fam]
-			fmt.Fprintf(ss.out, "    %-22s %-24s  mean %.4f  cx %.1f\n", fam, freeParamStrFromParams(w.Point.FreeParams), w.Score.Mean, w.Score.MeanComplexity)
+			fmt.Fprintf(out, "    %-22s %-24s  mean %.4f  cx %.1f\n", fam, freeParamStrFromParams(w.Point.FreeParams), w.Score.Mean, w.Score.MeanComplexity)
 		}
 	}
 	w := res.Ship
-	fmt.Fprintf(ss.out, "metis: winner %s — mean %.4f (SE %.4f, cx %.1f) over %d folds\n",
+	fmt.Fprintf(out, "metis: winner %s — mean %.4f (SE %.4f, cx %.1f) over %d folds\n",
 		freeParamStrFromParams(w.Point.FreeParams), w.Score.Mean, w.Score.SE, w.Score.MeanComplexity, len(w.FoldKeys))
 }
 

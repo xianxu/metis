@@ -223,3 +223,8 @@ the thrash: starts ≫ completions with the process alive (throughput ≈ 0) —
 - **A drift guard is only as strong as its fixture.** An optional-field schema addition is
   unexercised by a fixture that omits the field — pair every optional-key CUE change with a
   fixture carrying the key.
+
+## Close-review lesson (metis#55)
+- **Cite only tests that exist in the tree.** A diagnosis-time tool (pyte terminal replay,
+  used interactively in #46) is not a checked-in harness — referencing it in Done-when/Log
+  asserts coverage the suite doesn't have. Before writing "X test stays green," grep for X.

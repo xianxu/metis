@@ -464,7 +464,7 @@ func (sp *sweepProgress) emit() {
 	if sp.bw != nil {
 		busy, capacity, _ := sp.occupancy.mean()
 		sp.bw.paint(renderBoard(sp.snapshotLocked(),
-			boardEnv{width: sp.width, now: sp.now(), busy: busy, capacity: capacity}))
+			boardEnv{width: sp.width, now: sp.now(), busy: busy, capacity: capacity}), sp.width)
 		return
 	}
 	fmt.Fprintln(sp.out, progressLine(sp.st))
