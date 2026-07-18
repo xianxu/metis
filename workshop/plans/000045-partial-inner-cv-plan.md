@@ -63,3 +63,29 @@
 - [ ] Issue Log evidence; close (single boundary).
 
 **Verification gate:** full `-race` suite; the new e2e red-proofed (revert the splitK threading → (ii) fails); RUNBOOK cost numbers arithmetic-checked.
+
+## Revisions
+
+### 2026-07-17 — plan review folded (3 Important, 3 Minor)
+
+- **IDENTITY COMPAT (Important 1):** `InnerK` gets `yaml:"inner_k,omitempty" json:"inner_k,omitempty"` —
+  without the json tag, `record.CanonicalHash(Sweeper)` (shapeRunIdentity, sweep.go:863-874)
+  would inject `"InnerK":0` and churn EVERY existing shape's run identity/manifest dir. A
+  regression test pins that an inner_k-absent Sweeper marshals byte-identically to today.
+- **partitionRef IS INNER (Important 2):** sweep.go:797-800 mints `cv-k%d-strat%t-seed%d` from
+  `cv.K` — the partition identity flowing into every inner `_fold.partition` (point addresses,
+  Kpre) and told-set key. Derives from `InnerFolds()` (backward-safe: absent inner_k → same
+  string). Completeness net rekeyed: **grep the FIELD (`Resample.CV`) + whole-struct marshals**,
+  not the local `splitK` — full reader set: sweep.go:216-217, :798, shape.go:151, the
+  shapeRunIdentity marshal.
+- **FLAT PATH DECISION (Important 3): flat stays at `k` — `inner_k` is a NESTED-ONLY knob.**
+  Rationale: on a 1-config flat run the sweeper CV IS the reported estimate, so inner_k there
+  would silently change the estimand's train fraction — contradicting the architecture line
+  (outer k = estimand, #42's principle). The flat path ignores inner_k with ONE loud note
+  ("inner_k ignored — a flat run has no inner level; k is the estimand"); pinned by a flat×
+  inner_k test; documented in RUNBOOK/atlas + a code comment at sweep.go:324.
+- Minor 4: dry-run banners (sweep.go:241-246) print the inner count → innerK on the nested
+  dry-run line (flat dry-run stays k, per the decision).
+- Minor 5: the CUE drift guard's fixture omits inner_k — add an inner_k-bearing cue-vet case
+  so a typo'd schema key can't pass green.
+- Minor 6: assertion (iii) compares `with.k` as float64 (JSON round-trip).

@@ -212,6 +212,14 @@ wrapped by **thin step-executables** honoring the contract above. Hermetic via *
   `sweepPass` mutex guards the shared `configs`/`points`/`err` bookkeeping (the honest reduce stays pure
   in the sampler). Caveats (flag help): a COLD cache thundering-herds the shared upstream; clean
   per-`k/n` progress is deferred to metis#30.
+- **inner_k — the partial-inner-CV cost knob (metis#45):** `sweeper.resample.cv.k` is the
+  ESTIMAND knob (outer fold count + inner default — the #42 principle); optional `inner_k`
+  (>=2) overrides the INNER per-config CV only (selection precision/cost — `10×72×inner_k:5`
+  halves the decision grid vs k:10 inner). One accessor (`CVResample.InnerFolds()`) feeds the
+  nested inner passes, the partition ref, totals, and banners; the OUTER level (split dirs,
+  driver, held-out scoring partition — the #23 determinism invariant) never reads it. FLAT
+  runs ignore it loudly (their CV IS the reported estimate). `--sample m`/`--fast` stay
+  outer-only. The adaptive racing sampler over the same budget is the filed follow-up.
 - **Path is location, never identity (metis#34):** run ids, point-addresses, and the sweep
   identity are content-addressed (`shapeBlobHash`/`PointAddress`/`shapeRunIdentity` — no
   path-string term); output anchors are `Abs(Dir(expPath))`-derived and the ledger sidecar sits
