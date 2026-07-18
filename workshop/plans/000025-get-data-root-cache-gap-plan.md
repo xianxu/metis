@@ -41,28 +41,28 @@
 
 **Files:** Create `cmd/kaggle-download/pins.go`, `cmd/kaggle-download/pins_test.go`
 
-- [ ] Failing tests: (a) computed map matches known sha256 of fixture files; (b) matching pins → nil error; (c) one mismatched + one missing pinned file → error naming BOTH; (d) empty pins → nil error, computed still returned; (e) `pinBlock` renders sorted, paste-ready YAML.
-- [ ] Run red → implement → green.
-- [ ] Commit: `#25(metis): pins.go — content verify + paste-ready block` *(kaggle repo; reference metis#25 in body)*
+- [x] Failing tests: (a) computed map matches known sha256 of fixture files; (b) matching pins → nil error; (c) one mismatched + one missing pinned file → error naming BOTH; (d) empty pins → nil error, computed still returned; (e) `pinBlock` renders sorted, paste-ready YAML.
+- [x] Run red → implement → green.
+- [x] Commit: `#25(metis): pins.go — content verify + paste-ready block` *(kaggle repo; reference metis#25 in body)*
 
 ### Task 2: `run()` wiring (kaggle repo)
 
 **Files:** Modify `cmd/kaggle-download/main.go` (`downloadWith` gains `Sha256 map[string]string \`json:"sha256"\``; wire after the unzip loop). Test via the existing fake-CLI test harness in `main_test.go`.
 
-- [ ] Failing tests: (a) fake CLI serves fixture zip, pinned correctly → step succeeds; (b) same pin, MUTATED fake payload → step exits non-zero, stderr names the file; (c) no pins → success + stderr contains `UNPINNED ingest` + the block.
-- [ ] Run red → implement → green. Full kaggle suite.
-- [ ] Commit: `#25(metis): download verifies declared content pins`
+- [x] Failing tests: (a) fake CLI serves fixture zip, pinned correctly → step succeeds; (b) same pin, MUTATED fake payload → step exits non-zero, stderr names the file; (c) no pins → success + stderr contains `UNPINNED ingest` + the block.
+- [x] Run red → implement → green. Full kaggle suite.
+- [x] Commit: `#25(metis): download verifies declared content pins`
 
 ### Task 3: kbench pins + metis Kpre citation
 
-- [ ] Compute real hashes: `shasum -a 256 competition/titanic/data/titanic/*` (kbench) — pin into every shape whose get-data uses `kaggle/download` (grep them). Note: the DOWNLOADED files are what get hashed by the step — confirm the local data dir mirrors what the CLI serves (it was produced by it); if uncertain, run the real download once in a temp workspace to compute pins from the step's own print.
-- [ ] metis: locate the with-change→MISS coverage; add one table case if absent.
-- [ ] Commit kbench: `titanic: pin get-data content (metis#25)`; metis commit only if a test case was added.
+- [x] Compute real hashes: `shasum -a 256 competition/titanic/data/titanic/*` (kbench) — pin into every shape whose get-data uses `kaggle/download` (grep them). Note: the DOWNLOADED files are what get hashed by the step — confirm the local data dir mirrors what the CLI serves (it was produced by it); if uncertain, run the real download once in a temp workspace to compute pins from the step's own print.
+- [x] metis: locate the with-change→MISS coverage; add one table case if absent.
+- [x] Commit kbench: `titanic: pin get-data content (metis#25)`; metis commit only if a test case was added.
 
 ### Task 4: atlas + close
 
-- [ ] metis atlas (experiment.md cache section): the ingest-identity rule — external ingest declares content pins in `with` (fixed-output derivation); interior already input-addressed; unpinned ingest is loud.
-- [ ] Issue Log: evidence (test output, the mutated-payload failure line, kbench pin commit sha). Close with cross-repo commit pinned in the Log (the #48 close-review lesson).
+- [x] metis atlas (experiment.md cache section): the ingest-identity rule — external ingest declares content pins in `with` (fixed-output derivation); interior already input-addressed; unpinned ingest is loud.
+- [x] Issue Log: evidence (test output, the mutated-payload failure line, kbench pin commit sha). Close with cross-repo commit pinned in the Log (the #48 close-review lesson).
 
 **Verification gate:** kaggle suite green; the mutated-payload test red-proofed (revert the verify call, watch (b) fail); kbench dry-run parses the pinned shapes.
 

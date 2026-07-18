@@ -1,12 +1,13 @@
 ---
 id: 000025
-status: working
+status: codecomplete
 deps: []
 github_issue:
 created: 2026-07-07
 updated: 2026-07-17
 estimate_hours: 0.47
 started: 2026-07-17T16:50:53-07:00
+actual_hours: 0.9
 ---
 
 # get-data root cache gap — dataset keyed on path string, not content
@@ -98,6 +99,7 @@ citation/table-case + atlas rule.
 - Side-find of the metis-v2 caching prior-art survey (pensive). Not part of the algebra; a soundness fix.
 
 ### 2026-07-17 (claim + reframe)
+- 2026-07-17: closed — kaggle suite+e2e green, 8 new tests, mutation red-proofed (neutered verify fails the test); kbench e2e 3 passed with the new stderr note; pinned titanic-sweep.md parses via -dry-run (10x72x10); cross-repo commits pinned in Log (kaggle 0960f34+a9aadcf, kbench 742238c); re-key cited to existing with->Kpre tests. actual 0.9h = LABELED JUDGMENT (transcripts under brain project dir - engine cannot attribute; not a measured value); review verdict: SHIP
 - Claimed into the platform tranche (operator lane split; #24/#34 queued behind). Recon: the
   issue's local-path premise predates M1a — the live gap is remote ingest identity. Design =
   config-declared content pins (fixed-output derivation); rationale above. ARCH-DRY: no new
