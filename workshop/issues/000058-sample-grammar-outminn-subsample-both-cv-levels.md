@@ -1,11 +1,12 @@
 ---
 id: 000058
-status: open
+status: working
 deps: []
 github_issue:
 created: 2026-07-18
 updated: 2026-07-18
 estimate_hours:
+started: 2026-07-18T12:06:53-07:00
 ---
 
 # sample grammar outMinN: subsample both CV levels
