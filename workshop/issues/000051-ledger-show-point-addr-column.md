@@ -71,3 +71,12 @@ this issue closes the remaining `ledger show` gap only.
   prefix path — discovery: the resolver expands to the matched CONFIG (all its rows), so the
   fixture needs distinct free-params per row. Full suite green. Docs untouched by design:
   --no-atlas (one column on an existing documented surface; ledger-cmd help self-describes).
+
+### 2026-07-17 (REWORK folded — the aggregation seam)
+- Close review (REWORK, correctly): `--sort` aggregates via AggregateView which stamped the
+  synthetic group key into PointAddr — the new column rendered garbage exactly on the sorted
+  leaderboard (the operator's discovery flow), and the first round-trip test bypassed
+  aggregation (Fold:nil rows straight into renderLedger). Both Criticals fixed at the source:
+  aggregate rows now carry their first member's REAL addr (resolvePointRows expands to the
+  config, so any member addr is a valid handle); end-to-end test drives showLedger --sort on a
+  per-fold ledger and resolves every rendered cell against the raw ledger. Suite + -race green.
