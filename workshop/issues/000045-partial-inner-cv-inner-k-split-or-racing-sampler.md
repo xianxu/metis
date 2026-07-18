@@ -1,11 +1,12 @@
 ---
 id: 000045
-status: open
+status: working
 deps: []
 github_issue:
 created: 2026-07-15
-updated: 2026-07-15
+updated: 2026-07-17
 estimate_hours:
+started: 2026-07-17T23:24:31-07:00
 ---
 
 # partial inner CV — split inner_k from outer k, and/or an adaptive racing sampler
