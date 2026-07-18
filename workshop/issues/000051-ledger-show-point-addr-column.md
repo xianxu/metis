@@ -55,9 +55,9 @@ this issue closes the remaining `ledger show` gap only.
 
 ## Plan
 
-- [ ] `renderLedger`: `point` column (short 8-char) after `code`; header updated
-- [ ] round-trip test: rendered short handle resolves via the --point prefix path to the same row
-- [ ] Log evidence; atlas untouched (`--no-atlas` justified: one column on an existing documented surface)
+- [x] `renderLedger`: `point` column (short 8-char) after `code`; header updated
+- [x] round-trip test: rendered short handle resolves via the --point prefix path to the same row
+- [x] Log evidence; atlas untouched (`--no-atlas` justified: one column on an existing documented surface)
 
 ## Log
 
@@ -65,3 +65,9 @@ this issue closes the remaining `ledger show` gap only.
 - Filed from the operator's promotion attempt: the --point flow exists (#41) and resolves
   prefixes (#39) but has no discovery surface. Related: metis#40 (select-as-conversation)
   would supersede parts of this; the column is the cheap immediate fix.
+
+### 2026-07-17 (built)
+- point column after code (short 8-char); round-trip test drives the REAL resolvePointRows
+  prefix path — discovery: the resolver expands to the matched CONFIG (all its rows), so the
+  fixture needs distinct free-params per row. Full suite green. Docs untouched by design:
+  --no-atlas (one column on an existing documented surface; ledger-cmd help self-describes).
