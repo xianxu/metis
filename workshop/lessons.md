@@ -381,3 +381,11 @@ the thrash: starts ≫ completions with the process alive (throughput ≈ 0) —
 - The fresh-eyes boundary review still caught the one real bug (I1: `readIncumbent` used
   `AggregateView` — a per-config MAX — instead of the canonical per-family `FamilyEstimate`,
   biasing the incumbent optimistic → over-stop). The review discipline held through the mess.
+- **A byte-identical / unobservable decision must be extracted to a PURE function to be testable
+  (metis#67).** The default scheduler choice (`prioritySem` vs `chanSem`) produces byte-identical
+  run artifacts by design, so it can't be asserted from any output — and it was buried in
+  `runExperiment`'s IO glue operating on a local `o`. The change-code plan judge (correctly) failed
+  the plan: the promised "default-uses-prioritySem" test was unwriteable. Fix: extract
+  `selectLeafBudget(maxParallel, globalFanout) leafBudget` — a pure function unit-tested by
+  concrete return TYPE. ARCH-PURE isn't just cleanliness; here it was the ONLY way to make the
+  guarantee testable. When a decision has no observable output, the pure function IS the seam.
