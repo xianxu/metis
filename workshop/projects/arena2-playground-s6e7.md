@@ -91,3 +91,11 @@ friction (kbench layering). Everything else is out unless the competition says o
   v0 (`--run <id> -n 10`; rf MDI / hist_gbm permutation-under-declared-metric). Motivated
   by M3's interaction-ladder protocol (extend the strongest combos, guided by what the
   winner actually used). Future members: `debug reliability`, `debug describe` (metis#5).
+- kbench#13 M1 CLOSED (FIX-THEN-SHIP; fixes bundled): adapt NaN-preserving; `s6e7/features`
+  step live (impute knob fit per-fold on analysis rows; cross-fit K-1 interaction encodings
+  incl. missingness cells); M3 grid = 24 configs (`impute(2) × encodings(3) × 4-model
+  cw=balanced foil`) on balanced accuracy. Suites: s6e7 18/18 + e2e first-run green, titanic
+  54/54 no regression, independent re-verification 4/4. **Ready for the operator decision
+  run** (`--sample out3`; fresh cohort by construction — adapt/features re-key). Queued
+  after the run: results + honesty protocol → M2 close; kbench guard issue (session-scoped
+  fingerprint; measured 24s/test tax); metis#60/#61 as the next demanded builds.
