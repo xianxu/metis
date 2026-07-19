@@ -5,7 +5,7 @@ deps: []
 github_issue:
 created: 2026-07-19
 updated: 2026-07-19
-estimate_hours: 1.7
+estimate_hours: 1.36
 started: 2026-07-19T01:03:44-07:00
 ---
 
@@ -96,7 +96,7 @@ item: real-api-discovery    design=0.05 impl=0.15
 item: milestone-review      design=0.0 impl=0.2
 item: milestone-review      design=0.0 impl=0.2
 design-buffer: 0.2
-total: 1.7
+total: 1.36
 ```
 
 (Item legend: M1 ensemble kind · M2 catboost kind · catboost dep/API + seed passthrough ·
