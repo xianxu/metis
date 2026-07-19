@@ -80,3 +80,10 @@ friction (kbench layering). Everything else is out unless the competition says o
   ~0.4% gap; candidates are per-class threshold tuning on OOF probabilities and
   missing-indicator features. Project status left `executing` for the operator to decide
   done vs iterate.
+- M3 threads opened (operator direction, 2026-07-18 discussion): **metis#60**
+  (predict-proba + decision step — demand #3: threshold tuning inside the seal + family
+  blending) and **kbench#13** (missingness-native adapt knob + cross-fit interaction-encoding
+  rungs — the features half; NaN-native verified on sklearn 1.9.0 for both families).
+  Sequencing: kbench#13 is independent; #60 composes after. The arena M0–M3 structure is
+  distilled as a reusable template: brain/workshop/pensive/2026-07-18-01-pensive-competition-arena-template.md
+  (this project file is its worked example).
