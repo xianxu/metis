@@ -13,6 +13,8 @@ from sklearn.ensemble import HistGradientBoostingClassifier, RandomForestClassif
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, balanced_accuracy_score
 
+from metis.split import cv_folds
+
 MODELS = frozenset({"logreg", "rf", "hist_gbm"})
 
 # The closed scorer set (metis#59). The ONE place a metric name resolves to a scorer —
@@ -27,6 +29,103 @@ def resolve_scorer(metric: str):
     if scorer is None:
         raise ValueError(f"unknown metric {metric!r}; want one of {sorted(_SCORERS)}")
     return scorer
+
+
+# ── the decision layer (metis#60): cost-sensitive plug-in rule, leaf-local ──────
+# INFERENCE (estimate p(y|x); metric-independent) vs DECISION (choose labels to
+# maximize the declared objective). Offsets are additive in log-probability space
+# = multiplicative prior reweighting — the Bayes-correct family for a prior-shifted
+# metric (balanced accuracy = accuracy under a uniform prior = the diagonal cost
+# matrix 1/π_k). A future full cost-matrix rule generalizes without touching the
+# sweeper: it only ever sees a scalar per-fold score of the declared procedure.
+
+# ±4 covers −log-prior optima down to ~1.8% class priors (metis#60 review issue 2).
+_OFFSET_GRID = np.linspace(-4.0, 4.0, 41)
+
+
+def parse_decide(raw):
+    """Normalize a `with["decide"]` value to `(rule, params)` — loud misuse pattern.
+
+    Accepts "argmax"/None (default: plain argmax, today's behavior) or the single-key
+    bundle {"offsets": {"holdout": 0.2}} (holdout ∈ (0, 0.5]; round(1/holdout) quantizes
+    the effective internal split, e.g. 0.3 → k=3 → 1/3)."""
+    if raw is None or raw == "argmax":
+        return "argmax", {}
+    if isinstance(raw, dict) and len(raw) == 1 and "offsets" in raw:
+        p = dict(raw["offsets"] or {})
+        holdout = p.get("holdout", 0.2)
+        if not (isinstance(holdout, (int, float)) and not isinstance(holdout, bool)
+                and 0 < holdout <= 0.5):
+            raise ValueError(f"decide offsets.holdout must be in (0, 0.5], got {holdout!r}")
+        p["holdout"] = float(holdout)
+        return "offsets", p
+    raise ValueError(
+        f'malformed decide config {raw!r}; want "argmax" or a single-key bundle '
+        f'{{"offsets": {{"holdout": 0.2}}}}')
+
+
+def predict_proba(estimator, X):
+    """Class probabilities for X, columns in `estimator.classes_` order."""
+    return estimator.predict_proba(X)
+
+
+def apply_offsets(proba, offsets):
+    """Decide class-column INDICES: argmax(log(clip(proba)) + offsets). Zero offsets ≡
+    plain argmax (log is monotone; clip guards log(0)). Callers map indices → labels via
+    the estimator's classes_."""
+    logp = np.log(np.clip(np.asarray(proba, dtype=float), 1e-12, None))
+    return (logp + np.asarray(offsets, dtype=float)).argmax(axis=1)
+
+
+def tune_class_offsets(proba, y, metric: str = "balanced_accuracy", classes=None):
+    """Grid-tune per-class log-offsets maximizing `metric` on (proba, y) — pure, no RNG.
+
+    Class 0 is pinned to 0 (only relative tilts matter → K-1 free params); each free class
+    sweeps _OFFSET_GRID. Best-so-far initializes at the NO-OP (zeros), and only a STRICT
+    improvement replaces it — so an uninformative proba matrix returns zeros, never an
+    arbitrary grid corner. Cost: O(grid^(K-1) × n) — priced by the caller (2-fits-per-leaf
+    note in the train docstring)."""
+    from itertools import product
+
+    proba = np.asarray(proba, dtype=float)
+    y = np.asarray(y)
+    k = proba.shape[1]
+    classes = np.arange(k) if classes is None else np.asarray(classes)
+    scorer = resolve_scorer(metric)
+    logp = np.log(np.clip(proba, 1e-12, None))
+
+    best = np.zeros(k)
+    best_score = scorer(y, classes[(logp + best).argmax(axis=1)])
+    for combo in product(_OFFSET_GRID, repeat=k - 1):
+        offs = np.concatenate([[0.0], combo])
+        score = scorer(y, classes[(logp + offs).argmax(axis=1)])
+        if score > best_score:
+            best, best_score = offs, score
+    return best
+
+
+def tune_offsets_on_holdout(X, y, kind: str, seed: int, params: dict | None, metric: str,
+                            holdout: float):
+    """Learn decision offsets from TRAINING rows only (metis#60, leaf-local): an internal
+    seeded stratified split (k=round(1/holdout), fold 0 = the tuning slice), an auxiliary
+    fit on the rest, offsets tuned on the held-out slice's probabilities. The aux model's
+    training-row probabilities are NOT used — an overfit model's in-sample probabilities
+    are overconfident and offsets tuned on them are garbage."""
+    import pandas as pd
+
+    Xa, ya = np.asarray(X), np.asarray(y)
+    k = int(round(1.0 / holdout))
+    uniq, counts = np.unique(ya, return_counts=True)
+    if counts.min() < k:
+        raise ValueError(
+            f"decide=offsets needs >= {k} rows of every class among the fold's training rows "
+            f"(internal stratified holdout k={k} = round(1/holdout={holdout})); got class "
+            f"counts {dict(zip(uniq.tolist(), counts.tolist()))}")
+    inner = np.asarray(cv_folds(pd.DataFrame({"_y": ya}), k, seed, stratify_col="_y"))
+    tune = inner == 0
+    aux = train(Xa[~tune], ya[~tune], kind, seed, params)
+    return tune_class_offsets(predict_proba(aux, Xa[tune]), ya[tune], metric=metric,
+                              classes=aux.classes_)
 
 
 def parse_model_config(raw) -> tuple[str, dict]:
@@ -118,26 +217,37 @@ def complexity(fitted, kind: str) -> float:
 
 
 def fold_fit(X, y, folds, fold_idx: int, kind: str, seed: int, params: dict | None = None,
-             metric: str = "accuracy"):
-    """Fit ONE fold and return `(score, fitted_model)` — pure, deterministic (metis#18 M1a).
+             metric: str = "accuracy", decide="argmax"):
+    """Fit ONE fold and return `(score, fitted_model, offsets)` — pure, deterministic.
 
     Train on the analysis rows (fold != fold_idx), score on the assessment rows
-    (fold == fold_idx). The fitted model is returned so a caller can *also* read its
-    realized complexity (metis#19) WITHOUT a second fit — one fit feeds both score and
-    complexity. Uses numpy so per-fold models are name-free and reproducible.
+    (fold == fold_idx). Under `decide={"offsets": ...}` (metis#60) the decision offsets are
+    a FITTED PARAMETER learned inside the fold's training rows (tune_offsets_on_holdout);
+    the MAIN model is still fitted on ALL training rows (unchanged from argmax), and the
+    assessment fold is scored through the tuned decision — the assessment never enters
+    tuning, so the sealed sweep measures fit+tune as ONE procedure. `offsets` is None under
+    argmax. The fitted model is returned so a caller can *also* read its realized
+    complexity (metis#19) WITHOUT a second fit.
     """
+    rule, dparams = parse_decide(decide)
     Xa = np.asarray(X)
     ya = np.asarray(y)
     fa = np.asarray(folds)
     val = fa == fold_idx
     trn = ~val
     model = train(Xa[trn], ya[trn], kind, seed, params)
+    if rule == "offsets":
+        offsets = tune_offsets_on_holdout(Xa[trn], ya[trn], kind, seed, params, metric,
+                                          dparams["holdout"])
+        labels = model.classes_[apply_offsets(predict_proba(model, Xa[val]), offsets)]
+        score = float(resolve_scorer(metric)(ya[val], labels))
+        return score, model, offsets
     score = float(resolve_scorer(metric)(ya[val], predict(model, Xa[val])))
-    return score, model
+    return score, model, None
 
 
 def fold_score(X, y, folds, fold_idx: int, kind: str, seed: int, params: dict | None = None,
-               metric: str = "accuracy") -> float:
+               metric: str = "accuracy", decide="argmax") -> float:
     """Validation accuracy for ONE fold (pure, deterministic) — metis#18 M1a.
 
     The single-fold body cv_score loops over, LIFTED OUT so the engine drives the fold
@@ -145,12 +255,13 @@ def fold_score(X, y, folds, fold_idx: int, kind: str, seed: int, params: dict | 
     Sampler's Done reduces the k fold-scores → (mean, SE) (the ledger keeps the raw fold
     rows, so metis#19's select is a free re-reduction). Delegates to fold_fit (DRY).
     """
-    score, _ = fold_fit(X, y, folds, fold_idx, kind, seed, params, metric=metric)
+    score, _, _ = fold_fit(X, y, folds, fold_idx, kind, seed, params, metric=metric,
+                           decide=decide)
     return score
 
 
 def cv_score(X, y, folds, kind: str, seed: int, params: dict | None = None,
-             metric: str = "accuracy") -> float:
+             metric: str = "accuracy", decide="argmax") -> float:
     """Mean validation accuracy over the fold assignment (pure, deterministic).
 
     The v1 whole-CV reducer, now expressed over fold_score (ARCH-DRY) — retained for
@@ -158,5 +269,6 @@ def cv_score(X, y, folds, kind: str, seed: int, params: dict | None = None,
     per (config, fold) and reduces in the resample Sampler's Done.
     """
     fa = np.asarray(folds)
-    scores = [fold_score(X, y, folds, f, kind, seed, params, metric=metric) for f in sorted(set(fa.tolist()))]
+    scores = [fold_score(X, y, folds, f, kind, seed, params, metric=metric, decide=decide)
+              for f in sorted(set(fa.tolist()))]
     return float(np.mean(scores))

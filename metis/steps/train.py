@@ -66,8 +66,8 @@ def main() -> None:
         # Fit ONCE (fold_fit) and read both the score AND the fitted model's realized
         # complexity (metis#19) — the parsimony axis the select rule consumes. Bare metric
         # names; the ledger namespaces them to train.fold_score / train.complexity.
-        score, model = fold_fit(X, y, _load_folds(ctx, w), int(fold["idx"]), kind, ctx.seed, params,
-                                 metric=metric)
+        score, model, _ = fold_fit(X, y, _load_folds(ctx, w), int(fold["idx"]), kind, ctx.seed,
+                                   params, metric=metric)
         io.write_metrics(ctx, {"fold_score": score, "complexity": complexity(model, kind)})
         return
 
