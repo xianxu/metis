@@ -30,13 +30,13 @@ friction (kbench layering). Everything else is out unless the competition says o
 
 ## Milestones
 
-- [ ] **M0 — access (operator):** accept S6E7 rules on kaggle.com (the download 403s until
+- [x] **M0 — access (operator):** accept S6E7 rules on kaggle.com (the download 403s until
   then). One click; unblocks everything.
-- [ ] **M1 — bring-up (kbench#12):** `competition/playground-s6e7/` workspace mirroring
+- [x] **M1 — bring-up (kbench#12):** `competition/playground-s6e7/` workspace mirroring
   titanic's layout: get-data (kaggle/download + `with.sha256` pins from the first download's
   paste-ready block — the #25 flow), an `adapt` step for the S6E7 schema, a starter shape
   (small grid, `inner_k` from day one), smoke on `--fast`.
-- [ ] **M2 — first honest submission:** full grid → `select --best --promote` → `kaggle
+- [x] **M2 — first honest submission:** full grid → `select --best --promote` → `kaggle
   submit -C` → record public score vs honest estimate in the Log (the tracking datum).
 - [ ] **M3 — iterate:** feature blocks + families as the leaderboard/estimate gap directs;
   file demanded workbench features as they surface (the demand list IS a deliverable).
@@ -59,3 +59,24 @@ friction (kbench layering). Everything else is out unless the competition says o
   passthrough. (The project header's "likely AUC" guess was corrected at kbench#12 recon:
   the S6E7 metric is balanced accuracy over an 85.9/8.4/5.8 3-class skew.) Gates kbench#12
   M2; kbench#12 M1 (workspace bring-up) is in flight on its branch.
+
+### 2026-07-18 (M0–M2 complete — done_when MET)
+
+- M0: operator accepted rules. M1: kbench#12 bring-up (SHIP verdict). M2: decision run
+  `--sample out3` (14-config balanced-accuracy grid, cohort 79a8dea4) → honest OUTER
+  **hist_gbm 0.9504 ± 0.0010** (rf 0.9437 ± 0.0008) → promoted
+  `hist_gbm{cw=balanced, iter 400, leaves 31}` → live **public_score 0.94903**.
+- **Honesty test: PASSED** — 0.14% gap (~1.4 SE), within the documented family-max
+  optimism. The done_when is met: a live submission produced entirely by the honest flow
+  on a content-pinned dataset, honest estimate recorded.
+- **The demand list (the deliverable):** the competition demanded exactly TWO workbench
+  features — metis#59 (balanced-accuracy metric knob + class_weight passthrough; shipped,
+  0.30h) and metis#58 (`--sample outMinN` iteration dial; shipped, 0.49h). NOT demanded:
+  metis#33 (GBM regularization), metis#54 (racing — the manual dial sufficed at 19m16s
+  decision-run cost), per-competition step-reuse friction (the kbench layering absorbed a
+  second competition with zero new abstractions; the only base-layer touch was the shared
+  e2e `make_ws` extraction). The generalization thesis held.
+- M3 (iterate) remains open at operator discretion: public 0.94903 vs the ~0.953 pack is a
+  ~0.4% gap; candidates are per-class threshold tuning on OOF probabilities and
+  missing-indicator features. Project status left `executing` for the operator to decide
+  done vs iterate.
