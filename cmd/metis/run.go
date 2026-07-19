@@ -84,8 +84,13 @@ type runOpts struct {
 	activity    activityEmitter // successful step/run facts; nil is a no-op
 	runRole     runRole         // role for successful concrete-run activity; zero = ineligible/non-sweep
 	readRoot    string          // metis#23: when set, the production execStep confines base-dataset reads to this root
-	maxParallel int             // metis#31: >1 ⇒ ParExec batches + a leaf semaphore; sizes leafSem
-	leafSem     chan struct{}   // metis#31: the shared global subprocess budget (nil = serial/cache-only)
+	maxParallel int             // metis#31: >1 ⇒ ParExec batches + a leaf semaphore; sizes leafBudget
+	leafBudget  leafBudget      // metis#31/#66: the shared global subprocess budget (nil = serial/cache-only);
+	//                           chanSem (default global fan-out) | prioritySem (--live fold-ordered)
+	priority    int             // metis#66: the outer-fold index threaded to execStep as the prioritySem key
+	live        bool            // metis#66: --live — fold-ordered priority scheduling + live incremental estimate
+	autoStop    bool            // metis#66: --auto-stop — sequential-outer + incumbent-referenced loser stop
+	stopSignal  <-chan struct{} // metis#66: board Q → graceful finalize (test seam; production reads stdin)
 	runControl  *runControl     // one per shape run: global abort + optional 2n admission slots
 	runLabel    string          // config/fold/preamble context captured with the first error
 	forkserver  bool            // metis#44: warm fork-server leaf executor (cmdRun default true;
@@ -138,14 +143,20 @@ func runExperiment(o runOpts) (experiment.Run, error) {
 	}
 
 	// metis#31: establish the parallel invariant in ONE home — maxParallel>1 ⇒ a
-	// non-nil SHARED leaf semaphore AND a serialized writer. Doing it here (not in
+	// non-nil SHARED leaf budget AND a serialized writer. Doing it here (not in
 	// cmdRun) means no direct-runOpts caller (the tests) can enable maxParallel>1 yet
-	// forget the sem or race the fan-out's progress writes on a bare buffer.
-	if o.maxParallel > 1 && o.leafSem == nil {
-		o.leafSem = make(chan struct{}, o.maxParallel)
+	// forget the budget or race the fan-out's progress writes on a bare buffer.
+	// metis#66: --live ⇒ a prioritySem (freed slots go to the lowest outer-fold index →
+	// fold 0 finishes first, backfill preserved); default ⇒ chanSem (global fan-out).
+	if o.maxParallel > 1 && o.leafBudget == nil {
+		if o.live || o.autoStop {
+			o.leafBudget = newPrioritySem(o.maxParallel)
+		} else {
+			o.leafBudget = newChanSem(o.maxParallel)
+		}
 	}
-	if sem := o.leafSem; sem != nil && o.leafGauge == nil {
-		o.leafGauge = func() (int, int) { return len(sem), cap(sem) } // metis#38: occupancy IS the semaphore
+	if b := o.leafBudget; b != nil && o.leafGauge == nil {
+		o.leafGauge = func() (int, int) { return b.gauge() } // metis#38/#66: occupancy IS the budget
 	}
 	// Exactly ONE writer wrap (metis#38): board mode → the pin-bottom compositor (it
 	// serializes internally — no syncWriter stacking); else parallel → syncWriter.
@@ -241,7 +252,7 @@ func runResolvedExperimentAdmitted(exp experiment.Experiment, o runOpts, runID s
 		return experiment.Run{}, err
 	}
 
-	var exec experiment.StepExecutor = execStep{stepPath: o.stepPath, expDir: expDir, seed: exp.Seed, readRoot: o.readRoot, out: out, sem: o.leafSem, pool: o.forkPool, pins: o.leafPins}
+	var exec experiment.StepExecutor = execStep{stepPath: o.stepPath, expDir: expDir, seed: exp.Seed, readRoot: o.readRoot, out: out, budget: o.leafBudget, priority: o.priority, pool: o.forkPool, pins: o.leafPins}
 	if o.exec != nil {
 		exec = o.exec // test seam: drive the loop/cache with a fake, no subprocess
 	}

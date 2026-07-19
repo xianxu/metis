@@ -259,8 +259,8 @@ wrapped by **thin step-executables** honoring the contract above. Hermetic via *
   **in batch order** (`SeqExec` serial default · `ParExec` goroutine fan-out · `ExecFor(parallel)`
   selects). A batch is independent by construction, so the order-independent reduce (metis#18) yields a
   byte-identical `Done` either way — parallelism is a pure speedup, not a semantic change. The ONE
-  budgeted resource is the real subprocess spawn: a single shared `chan struct{}` semaphore (cap
-  `--parallel`, default `NumCPU`, `METIS_MAX_PARALLEL`) acquired around `cmd.CombinedOutput()` in
+  budgeted resource is the real subprocess spawn: a single shared `leafBudget` (metis#66;
+  cap `--parallel`, default `NumCPU`, `METIS_MAX_PARALLEL`) acquired around `cmd.CombinedOutput()` in
   `execStep` — a cache HIT never reaches there, so only misses draw budget, and orchestration
   goroutines never hold a slot while awaiting children ⇒ **≤ n concurrent step subprocesses across ALL
   driver×sweeper×resample nesting, deadlock-free**. `runExperiment` establishes the parallel invariant
@@ -269,6 +269,22 @@ wrapped by **thin step-executables** honoring the contract above. Hermetic via *
   `sweepPass` mutex guards the shared `configs`/`points`/`err` bookkeeping (the honest reduce stays pure
   in the sampler). Caveats (flag help): a COLD cache thundering-herds the shared upstream; clean
   per-`k/n` progress is deferred to metis#30.
+- **Live fold-ordered scheduling + graceful Q (metis#66) — `cmd/metis/prioritysem.go` + `{exec,run,sweep,main,progress,runcontrol}.go`:**
+  the metis#31 `chan struct{}` semaphore became a `leafBudget` interface with two impls: `chanSem`
+  (the DEFAULT — priority-blind global fan-out, today's behavior) and `prioritySem` (a min-heap
+  semaphore that grants a freed slot to the LOWEST outer-fold index waiting). `execStep.priority` =
+  the leaf's outer-fold index (threaded via `runOpts.priority`/`sweepPass.priority`;
+  `runOuterFold`/`scoreOnOuterFold` set it). `--live` (implied by `--auto-stop`) builds the
+  prioritySem so **outer fold 0 finishes first → the running mean±SE tightens fold-by-fold**, while
+  the backfill invariant (`len(waiters)>0 ⟹ inflight==capacity`) keeps every core busy — "backfill"
+  is emergent from the priority queue, not separate logic. **CRITICAL invariant: `--live` is
+  byte-identical to the default run** (scheduling-only; the reduce is order-independent + sortPointRuns
+  normalizes) — locked by `TestLive_ByteIdenticalToDefault`. Board **Q** (a `q`/`Q` line on stdin →
+  `stdinStopSignal` → `runControl.requestStop`, a clean soft-latch distinct from a failure) is a
+  graceful finalize: admitted-but-unstarted leaves short-circuit with `errRunStopped`, in-flight
+  outer folds drain fast and are ABANDONED (`ss.abandoned`, excluded from `driverEvent`/the estimate),
+  and `finalizeStopped` reports an honest partial `out<n>` over the completed folds + writes the
+  partial ledger (both the full and stopped tails funnel through `persistNestedAndReport`, ARCH-DRY).
 - **Board banding + result-last (metis#55):** color lives in the PAINTER only (renderBoard
   stays plain — the paint/content split): `redraw` adds a dim full-width `─` separator rule
   above the frame (counted in the erase math), bolds the aggregate line, colors ✓/▸ glyphs

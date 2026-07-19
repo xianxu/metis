@@ -31,10 +31,13 @@ type execStep struct {
 	seed     int           // the experiment's seed, exposed to every step for reproducibility
 	readRoot string        // metis#23: outer-fold analysis root; when set, confines base-dataset reads (empty = unconfined)
 	out      io.Writer     // plain streaming progress
-	sem      chan struct{} // metis#31: the GLOBAL leaf budget — acquired around the subprocess
-	//                        spawn ONLY (a cache HIT never reaches here). One shared channel across
-	//                        all nesting levels ⇒ ≤ cap(sem) concurrent step subprocesses no matter
+	budget   leafBudget    // metis#31/#66: the GLOBAL leaf budget — acquired around the subprocess
+	//                        spawn ONLY (a cache HIT never reaches here). One shared budget across
+	//                        all nesting levels ⇒ ≤ capacity concurrent step subprocesses no matter
 	//                        how driver×sweeper×resample fans out. nil = unbounded (the serial path).
+	//                        chanSem = global fan-out (default); prioritySem = --live fold-ordered.
+	priority int // metis#66: this leaf's outer-fold index — the prioritySem grant key (lower =
+	//              higher priority). 0 on the flat/preamble path (chanSem ignores it anyway).
 	pool *serverPool // metis#44: when non-nil, convention-conforming wrappers route through the
 	//                  warm fork-server (one per project root) instead of a fresh uv/python spawn;
 	//                  non-conforming wrappers + broken servers fall back to the legacy path below.
@@ -94,12 +97,12 @@ func (e execStep) Execute(step experiment.Step, runDir string) (experiment.StepR
 	// through to the legacy spawn below; a RESPONSE, even exit != 0, is a real step outcome.
 	if e.pool != nil {
 		if spec, forkable := parseWrapper(exe); forkable {
-			if e.sem != nil {
-				e.sem <- struct{}{}
+			if e.budget != nil {
+				e.budget.acquire(e.priority)
 			}
 			resp, ok, ferr := e.pool.execute(spec, stepDir, env)
-			if e.sem != nil {
-				<-e.sem
+			if e.budget != nil {
+				e.budget.release()
 			}
 			if ferr != nil {
 				// I1: dispatched-and-lost — the forked child may still be running in this
@@ -140,12 +143,14 @@ func (e execStep) Execute(step experiment.Step, runDir string) (experiment.StepR
 	// Release immediately after the process exits, before the cheap metrics/artifact
 	// reads, so a slot is held only while a subprocess is actually running. An
 	// orchestration goroutine never reaches here holding another slot ⇒ deadlock-free.
-	if e.sem != nil {
-		e.sem <- struct{}{}
+	// metis#66: acquire at this leaf's outer-fold priority — the prioritySem grants fold 0
+	// first (chanSem ignores it → global fan-out).
+	if e.budget != nil {
+		e.budget.acquire(e.priority)
 	}
 	combined, cmdErr := cmd.CombinedOutput()
-	if e.sem != nil {
-		<-e.sem
+	if e.budget != nil {
+		e.budget.release()
 	}
 	if cmdErr != nil {
 		// Runner.Run already prefixes `step %q:`; name the executable, not the id

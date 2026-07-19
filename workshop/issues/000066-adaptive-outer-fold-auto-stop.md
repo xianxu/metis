@@ -5,7 +5,7 @@ deps: []
 github_issue:
 created: 2026-07-19
 updated: 2026-07-19
-estimate_hours:
+estimate_hours: 7.6
 started: 2026-07-19T08:32:12-07:00
 ---
 
@@ -86,15 +86,71 @@ silent.
   ledger; a documented stopping rule; an e2e where a known-loser config is stopped and a winner
   runs full.
 
+## Estimate
+
+```estimate
+model: estimate-logic-v3.1
+familiarity: 1.0
+item: greenfield-go-module   design=0.3   impl=0.8
+item: smaller-go-module      design=0.2   impl=0.5
+item: tui-screen             design=0.4   impl=0.9
+item: smaller-go-module      design=0.1   impl=0.5
+item: milestone-review       design=0.0   impl=0.2
+item: smaller-go-module      design=0.2   impl=0.4
+item: smaller-go-module      design=0.3   impl=0.6
+item: method-b-decisions     design=0.3   impl=0.5
+item: smaller-go-module      design=0.15  impl=0.5
+item: milestone-review       design=0.0   impl=0.2
+item: atlas-docs             design=0.05  impl=0.2
+design-buffer: 0.15
+total: 7.6
+```
+
+Σdesign 2.0 × 1.15 = 2.30; Σimpl 5.30 × 1.00 = 5.30; total **7.6** (= `estimate_hours`).
+Item map: `greenfield-go-module` = the priority-semaphore + leaf-budget interface;
+`smaller-go-module`×5 = thread-priority/`--live`, the determinism test harness,
+`--auto-stop`+incumbent-read, sequential-outer+family-filtering, ledger-marker+e2e;
+`tui-screen` = board `Q`→graceful-finalize (stdin seam + stop-latch + abandon +
+partial finalize); `method-b-decisions` = the predictive stop rule (2 decisions ×
+0.15 = the predictive-variance model + the t-critical choice); `milestone-review`×2
+= the M1/M2 boundary reviews; `atlas-docs` = the atlas sweep. Two review boundaries.
+
 ## Plan
 
-- [ ] **M1** — fold-ordered priority+backfill scheduler in the metis#31 executor; incremental
-  `Aggregate` emission per fold; `--live` gate; board `Q`→graceful-finalize. Determinism test
-  (`--live` ≡ default), throughput test (fold-tail overhead bounded).
-- [ ] **M2** — `--auto-stop`: read incumbent from ledger; per-fold predictive stopping rule
-  (losers only, documented); `stopped: auto` ledger marker; e2e (loser stopped, winner full).
+- [ ] **M1** — fold-ordered priority+backfill scheduler in the metis#31 executor (a
+  `leafBudget` interface: `chanSem` default / `prioritySem` under `--live`); incremental
+  `Aggregate` emission per fold; `--live` gate; board `Q`→graceful-finalize (stdin seam →
+  clean stop-latch → abandon in-flight folds → partial ledger + honest `out<n>`).
+  Determinism test (`--live` ≡ default, byte-identical), prioritySem unit test (grant
+  order + backfill invariant + `-race`), Q-finalize test.
+- [ ] **M2** — `--auto-stop`: sequential-outer scheduling + per-fold family filtering; read
+  incumbent from the shape's existing ledger; documented predictive stopping rule (pure
+  `shouldStop`, losers only, t_{n-1} one-sided 95%); `stopped: auto` ledger marker; e2e
+  (loser stopped, winner runs full k).
 
 ## Log
+
+### 2026-07-19 — M1 implemented
+- **Priority scheduling as a pure budget swap.** The metis#31 leaf `chan struct{}` became a
+  `leafBudget` interface (`cmd/metis/prioritysem.go`): `chanSem` (default global fan-out) /
+  `prioritySem` (min-heap, grants a freed slot to the lowest outer-fold index; backfill
+  invariant `len(waiters)>0 ⟹ inflight==capacity`). No ParExec change — all leaves still fan
+  out as goroutines; only the budget's grant policy orders them, so fold 0 finishes first. The
+  incremental mean±SE emission already existed (`driverEvent`/`outerScores`) — priority
+  scheduling makes it tighten meaningfully. Priority = outer-fold idx, threaded
+  `runOpts.priority`→`execStep.priority` (set in `runOuterFold`/`scoreOnOuterFold`).
+- **`--live`** (implied by `--auto-stop`) builds the prioritySem when parallel; serial is
+  already fold-ordered.
+- **Board Q** = clean graceful finalize: `stdinStopSignal` (q/Q line, stdlib-only) →
+  `runControl.requestStop` (soft-latch ≠ failure) → admitted leaves short-circuit
+  (`errRunStopped`) → in-flight folds ABANDONED (`ss.abandoned`, excluded from the estimate) →
+  `finalizeStopped` reports honest partial `out<n>` + partial ledger. Full & stopped tails share
+  `persistNestedAndReport` (ARCH-DRY). No pkg/sampler change (avoided a type change by gating
+  abandoned folds at the driverEvent call site + aggregating the sink's completed scores).
+- **Tests:** `TestLive_ByteIdenticalToDefault` (the determinism gate — default ≡ `--live`
+  byte-identical ledger+manifest+estimate, budget exercised e2e under `-race`), `prioritysem_test.go`
+  (grant order + FIFO + capacity + backfill peak, `-race`), `TestLive_QFinalizesHonestPartial`
+  (fold 0 completes → out1, folds 1/2 abandoned). Full suite green (Go + 124 pytest); vet clean.
 
 ### 2026-07-19
 - Filed from the arena2 M6 design session (operator-designed). Correctness is a non-issue
