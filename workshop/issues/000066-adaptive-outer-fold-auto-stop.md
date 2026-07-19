@@ -1,11 +1,12 @@
 ---
 id: 000066
-status: open
+status: working
 deps: []
 github_issue:
 created: 2026-07-19
 updated: 2026-07-19
 estimate_hours:
+started: 2026-07-19T08:32:12-07:00
 ---
 
 # adaptive outer-fold scheduling + --auto-stop (incumbent-referenced early stop of losing configs)
