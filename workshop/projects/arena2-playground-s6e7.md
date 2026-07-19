@@ -38,8 +38,15 @@ friction (kbench layering). Everything else is out unless the competition says o
   (small grid, `inner_k` from day one), smoke on `--fast`.
 - [x] **M2 — first honest submission:** full grid → `select --best --promote` → `kaggle
   submit -C` → record public score vs honest estimate in the Log (the tracking datum).
-- [ ] **M3 — iterate:** feature blocks + families as the leaderboard/estimate gap directs;
-  file demanded workbench features as they surface (the demand list IS a deliverable).
+- [x] **M3 — iterate:** DONE — ran four issue-level rounds under this umbrella: M3-features
+  (kbench#13: NaN-through won, interaction ladder flat), M4-decision (kbench#15: loss-vs-decision
+  answer), M4-blend (kbench#16: ensemble soft-vote outer-CV), M5-bench (kbench#16: catboost +
+  seed-bag). The demand list held: the competition demanded only model-layer additions the
+  workbench absorbs Python-only (ensemble/catboost/seed kinds — zero Go edits).
+- [ ] **M6 — close the ~0.003 gap (or declare the noise floor):** the model-space is
+  EXHAUSTED (every family/blend/mechanism converges to honest OUTER ~0.950-0.951); the residual
+  gap to the ~0.953 pack is a FEATURE/DATA problem. Hypotheses ranked below. Deferred to
+  operator go/no-go (the project's done_when was met at M2; this is optional gap-chasing).
 
 ## Log
 
@@ -138,3 +145,54 @@ friction (kbench layering). Everything else is out unless the competition says o
   both under current code). Then `kaggle submit --run blend-<hash>`. Optional first: solo rf
   M4 winner submit (honest 0.9500±0.0004). M5 gate: the residual gap after blend
   (pensive: brain/workshop/pensive/2026-07-19-01-pensive-s6e7-classifier-candidates-m5.md).
+
+### 2026-07-19 (M4-blend + M5 — the model bench, autonomous overnight run)
+
+- **metis#65 (SHIP, merged PR#47):** shipped the enabling model kinds Python-only (zero Go
+  edits — `FamilyOf` derives family structurally): `ensemble` soft-vote (the blend made
+  scorable INSIDE nested CV — an honest OOF, vs `metis blend`'s post-hoc leaderboard-only
+  combine), `catboost` (the M5 mechanism bet), and seed passthrough (`params.seed` → seed-bagging
+  when composed with `ensemble`). 124 pytest, real-binary/forkserver smokes; two milestone
+  reviews (M1 SHIP; M2 FIX-THEN-SHIP caught + fixed a catboost predict-dtype ship-path guard).
+- **M4-blend (kbench#16 M1, cohort 5b3f38ee, out3):** ensemble-BLEND {rf-bal, gbm-bal}
+  **0.9507±0.0010** > rf 0.9500±0.0004 > gbm 0.9496±0.0006. Highest POINT estimate (+0.0007
+  over rf, at the minority-class boundaries M4's diff localized; offsets-on-blend won all 3
+  folds) but WITHIN 1 SE at out3 → not distinguishable from rf; reliability tiebreak ships rf.
+  A small, noise-level yes — matches the pre-registered "modest ~0.001-0.002".
+- **M5 bench (kbench#16 M2, cohort 56303278, out3):** seed-bag **0.9510±0.0009** ≈ gbm
+  0.9508±0.0008 > catboost **0.9501±0.0007** > rf 0.9493±0.0007. **CatBoost does NOT beat the
+  incumbent** — a genuinely different boosting mechanism finds no new signal → strong
+  confirmation of the data noise floor. Seed-bag adds only within-noise +0.0002.
+- **The synthesis (why M6 is a feature/data thread, not a model thread):** across M3→M5, EVERY
+  model-space lever — capacity, class-weight, decision offsets, a diverse-family blend, a new
+  boosting mechanism (catboost), variance reduction (seed-bag) — converges to honest OUTER
+  **~0.950-0.951**. Two independent families agreeing to the 4th decimal, and a third mechanism
+  landing in the same band, IS the data noise floor (synthetic-data label noise). The ~0.003
+  gap to the ~0.953 pack is therefore almost certainly NOT reachable by model changes.
+
+### M6 — the gap-closing hypotheses (ranked; operator go/no-go)
+
+The model space is exhausted. If the gap is worth chasing, in likelihood order:
+1. **Source-dataset augmentation (the classic Playground move).** S6E7 is synthetic, generated
+   from a real "student health" dataset; top Playground finishers routinely concat the ORIGINAL
+   dataset (found via the competition's "generated from" note) into training — it adds real
+   signal the synthetic generator smoothed out. Legal but tests PROVENANCE, not the workbench —
+   deprioritized as off-mission all arena, but it's the single most likely gap-closer. Needs a
+   separate shape (different estimand) + importance weights (metis#63, the dormant `weight` role).
+2. **Confirm the blend edge at out10 (cheap, high-info).** M4-blend 0.9507 is within 1 SE at
+   out3; a full k=10 run (cache-escalates from 5b3f38ee's 3 folds) tightens SE ~1.8× — decides
+   whether the blend edge is real or noise before investing in a wider blend.
+3. **Stacking over soft-vote.** A logistic meta-learner on the base models' OOF probabilities
+   (vs the current unweighted average) can weight members by reliability. Needs a new metis
+   `stack` mechanism (OOF-proba meta-fit inside the seal) — a real workbench feature, only worth
+   it if #2 shows blending has headroom.
+4. **Feature engineering round 2.** The M3 flat-encoding ladder closed, but untried: aggregate/
+   ratio features over the 13 raw columns, or a missingness-count feature. Lower prior (the
+   noise-floor evidence argues features are saturated), but cheap to probe.
+5. **NOT worth it:** deeper single-model tuning (converged), deep tabular (TabPFN public 0.94756
+   < our GBM — evidence against), more capacity (saturated at M2).
+
+Recommendation: if the operator wants the leaderboard, **#1 (source augmentation)** is the move,
+accepting it's a provenance experiment, not a workbench one. If the goal stays "prove the
+workbench generalizes" (the project's actual done_when, met at M2), arena2 is **DONE** — the
+model bench is the honest, complete answer: the workbench measured the noise floor correctly.
