@@ -237,12 +237,15 @@ def train(X, y, kind: str, seed: int, params: dict | None = None):
 
 
 def predict(estimator, X):
-    """Predict labels for X with a fitted estimator, as a 1-D array.
+    """Predict labels for X with a fitted estimator, as a 1-D array in the label dtype.
 
-    Raveled because CatBoost's `.predict()` returns shape (n, 1); sklearn estimators already
-    return (n,), so `reshape(-1)` is a no-op for them — one site fixes catboost everywhere
-    predict flows (fold_score/cv_score + the predict step's argmax path)."""
-    return np.asarray(estimator.predict(X)).reshape(-1)
+    Two normalizations, single-sourced here (a no-op for the sklearn kinds; both guard
+    CatBoost, whose `.predict()` can return shape (n, 1) and — on some versions/configs —
+    FLOAT class labels): `reshape(-1)` → 1-D, then `.astype(classes_.dtype)` → the label
+    dtype the estimator learned (so `predictions.csv` writes `0`, never `0.0`; the s6e7
+    submission step maps INT codes → string labels). Fixes catboost everywhere predict flows
+    (fold_score/cv_score + the ship predict step's argmax path)."""
+    return np.asarray(estimator.predict(X)).reshape(-1).astype(estimator.classes_.dtype)
 
 
 def complexity(fitted, kind: str) -> float:

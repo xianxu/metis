@@ -116,6 +116,25 @@ folded in before implementation:
    member seeds (seed-bagging, the point of composing seed×ensemble) is testable in M1; M2 is
    now purely the CatBoost external-dep add (isolating that risk — the split's stated rationale).
 
+### 2026-07-19 — M2 milestone-close FIX-THEN-SHIP findings addressed
+Boundary review verdict FIX-THEN-SHIP (high confidence, no Critical; two Important + minors),
+all folded into the M2 close commit (#174):
+1. **Ravel LOCATION reconciled (Spec correction):** the Spec §M2 said "ravel at the make_model
+   boundary"; the implementation correctly ravels at the single `predict()` call site (DRY —
+   one site, no-op for sklearn kinds). The Spec described a location the code doesn't use.
+2. **Predictions dtype (Important #1):** CatBoost's `.predict()` CAN return float labels
+   ("0.0") — a ship-submission drift (scoring unaffected). PROBED: on catboost 1.2.10 with our
+   int64 target it already returns int64, so it doesn't reproduce here — but `predict()` now
+   defensively `.astype(classes_.dtype)` (a no-op for sklearn kinds and int64 catboost) so the
+   label dtype is GUARANTEED regardless of catboost version/config.
+3. **Fold-scoring test gap (Important #2):** added `test_catboost_fold_score_path_and_int_labels`
+   — exercises `fold_score` (the nested-CV path arena2 consumes) for catboost AND asserts INT
+   labels (`dtype.kind in "iu"`), pinning both the path and the dtype guarantee.
+4. **Minors:** atlas/index.md complexity enumeration now lists catboost + ensemble; the
+   `depth` (catboost, exact oblivious depth) vs `max_depth` (rf/gbm, a cap) asymmetry is left
+   UN-aliased deliberately — the two mean different things, so aliasing would be semantically
+   wrong; the sweep uses `depth` for catboost directly.
+
 ## Estimate
 
 ```estimate
@@ -142,6 +161,7 @@ moving — flagged at start-plan.)
 ## Log
 
 ### 2026-07-19
+- 2026-07-19: closed M2 — catboost kind: 123 pytest green (6 catboost — 1-D predict ravel, determinism+seed-override, balanced-changes-fit+loud-unknown, complexity=tree_count×2^depth, no-side-effect-dir/ARCH-PURE, catboost-as-ensemble-member); go build -o bin/metis clean; real-binary+forkserver smoke solo AND catboost-in-ensemble split→train→predict ok, predictions well-formed 1-D, NO catboost_info/ leak (purity pin holds); atlas updated (catboost surface). --no-actual: interleaved metis+kbench session.; review verdict: FIX-THEN-SHIP
 - 2026-07-19: closed M1 — ensemble kind + seed passthrough: 116 pytest green (soft-vote=member-mean, weights tilt, single-member≈bare, complexity=Σmembers, decide=offsets composition, seed override re-keys+changes-fit, seed-bagging distinct members, ensemble-through-step-path); go build -o bin/metis clean (zero Go edits — FamilyOf structural); real-binary+forkserver smoke on toy ensemble shape split→train→predict ok; atlas updated (ensemble+seed surface). --no-actual: session interleaves metis+kbench issues.; review verdict: SHIP
 - Opened + claimed. Enables arena2 M4-blend (ensemble outer-CV measurement) + M5 (catboost
   bench). Sibling kbench issue runs the sweeps. Cross-repo: kbench runs against the LOCAL

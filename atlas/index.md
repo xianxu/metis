@@ -136,7 +136,8 @@ identical on a non-Kaggle platform?* — if yes, it lives here.
   **measured on the fitted model** (M2): each model class's `metis.model.complexity(fitted, kind)` reports
   realized capacity — rf **mean** leaves/tree (n_estimators-neutral per Breiman's LLN), logreg coef count
   (= feature count), hist_gbm **total** leaves summed across boosted trees (metis#21 — sum, not mean:
-  boosting is additive, so more rounds add capacity; clean within a fixed learning_rate) — emitted per
+  boosting is additive, so more rounds add capacity; clean within a fixed learning_rate), catboost
+  `tree_count × 2^depth` (oblivious trees, metis#65), ensemble **Σ** member complexities (metis#65) — emitted per
   fold by `train` (`fold_fit` fits once for both score + complexity),
   reduced by `Aggregate`. **`GuardComplexity`** rejects a parsimony rule when any swept family lacks measured
   complexity (post-fold, pre-selection — a silently-dropped axis → a quietly-wrong winner). `SelectConfigs`

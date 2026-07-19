@@ -527,6 +527,22 @@ def test_catboost_no_side_effect_dir(tmp_path, monkeypatch):
     assert not (tmp_path / "catboost_info").exists()
 
 
+def test_catboost_fold_score_path_and_int_labels():
+    """The nested-CV path arena2 actually consumes (fold_score → fold_fit → predict) works for
+    catboost, and predictions come back as INT labels (not float '0.0' — the ship-submission
+    dtype the s6e7 submission step needs, review M2 Important #1)."""
+    import pandas as pd
+
+    X, y = _skewed_3class()
+    folds = cv_folds(pd.DataFrame({"y": y}), 3, 0, stratify_col="y")
+    s = fold_score(X, y, folds, 0, "catboost", 0,
+                   params={"iterations": 20, "depth": 3}, metric="balanced_accuracy")
+    assert 0.0 <= s <= 1.0
+    preds = predict(train(X, y, "catboost", 0, params={"iterations": 20, "depth": 3}), X)
+    assert preds.dtype.kind in "iu"                       # integer labels, NOT float
+    assert set(preds.tolist()) <= set(int(c) for c in np.unique(y))
+
+
 def test_catboost_as_ensemble_member():
     """The compose seam (plan-review M2 note): catboost inside an ensemble — named catboost-<i>,
     complexity recovered via the same rsplit dispatch (catboost is hyphen-free)."""
