@@ -132,3 +132,66 @@ None (no crash/always-wrong path).
 
 ### 7. Plan revision recommendations
 - If I1 is fixed as recommended, no plan-code contradiction remains. If the team elects to keep the per-config-group incumbent, add a `## Revisions` entry to `workshop/plans/000066-…-plan.md` under M2.1 documenting the deliberate deviation from "`metis select`'s best-per-family" and the over-stop bias it introduces (so the plan stops claiming the select-parity semantics). Same note belongs in `atlas/experiment.md` to correct the "best per-family" wording.
+
+---
+
+## Re-review — 2026-07-19T09:53:28-07:00 (SHIP)
+
+| field | value |
+|-------|-------|
+| issue | 66 — adaptive outer-fold scheduling + --auto-stop (incumbent-referenced early stop of losing configs) |
+| repo | metis |
+| issue file | workshop/issues/000066-adaptive-outer-fold-auto-stop.md |
+| boundary | milestone M2 |
+| milestone | M2 |
+| window | feae0e77733970491329088a3b8f12b36921261b..HEAD |
+| command | sdlc milestone-close --issue 66 --milestone M2 |
+| reviewer | claude |
+| timestamp | 2026-07-19T09:53:28-07:00 |
+| verdict | SHIP |
+
+## Review
+
+Ignoring 6 permissions.allow entries from .claude/settings.json: this workspace has not been trusted. Run Claude Code interactively here once and accept the trust dialog, or set projects["/Users/xianxu/workspace/metis"].hasTrustDialogAccepted: true in /Users/xianxu/.claude.json.
+I have a complete, verified picture. The review window (`feae0e7..HEAD`) contains both the M2 implementation and the fix commit that resolved the prior FIX-THEN-SHIP finding, so the net diff I'm reviewing shows the **corrected** `readIncumbent`. I traced the numeric paths by hand and verified the reducer reuse against the canonical select path.
+
+```verdict
+verdict: SHIP
+confidence: high
+```
+
+**Summary.** This M2 close delivers the incumbent-referenced loser-stop cleanly, and — critically — the net diff already incorporates the fix for the one substantive finding the two prior passes raised (the `AggregateView` incumbent bias). I independently verified the fix: `readIncumbent` now computes the incumbent via `familyEstimateFromLedger` → `sampler.FamilySelect` (`autostop.go:44-52`), the *exact* reduce `metis select` ships (`select_cmd.go:125`), passed the *same* metric argument (`obj.Metric`, identical to `select_cmd.go:103`). The family-key space is consistent end-to-end (`PerFamily`/`ConfigStat.Family`/`FamilyOf` all agree, so `recordFamilyScore` → `stoppedFams` → `activeConfigs` → `markStoppedRows` key on the same string). The pure rule (`shouldStop`/`tCrit`) is genuinely IO-free and directly unit-tested, the predictive-variance derivation is mathematically correct (I re-derived `Var(S)=rσ²(1+r/n)`), budget reclaim is real (stopped families' *inner* sweeps are dropped), and the `stopped` ledger column is a faithful ragged-column extension. The regression test genuinely exercises the divergence the old code missed. Only documented Minors remain; nothing blocks the boundary. **Caveat: I could not execute `go test`/`go vet` — the harness errors on session-env creation (`EPERM mkdir …/.claude/session-env/…`), not a sandbox restriction, so it persists even with the sandbox disabled. My verification is static + hand-traced; the main agent should confirm the suite is green before trusting the close (the Log claims it is).**
+
+### 1. Strengths
+- **The prior finding is genuinely fixed, not papered over** (`autostop.go:27-53`). `readIncumbent` threads `ss.sh` in and calls the same `familyEstimateFromLedger`→`FamilySelect` path `metis select` uses — ARCH-DRY restored, one definition of "the incumbent" fleet-wide. The docstring now correctly names why `AggregateView` was wrong.
+- **The regression test exercises the actual divergence** (`autostop_test.go:19-42`): rf's winning config *varies* across folds (rf4@0.80, rf8@0.90 → pooled 0.85), and the assertion pins 0.85, not the per-config max 0.90 — it fails against the old reducer, passes against the new. This is exactly the test the earlier passes asked for.
+- **Pure rule, cleanly injected (ARCH-PURE done right).** `shouldStop`/`tCrit` (`autostop.go:72`,`:101`) are deterministic and tested directly (loser/winner/borderline/both-directions/monotone/n=1/full-k/t-table); `evaluateAutoStop`/`activeConfigs` are the thin seam. The `--auto-stop`+`--sample`/`--fast` reject (`sweep.go:333`) removes the earlier k-vs-runFolds imprecision *by construction* (under auto-stop, `runFolds==k` always).
+- **Real budget reclaim** (`sweep.go:110-129`): `activeConfigs` drops stopped families from the *sealed inner sweep* (the actual cost), never to empty. Sequential-outer gating (`outerParallel=false`, `sweep.go:606-608`) makes each fold's decision cleanly gate the next.
+- **Ledger back-compat preserved and now unit-tested** (`ledger.go:119-135`, `ledger_test.go` `TestEncodeDecode_StoppedRaggedColumn`): the ragged `stopped` column mirrors `fold`/`level`/`outer_fold`; a no-stopped-row ledger stays byte-identical, and that guard is now asserted (resolving the prior I2).
+- **First-run / corrupt-ledger paths are safe** (`ledger.go:153-162`): a missing ledger returns empty-no-error → `present=false` → loud no-op.
+
+### 2. Critical findings
+None. The prior C1/I1 (`AggregateView` incumbent bias) is resolved in this window and verified.
+
+### 3. Important findings
+None.
+
+### 4. Minor findings
+- **Corrupt-ledger conflated with "no prior run"** (`autostop.go:40-43`): a decode error returns `present=false`, printing "no incumbent (no prior run)" (`sweep.go:613`) and silently degrading to a full sweep. Distinguish a real load error (warn) from a legitimately-absent ledger.
+- **All-losers edge over-marks `stopped: auto`** (`sweep.go:125-127` + `markStoppedRows:171-179`): if every family is stopped, `activeConfigs` keeps them all so they run full k, yet `markStoppedRows` still tags their rows `stopped: auto` — the marker's documented meaning ("remaining folds were cut") is then inaccurate for a rare all-worse-than-incumbent run. Cosmetic/provenance only.
+- **Cross-cohort incumbent pooling** (`autostop.go:44`): `FamilyEstimate` pools outer rows across *all* fingerprint cohorts, whereas `metis select` refuses a multi-cohort ledger without `--fingerprint`. A stale cohort could set the bar. Already documented in the docstring (`autostop.go:35-37`); acceptable (stop cost = a re-run) until a `--auto-stop --fingerprint` knob is wanted.
+- **`--auto-stop` on a flat (1-config) shape is a silent no-op** — the flag never reaches `runNestedCV`. The help text doesn't note this (the `--live` help does note flat is unaffected).
+
+### 5. Test coverage notes
+- Pure rule (`shouldStop`/`tCrit`): excellent, direct, pins real statistical behavior. `readIncumbent` now has a direct unit test that seeds real multi-fold outer rows with a varying within-family winner (`autostop_test.go`) — the gap the prior passes flagged is closed.
+- e2e (`autostop_e2e_test.go`): I hand-verified the numerics — with incumbent 0.80, logreg (scores ~0.70/0.705) stops after fold 1 (`mean+t·SEpred ≈ 0.714 < 0.80`, t₁=6.314), rf (~0.90) never stops → full k=4. The seeded pass-through incumbent row (FreeParams `{train.model: prior}`) correctly lands in the `""` family bucket under the new reducer, still yielding incumbent 0.80, so the e2e remains valid after the fix.
+- `stopped` ragged column: now covered by a dedicated `pkg/ledger` unit test *and* the e2e round-trip.
+- **Not executed in this pass** (harness EPERM). Recommend the main agent run `go test ./cmd/metis/ ./pkg/ledger/ ./pkg/sampler/ -race` + `go vet ./...` before recording the verdict.
+
+### 6. Architectural notes for upcoming work
+- **ARCH-DRY — PASS.** The parallel/biased incumbent reduce is gone; `familyEstimateFromLedger` is now the single per-family outer reducer both `metis run --auto-stop` and `metis select` consume. Downstream metis#54 (inner racing) can build on one stable "incumbent" definition.
+- **ARCH-PURE — PASS.** Stat rule pure and injected; the sweep methods are a thin coordination seam on the accumulator.
+- **ARCH-PURPOSE — PASS.** The diff fulfills the Spec's actual commitment — the incumbent is now `metis select`'s best-per-family (the honest shippable number), not the cheap-but-biased per-config max — so the "never truncate a would-be winner" invariant holds upstream of `shouldStop`, and the reclaim/losers-only/marker/e2e all deliver.
+
+### 7. Plan revision recommendations
+None required. The plan body's M2.1 still literally reads "`ledger.AggregateView → ledger.Best`" (`plan:119-122`), but the appended `## Revisions` entry (`plan:182-194`, added in the fix commit) documents the correction to `familyEstimateFromLedger`+`FamilySelect` — the sanctioned append-don't-overwrite convention. The plan and code are consistent as of this window.
