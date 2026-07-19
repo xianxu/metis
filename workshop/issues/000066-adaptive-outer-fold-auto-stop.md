@@ -117,7 +117,7 @@ partial finalize); `method-b-decisions` = the predictive stop rule (2 decisions 
 
 ## Plan
 
-- [ ] **M1** — fold-ordered priority+backfill scheduler in the metis#31 executor (a
+- [x] **M1** — fold-ordered priority+backfill scheduler in the metis#31 executor (a
   `leafBudget` interface: `chanSem` default / `prioritySem` under `--live`); incremental
   `Aggregate` emission per fold; `--live` gate; board `Q`→graceful-finalize (stdin seam →
   clean stop-latch → abandon in-flight folds → partial ledger + honest `out<n>`).
@@ -131,6 +131,7 @@ partial finalize); `method-b-decisions` = the predictive stop rule (2 decisions 
 ## Log
 
 ### 2026-07-19 — M1 implemented
+- 2026-07-19: closed M1 — M1: leafBudget interface (chanSem default / prioritySem --live, prioritysem.go) + fold-priority threading (runOpts.priority->execStep) + board Q graceful-finalize (runControl.requestStop soft-latch, abandon in-flight folds, finalizeStopped honest out<n>). Tests: TestLive_ByteIdenticalToDefault (determinism: byte-identical ledger+manifest+estimate, budget exercised e2e under -race), prioritysem_test.go (grant order/FIFO/capacity/backfill -race), TestLive_QFinalizesHonestPartial (out1, folds 1/2 abandoned). go test ./... green, go vet clean, uv run pytest 124 passed. Actuals N/A — concurrent multi-agent session, active-time measurement contaminated.; review verdict: FIX-THEN-SHIP
 - **Priority scheduling as a pure budget swap.** The metis#31 leaf `chan struct{}` became a
   `leafBudget` interface (`cmd/metis/prioritysem.go`): `chanSem` (default global fan-out) /
   `prioritySem` (min-heap, grants a freed slot to the lowest outer-fold index; backfill

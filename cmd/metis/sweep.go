@@ -474,6 +474,22 @@ func (ss *shapeSweep) runNestedCV(ctx sampler.Ctx, configPts []shape.Point, k, i
 	fmt.Fprintf(ss.out, "metis: nested-CV %s (%s) — %s outer fold(s) × (%d configs × %s inner folds)\n",
 		ss.sh.ID, shapeRunID[:12], fmtLevel(runFolds, k), len(configPts), fmtLevel(runInnerK, innerK))
 
+	// metis#66: the graceful-stop bridge — a Q on the board latches runControl.requestStop so
+	// admitted-but-not-yet-run leaves short-circuit (in-flight outer folds drain fast, no new
+	// leaf starts). Armed BEFORE the preamble so a Q during the (single, long) outer-split short-
+	// circuits its leaves too. done closes on return so the watcher goroutine never leaks.
+	done := make(chan struct{})
+	defer close(done)
+	if ss.o.stopSignal != nil && ss.o.runControl != nil {
+		go func() {
+			select {
+			case <-ss.o.stopSignal:
+				ss.o.runControl.requestStop()
+			case <-done:
+			}
+		}()
+	}
+
 	// Preamble: materialize the k outer-analysis subset dirs ONCE (unconfined — outer-split reads
 	// the full dataset to split it). Always split into k dirs (a stable partition); --fast just runs
 	// fewer of them (runFolds ≤ k). Deterministic run id → the analysis_i refs are locatable.
@@ -488,20 +504,6 @@ func (ss *shapeSweep) runNestedCV(ctx sampler.Ctx, configPts []shape.Point, k, i
 		return ss.fail("nested-CV preamble", err)
 	}
 	outerPart := sampler.PartitionRef(fmt.Sprintf("outer-cv-k%d-strat%t-seed%d", k, stratify, ss.sh.Seed))
-
-	// metis#66: the graceful-stop bridge — a Q on the board latches runControl.requestStop so
-	// admitted-but-not-yet-run leaves short-circuit (in-flight outer folds drain fast, no new
-	// leaf starts). done closes on the sampler.Run return so the watcher goroutine never leaks.
-	done := make(chan struct{})
-	if ss.o.stopSignal != nil && ss.o.runControl != nil {
-		go func() {
-			select {
-			case <-ss.o.stopSignal:
-				ss.o.runControl.requestStop()
-			case <-done:
-			}
-		}()
-	}
 
 	est := sampler.Run(ctx, sampler.CVDriver{K: runFolds, Stratify: stratify},
 		func(p sampler.OuterFoldPoint) float64 {
@@ -536,7 +538,8 @@ func (ss *shapeSweep) runNestedCV(ctx sampler.Ctx, configPts []shape.Point, k, i
 			}
 			ss.whileHealthy(func() { ss.prog.driverEvent(ev) })
 		})
-	close(done)
+	// done is closed by the deferred close above (armed before the preamble); the watcher
+	// goroutine exits on it whether we return here or via a stop/error path.
 	if err := ss.firstError(); err != nil {
 		return err
 	}

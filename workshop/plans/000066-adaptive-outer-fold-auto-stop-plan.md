@@ -163,5 +163,21 @@ the reduce is order-independent and `sortPointRuns` normalizes on-disk order.
   `atlas/index.md` for `--live`/`--auto-stop` + the priority-scheduling / sequential-
   outer / auto-stop-rule surface.
 
+## Revisions
+
+### 2026-07-19 — M1 boundary review (FIX-THEN-SHIP → fixed in the close commit)
+- The `--auto-stop` CLI flag was registered at M1 (not just M2), because its `runOpts.autoStop`
+  plumbing threads through the same budget-selection seam as `--live`. The M1 boundary review
+  (ARCH-PURPOSE) flagged its help as over-promising M2 behavior; **decision:** the flag's help is
+  reworded to be M1-honest ("NOT YET ACTIVE — currently only enables --live; incumbent-read +
+  loser-stop land in M2"). M2 restores the full promise once the logic lands.
+- **Q during the preamble is now handled, not a no-op:** the stop-bridge is armed BEFORE
+  `materializeOuterAnalysis`, so a Q during the (single, long) outer-split short-circuits its
+  leaves and finalizes as `out0` — resolving the review's "unreachable preamble-stop branch."
+- `--live` help softened: a flat (single-config) run is unaffected (all leaves one priority),
+  not an error (unlike `--sample`), matching the actual behavior.
+- Q-finalize test strengthened to `out2` (n≥2) so the non-zero-SE branch of
+  `completedOuterEstimate` is covered.
+
 ## Estimate
 See the issue's `## Estimate` block (authoritative).
