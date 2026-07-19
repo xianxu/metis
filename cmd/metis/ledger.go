@@ -94,7 +94,17 @@ func shapeConfigToExperiment(sh experiment.Shape, c shape.Point) experiment.Expe
 // drift a CSV/JSON round-trip introduces (a row's `300` may be int or float64; the
 // point's is yaml-int) — both marshal to `300`, and lists compare structurally.
 func freeParamsEqual(p shape.Point, want map[string]any) bool {
-	gb, err1 := json.Marshal(freeParamMap(p)) // reuses the sweep driver's renderer
+	// metis#64: a NULL free-param encodes to an empty CSV cell and the decode SKIPS empties,
+	// so a round-tripped row is KEY-ABSENT where the expanded point carries an explicit nil.
+	// Canonicalize null ≡ absent by dropping nil-valued entries from the point's map — the
+	// matcher-side fix heals existing ledgers retroactively (no re-run, no format change).
+	pm := freeParamMap(p) // reuses the sweep driver's renderer
+	for k, v := range pm {
+		if v == nil {
+			delete(pm, k)
+		}
+	}
+	gb, err1 := json.Marshal(pm)
 	wb, err2 := json.Marshal(want)
 	return err1 == nil && err2 == nil && bytes.Equal(gb, wb)
 }

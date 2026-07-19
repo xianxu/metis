@@ -987,13 +987,28 @@ func freeParamStr(p shape.Point) string {
 	return freeParamStrFromParams(p.FreeParams)
 }
 
+// renderFreeParamValue renders a free-param value for humans: composite values (the $any-map
+// bundles, lists) as compact JSON — NOT Go's %v map syntax (metis#64:
+// `map[offsets:map[holdout:0.2]]` → `{"offsets":{"holdout":0.2}}`); scalars via %v.
+func renderFreeParamValue(v any) string {
+	switch v.(type) {
+	case nil:
+		return "null" // a null rung, not Go's <nil>
+	case map[string]any, []any:
+		if b, err := json.Marshal(v); err == nil {
+			return string(b)
+		}
+	}
+	return fmt.Sprintf("%v", v)
+}
+
 func freeParamStrFromParams(fps []shape.FreeParam) string {
 	s := ""
 	for i, fp := range fps {
 		if i > 0 {
 			s += " "
 		}
-		s += fmt.Sprintf("%s=%v", fp.Path, fp.Value)
+		s += fp.Path + "=" + renderFreeParamValue(fp.Value)
 	}
 	if s == "" {
 		return "(no free params)"

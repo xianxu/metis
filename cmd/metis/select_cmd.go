@@ -448,7 +448,7 @@ func freeParamMapStr(m map[string]any) string {
 	sort.Strings(keys)
 	parts := make([]string, 0, len(keys))
 	for _, k := range keys {
-		parts = append(parts, fmt.Sprintf("%s=%v", k, m[k]))
+		parts = append(parts, k+"="+renderFreeParamValue(m[k]))
 	}
 	return strings.Join(parts, " ")
 }
