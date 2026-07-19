@@ -1,12 +1,13 @@
 ---
 id: 000026
-status: working
+status: codecomplete
 deps: [000027]
 github_issue:
 created: 2026-07-11
 updated: 2026-07-19
 estimate_hours:
 started: 2026-07-19T16:02:06-07:00
+actual_hours: 0.06
 ---
 
 # sweep key = shape blob-hash, not repo HEAD sweep_sha
@@ -73,6 +74,7 @@ tracked separately; this issue is the *sweep-file* identity, that one is the *ru
   issue to file once that design converges).
 
 ### 2026-07-19 — CLOSED as subsumed by #27 (verified)
+- 2026-07-19: closed — Subsumed by #27 (verified by code trace, no new code needed). Both Done-when met: (1) shape blob-hash IS the intent identity via PointAddress=hash(resolved_with,shape_blob_hash,seed); shape bytes recoverable from a row: point_addr->runs/<id>/record.json->Steps[].Code.D carries the shape .md (path,blob-hash) via addSpecToClosure->git cat-file blob <hash>, dirty-safe (hash-object -w, pinned by refs/metis/sweeps/<id>). (2) repo-HEAD sweep_sha column removed; runs still distinguished by point_addr+code_fingerprint; no identity term keys off repo-HEAD (only Code.Commit provenance remains). Continuation risk cleared: nothing keys off repo-HEAD sweep_sha. Reconciled stale sweep_sha/--sweep vocabulary in workshop/lessons.md. Residual "all shape variations swept" query demand-gated/deferred per operator (natural home = #28 metis reproduce).; review verdict: SHIP
 Re-surveyed the current code before planning (the `deps:[27]` gate resolved — #27 is in history). Every
 goal here is already MET by #27 (commits `8c7483a` "PointAddress = hash(resolved_with, shape_blob_hash,
 seed)" + `cfafcfa` "CodeFingerprint over the run-end D closure"). Traced against the two Done-when items:
