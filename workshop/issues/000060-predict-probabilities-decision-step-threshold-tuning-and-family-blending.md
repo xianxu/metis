@@ -131,3 +131,7 @@ folded; the honesty deviation confirmed sound by the reviewer).
   honesty guarantee path), priors comment corrected, int-normalization comment.
 - Deltas logged by fork: docs folded into Task 2 commit; apply_offsets returns indices
   (callers map via classes_); no-op tie-break implemented as init-at-zeros.
+- EARLY MERGE (loud, deliberate): M1 publishes ahead of issue close because kbench#15 (the
+  M4 decision-grid sweep) depends on it cross-repo — the operator sweep's cohort fingerprint
+  should pin a published main commit, not a mutable branch checkout. M2 (blend) continues on
+  a FRESH branch name per the #148 no-reuse rule.
