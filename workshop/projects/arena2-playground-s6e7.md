@@ -87,3 +87,7 @@ friction (kbench layering). Everything else is out unless the competition says o
   Sequencing: kbench#13 is independent; #60 composes after. The arena M0–M3 structure is
   distilled as a reusable template: brain/workshop/pensive/2026-07-18-01-pensive-competition-arena-template.md
   (this project file is its worked example).
+- Demand #4 filed: metis#61 — `metis debug` read-only verb family, `feature-importance`
+  v0 (`--run <id> -n 10`; rf MDI / hist_gbm permutation-under-declared-metric). Motivated
+  by M3's interaction-ladder protocol (extend the strongest combos, guided by what the
+  winner actually used). Future members: `debug reliability`, `debug describe` (metis#5).
