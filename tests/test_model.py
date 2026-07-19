@@ -318,3 +318,136 @@ def test_fold_fit_offsets_main_model_is_all_training_rows():
                              decide={"offsets": {"holdout": 0.2}})
     # same seed + same (all) training rows -> identical main model predictions
     assert np.array_equal(m_argmax.predict(X), m_tuned.predict(X))
+
+
+# --- metis#65: seed passthrough (params-level seed override) ---
+
+
+def test_seed_passthrough_overrides_ctx_seed():
+    """A params["seed"] overrides the ctx seed at the estimator; absent = ctx seed (no re-key)."""
+    for kind in ("logreg", "rf", "hist_gbm"):
+        assert make_model(kind, seed=3).random_state == 3              # default: ctx seed
+        assert make_model(kind, seed=3, params={"seed": 7}).random_state == 7   # override wins
+        # override is independent of ctx seed (same eff_seed regardless of ctx)
+        a = make_model(kind, seed=0, params={"seed": 5}).random_state
+        b = make_model(kind, seed=999, params={"seed": 5}).random_state
+        assert a == b == 5
+
+
+def _noisy(n=300, seed=0):
+    """Non-separable frame (class overlap + label noise) — different bootstrap seeds yield
+    genuinely different forests here, unlike the trivially-separable `_separable`."""
+    X, y = make_classification(
+        n_samples=n, n_features=6, n_informative=3, n_redundant=0, n_clusters_per_class=2,
+        class_sep=0.6, flip_y=0.12, random_state=seed,
+    )
+    return X, y
+
+
+def test_seed_passthrough_changes_the_fit():
+    """The overridden seed must actually reach the fit — two rf seeds → different forests
+    (compared on predict_proba, sensitive to per-tree bootstrap differences)."""
+    X, y = _noisy(seed=1)
+    m1 = train(X, y, "rf", seed=0, params={"seed": 1, "max_depth": 3})
+    m2 = train(X, y, "rf", seed=0, params={"seed": 2, "max_depth": 3})
+    assert not np.allclose(m1.predict_proba(X), m2.predict_proba(X))   # distinct bootstraps
+    # and the override is deterministic (same seed → same fit, regardless of ctx seed)
+    m3 = train(X, y, "rf", seed=555, params={"seed": 1, "max_depth": 3})
+    assert np.array_equal(m1.predict_proba(X), m3.predict_proba(X))
+
+
+# --- metis#65: ensemble model kind (soft-vote blend, scorable in nested CV) ---
+
+
+def _ensemble_params(seeds=None):
+    """Two-member ensemble bundle (rf + hist_gbm). `seeds` (optional) seed-bags the members."""
+    rf = {"n_estimators": 20, "max_depth": 3}
+    gbm = {"max_iter": 20, "max_leaf_nodes": 7}
+    if seeds is not None:
+        rf, gbm = {**rf, "seed": seeds[0]}, {**gbm, "seed": seeds[1]}
+    return {"members": [{"rf": rf}, {"hist_gbm": gbm}]}
+
+
+def test_parse_model_config_ensemble_bundle():
+    """The ensemble bundle normalizes like any $any-map: {"ensemble": {...}} → ("ensemble", {...})."""
+    raw = {"ensemble": _ensemble_params()}
+    kind, params = parse_model_config(raw)
+    assert kind == "ensemble"
+    assert params == _ensemble_params()
+
+
+def test_make_model_ensemble_requires_members():
+    for bad in ({}, {"members": []}, {"members": "rf"}, {"weights": [1, 1]}):
+        with pytest.raises(ValueError, match="members"):
+            make_model("ensemble", seed=0, params=bad)
+
+
+def test_ensemble_train_predict_shapes_and_classes():
+    X, y = _separable()
+    m = train(X, y, "ensemble", seed=42, params=_ensemble_params())
+    preds = predict(m, X)
+    assert preds.shape == (len(y),)
+    assert set(np.unique(preds)).issubset(set(np.unique(y)))
+    # named by kind (DRY complexity recovery); suffixed -<i> for uniqueness.
+    assert list(m.named_estimators_) == ["rf-0", "hist_gbm-1"]
+
+
+def test_ensemble_predict_proba_is_member_mean():
+    """Soft vote (unweighted) = the plain mean of member predict_probas over estimators_."""
+    X, y = _separable()
+    m = train(X, y, "ensemble", seed=42, params=_ensemble_params())
+    member_mean = np.mean([e.predict_proba(X) for e in m.estimators_], axis=0)
+    assert np.allclose(m.predict_proba(X), member_mean)
+
+
+def test_ensemble_weights_tilt_the_average():
+    """weights re-weight the soft vote: [3,1] → (3·p_rf + 1·p_gbm)/4."""
+    X, y = _separable()
+    params = {**_ensemble_params(), "weights": [3, 1]}
+    m = train(X, y, "ensemble", seed=42, params=params)
+    p_rf, p_gbm = (e.predict_proba(X) for e in m.estimators_)
+    assert np.allclose(m.predict_proba(X), (3 * p_rf + 1 * p_gbm) / 4)
+
+
+def test_ensemble_single_member_matches_bare_model():
+    """A one-member ensemble is a degenerate no-op: its proba == the lone member's (a cheap pin)."""
+    X, y = _separable()
+    m = train(X, y, "ensemble", seed=42, params={"members": [{"rf": {"n_estimators": 20, "max_depth": 3}}]})
+    (lone,) = m.estimators_
+    assert np.allclose(m.predict_proba(X), lone.predict_proba(X))
+    assert complexity(m, "ensemble") == complexity(lone, "rf")
+
+
+def test_ensemble_complexity_is_sum_of_members():
+    """Aggregate capacity = Σ member realized complexities; member kind recovered from the name."""
+    X, y = _separable()
+    m = train(X, y, "ensemble", seed=42, params=_ensemble_params())
+    rf_fit, gbm_fit = m.estimators_
+    assert complexity(m, "ensemble") == complexity(rf_fit, "rf") + complexity(gbm_fit, "hist_gbm")
+
+
+def test_ensemble_seed_bagging_distinct_seeds_distinct_members():
+    """Seed-bagging (metis#65 ✕ ensemble): two rf members with DISTINCT seeds → distinct fits.
+    (rf, not hist_gbm — hist_gbm's random_state is a no-op below the 10k early-stopping cutoff.)"""
+    X, y = _noisy(seed=2)
+    params = {"members": [{"rf": {"n_estimators": 20, "max_depth": 3, "seed": 1}},
+                          {"rf": {"n_estimators": 20, "max_depth": 3, "seed": 2}}]}
+    m = train(X, y, "ensemble", seed=42, params=params)
+    a, b = m.estimators_
+    assert not np.allclose(a.predict_proba(X), b.predict_proba(X))   # the two seed-bags differ
+
+
+def test_ensemble_composes_with_decide_offsets():
+    """The decision layer tunes offsets on the ENSEMBLE's averaged proba (metis#60 ✕ #65)."""
+    import pandas as pd
+
+    X, y = _decide_frame()
+    folds = cv_folds(pd.DataFrame({"y": y}), 2, 0, stratify_col="y")
+    params = {"members": [{"rf": {"n_estimators": 20, "max_depth": 3}},
+                          {"logreg": {}}]}
+    score, model, offsets = fold_fit(X, y, folds, 0, "ensemble", 0, params,
+                                     metric="balanced_accuracy",
+                                     decide={"offsets": {"holdout": 0.2}})
+    assert offsets is not None and len(offsets) == 2   # per-class offsets on the blend
+    assert isinstance(model, type(train(X, y, "ensemble", 0, params)))  # a VotingClassifier
+    assert 0.0 <= score <= 1.0

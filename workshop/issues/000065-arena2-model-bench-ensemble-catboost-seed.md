@@ -89,7 +89,7 @@ so the generic `predict()` stays 1-D.
 
 ## Plan
 
-- [ ] **M1** — `ensemble` kind + seed passthrough in `metis/model.py`: make_model
+- [x] **M1** — `ensemble` kind + seed passthrough in `metis/model.py`: make_model
   VotingClassifier-soft (members named `<kind>-<i>`), member parse via parse_model_config,
   complexity=sum via member-name dispatch, MODELS += ensemble, `params.seed` override
   (`eff_seed`) at each estimator. Unit tests: soft-vote average = member mean, WEIGHTS tilt,
@@ -146,3 +146,13 @@ moving — flagged at start-plan.)
   bench). Sibling kbench issue runs the sweeps. Cross-repo: kbench runs against the LOCAL
   metis tree, so metis need not be merged before the kbench smoke/runs (the merge is the
   publish, not the execution dep).
+- **M1 done** — `ensemble` kind + seed passthrough in model.py (3 files: model.py,
+  test_model.py, test_steps.py). VotingClassifier(soft), members named `<kind>-<i>`,
+  complexity=Σ via member-name dispatch (DRY, no type-map), `params.seed` override. Tests:
+  soft-vote=member-mean, weights tilt, single-member≈bare, complexity=sum, decide=offsets
+  composition, seed override re-keys+changes-fit, seed-bagging distinct members, ensemble
+  through the step path. 116 pytest green; `go build` clean (zero Go edits — FamilyOf derives
+  `train.model=ensemble` structurally). Real-binary+forkserver smoke on a toy ensemble shape:
+  split→train→predict all ✓. Test-data note: seed-effect tests need NON-separable data
+  (rf bootstraps converge to identical hard preds on trivially-separable data) + predict_proba
+  comparison — a lesson.

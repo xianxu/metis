@@ -9,13 +9,14 @@ entrypoints (metis.steps.*) are the only place these meet the filesystem.
 from __future__ import annotations
 
 import numpy as np
-from sklearn.ensemble import HistGradientBoostingClassifier, RandomForestClassifier
+from sklearn.ensemble import (HistGradientBoostingClassifier, RandomForestClassifier,
+                              VotingClassifier)
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, balanced_accuracy_score
 
 from metis.split import cv_folds
 
-MODELS = frozenset({"logreg", "rf", "hist_gbm"})
+MODELS = frozenset({"logreg", "rf", "hist_gbm", "ensemble"})
 
 # The closed scorer set (metis#59). The ONE place a metric name resolves to a scorer —
 # fold_fit consumes it; the train step ALSO resolves eagerly at entry so an unknown
@@ -161,21 +162,43 @@ def make_model(kind: str, seed: int, params: dict | None = None):
 
     `params` are the swept hyperparams (from the `$any`-map branch); known keys are applied,
     unknown keys ignored (forward-compatible with shapes carrying extra knobs).
+
+    **Seed passthrough (metis#65):** a `params["seed"]` OVERRIDES the ctx seed for THIS
+    estimator (absent → ctx seed, byte-identical to before; present → re-keys the leaf since
+    it rides `with.model` → Kpre). This is what lets a shape sweep seed as a dimension, and —
+    composed with the `ensemble` kind — turns "one config × several seeds" into seed-bagging.
     """
     p = params or {}
+    eff_seed = int(p.get("seed", seed))
     if kind == "logreg":
-        return LogisticRegression(C=p.get("C", 1.0), max_iter=1000, random_state=seed)
+        return LogisticRegression(C=p.get("C", 1.0), max_iter=1000, random_state=eff_seed)
     if kind == "rf":
         return RandomForestClassifier(
             n_estimators=p.get("n_estimators", 100), max_depth=p.get("max_depth"),
             class_weight=p.get("class_weight"),
-            random_state=seed)
+            random_state=eff_seed)
     if kind == "hist_gbm":
         return HistGradientBoostingClassifier(
             learning_rate=p.get("learning_rate", 0.1), max_iter=p.get("max_iter", 100),
             max_leaf_nodes=p.get("max_leaf_nodes", 31), max_depth=p.get("max_depth"),
             class_weight=p.get("class_weight"),
-            random_state=seed)
+            random_state=eff_seed)
+    if kind == "ensemble":
+        # Soft-vote blend (metis#65): the blend made scorable INSIDE nested CV (vs `metis
+        # blend`'s post-hoc leaderboard-only combine). members = a list of $any-map bundles
+        # ({"rf": {...}}, ...) parsed by the SAME parse_model_config (ARCH-DRY, one level of
+        # recursion). Each member is NAMED by its kind (suffixed -<i> for uniqueness) so
+        # complexity() recovers the kind from the name — no estimator-type→kind reverse map.
+        # eff_seed is each member's BASE seed; a member's own params["seed"] still overrides
+        # (seed-bagging). VotingClassifier(soft) averages predict_proba (weighted by weights),
+        # exposing fit/predict/predict_proba/classes_ → it composes with decide/metric/seal
+        # unchanged.
+        members = p.get("members")
+        if not isinstance(members, list) or not members:
+            raise ValueError(f"ensemble needs a non-empty 'members' list; got {members!r}")
+        estimators = [(f"{mk}-{i}", make_model(mk, eff_seed, mp))
+                      for i, (mk, mp) in enumerate(parse_model_config(m) for m in members)]
+        return VotingClassifier(estimators=estimators, voting="soft", weights=p.get("weights"))
     raise ValueError(f"unknown model {kind!r}; want one of {sorted(MODELS)}")
 
 
@@ -219,6 +242,13 @@ def complexity(fitted, kind: str) -> float:
         # (Private attr: sklearn 1.9.0 exposes no public per-tree accessor; if an upgrade
         # breaks this, that's the regression site.)
         return float(sum(t.get_n_leaf_nodes() for stage in fitted._predictors for t in stage))
+    if kind == "ensemble":
+        # SUM of member realized complexities (aggregate capacity — the parsimony axis for a
+        # blend). Recover each member's kind from its NAME (set in make_model from the
+        # parse_model_config label, suffixed -<i>): rsplit on the LAST '-' — no kind name
+        # contains '-', so this is unambiguous and derives from the single kind source (DRY).
+        return float(sum(complexity(est, name.rsplit("-", 1)[0])
+                         for name, est in fitted.named_estimators_.items()))
     raise ValueError(f"complexity: unknown model kind {kind!r}; want one of {sorted(MODELS)}")
 
 
