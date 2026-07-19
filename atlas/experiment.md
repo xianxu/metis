@@ -143,6 +143,18 @@ wrapped by **thin step-executables** honoring the contract above. Hermetic via *
     learning_rate/max_iter/max_leaf_nodes/max_depth/class_weight — metis#21, #59); `params` threads through
     `train`/`cv_score` (default `{}` = sklearn defaults). Adding a model kind is Python-only (`MODELS`
     + `make_model` + `complexity`); the Go layer derives the family structurally (`FamilyOf`), zero edits.
+    **`ensemble` kind + seed passthrough (metis#65):** `ensemble` is a soft-vote blend built as
+    an sklearn `VotingClassifier(voting="soft")` over `params["members"]` (a list of the SAME
+    `$any`-map bundles, parsed by `parse_model_config` — one level of recursion) with optional
+    `params["weights"]` — **the blend made scorable INSIDE nested CV** (an honest OOF estimate),
+    as opposed to `metis blend`'s post-hoc leaderboard-only combine over promoted runs. It
+    exposes the estimator API, so it composes with decide/metric/seal unchanged; offsets tune on
+    the ensemble's AVERAGED proba. `complexity(ensemble)` = SUM of member realized complexities,
+    each member's kind recovered from its `VotingClassifier` NAME (`<kind>-<i>`, set from the
+    parse_model_config label — DRY, no estimator-type→kind reverse map). **Seed passthrough:**
+    `make_model` reads `eff_seed = params.get("seed", ctx_seed)` at every estimator — absent =
+    byte-identical (no re-key); present = a swept seed dimension that re-keys the leaf, and,
+    composed with `ensemble` (one config × distinct member seeds), IS seed-bagging.
   - **Model-config contract (`parse_model_config`, metis#12):** the `with["model"]` value is EITHER
     a kind string (`"logreg"`) OR the **`$any` map** (tagged, ex-`$oneof`) single-key bundle carrying the
     swept hyperparams (`{"rf": {"n_estimators": 200, "max_depth": 4}}`); `parse_model_config(raw) →
