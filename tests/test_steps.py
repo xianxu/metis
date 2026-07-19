@@ -125,6 +125,23 @@ def test_train_per_fold_emits_complexity_for_hist_gbm(tmp_path, monkeypatch):
     assert metrics["complexity"] > 0.0  # hist_gbm total leaves across boosted trees
 
 
+def test_train_per_fold_ensemble_through_step_path(tmp_path, monkeypatch):
+    """metis#65: an `ensemble` bundle flows through the SAME train step → parse_model_config →
+    make_model(VotingClassifier) → complexity seam and emits fold_score + a finite complexity
+    (the sum-of-members capacity). Covers the step/IO boundary the unit tests don't."""
+    run = tmp_path / "runs" / "r-ens"
+    _run_step(monkeypatch, run, "split", {"dataset": "toy", "k": 3, "stratify": True}, cv_split.main)
+    ts = _run_step(monkeypatch, run, "train",
+                   {"dataset": "toy", "folds": "split",
+                    "model": {"ensemble": {"members": [
+                        {"rf": {"n_estimators": 15, "max_depth": 3}},
+                        {"hist_gbm": {"max_iter": 15, "max_leaf_nodes": 8}}]}},
+                    "_fold": {"partition": "p", "idx": 0}}, train.main)
+    metrics = json.loads((ts / "metrics.json").read_text())
+    assert 0.0 <= metrics["fold_score"] <= 1.0
+    assert metrics["complexity"] > 0.0  # Σ member complexities (rf mean-leaves + gbm total-leaves)
+
+
 def test_step_context_requires_env(monkeypatch):
     for v in ("METIS_STEP_DIR", "METIS_RUN_DIR", "METIS_STEP_ID", "METIS_EXP_DIR", "METIS_SEED"):
         monkeypatch.delenv(v, raising=False)

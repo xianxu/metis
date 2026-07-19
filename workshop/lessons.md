@@ -312,3 +312,27 @@ the thrash: starts ≫ completions with the process alive (throughput ≈ 0) —
 - **A 2-line #!/bin/sh step script makes single-step exec hermetically testable** — a toy
   submission step (copy predictions → $METIS_STEP_DIR) exercises the full env contract +
   literal-path landing with no real binary or venv; reuse for future step-seam verb tests.
+
+## Implementation lessons (metis#65 — ensemble/catboost/seed, 2026-07-19)
+
+- **Adding a model kind is genuinely Python-only** (confirmed a third time): `MODELS` +
+  `make_model` + `complexity`, and the Go `FamilyOf` derives `train.model=<kind>` structurally
+  from the `$any`-map branch label — no Go/CUE enum, no README kind list. Keep kind names
+  hyphen-free (the ensemble member-name recovery does `rsplit("-", 1)`).
+- **Seed-effect tests need NON-separable data + a `predict_proba` comparison.** rf bootstraps
+  (different seeds) converge to identical HARD predictions on trivially-separable data —
+  `predict()` equality is a false negative for "did the seed reach the fit". Use a noisy frame
+  and compare probabilities. (hist_gbm's `random_state` is a further trap: a no-op below the
+  ~10k early-stopping cutoff — use rf for seed-diversity tests.)
+- **A `$any` model map keys branches by KIND**, so only ONE `ensemble` branch fits per shape
+  (blend and seed-bag are both `ensemble` → same `FamilyOf` → indistinguishable in select).
+  Multiple ensembles must live in separate sweep cohorts.
+- **CatBoost integration checklist** (any heavy external estimator): `allow_writing_files=False`
+  (its default writes `catboost_info/` — an IO side-effect breaching ARCH-PURE), `logging_level="Silent"`,
+  `thread_count=1` (orchestrator owns parallelism + determinism); lazy-import it inside the
+  make_model branch (keeps matplotlib/plotly/graphviz out of the forkserver preload for other
+  kinds); `.predict()` returns `(n,1)` and can return FLOAT labels → normalize at the ONE
+  `predict()` site with `.reshape(-1).astype(classes_.dtype)` (a no-op for sklearn kinds).
+- **Estimate block grammar (ariadne #182-branch parser):** `item:` lines must be BARE
+  (`item: <slug>  design=<f> impl=<f>`) — a trailing `# comment` breaks `itemRE` and the line
+  falls through to "unknown estimate field". Total must reconcile: `total = Σdesign×(1+buffer) + Σimpl`.

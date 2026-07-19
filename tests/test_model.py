@@ -5,8 +5,8 @@ import pytest
 from sklearn.datasets import make_classification
 
 from metis.model import (apply_offsets, complexity, cv_score, fold_fit, fold_score, make_model,
-                         parse_decide, parse_model_config, predict, resolve_scorer,
-                         train, tune_class_offsets)
+                         parse_decide, parse_model_config, predict, predict_proba,
+                         resolve_scorer, train, tune_class_offsets)
 from metis.split import cv_folds
 
 
@@ -318,3 +318,239 @@ def test_fold_fit_offsets_main_model_is_all_training_rows():
                              decide={"offsets": {"holdout": 0.2}})
     # same seed + same (all) training rows -> identical main model predictions
     assert np.array_equal(m_argmax.predict(X), m_tuned.predict(X))
+
+
+# --- metis#65: seed passthrough (params-level seed override) ---
+
+
+def test_seed_passthrough_overrides_ctx_seed():
+    """A params["seed"] overrides the ctx seed at the estimator; absent = ctx seed (no re-key)."""
+    for kind in ("logreg", "rf", "hist_gbm"):
+        assert make_model(kind, seed=3).random_state == 3              # default: ctx seed
+        assert make_model(kind, seed=3, params={"seed": 7}).random_state == 7   # override wins
+        # override is independent of ctx seed (same eff_seed regardless of ctx)
+        a = make_model(kind, seed=0, params={"seed": 5}).random_state
+        b = make_model(kind, seed=999, params={"seed": 5}).random_state
+        assert a == b == 5
+
+
+def _noisy(n=300, seed=0):
+    """Non-separable frame (class overlap + label noise) — different bootstrap seeds yield
+    genuinely different forests here, unlike the trivially-separable `_separable`."""
+    X, y = make_classification(
+        n_samples=n, n_features=6, n_informative=3, n_redundant=0, n_clusters_per_class=2,
+        class_sep=0.6, flip_y=0.12, random_state=seed,
+    )
+    return X, y
+
+
+def test_seed_passthrough_changes_the_fit():
+    """The overridden seed must actually reach the fit — two rf seeds → different forests
+    (compared on predict_proba, sensitive to per-tree bootstrap differences)."""
+    X, y = _noisy(seed=1)
+    m1 = train(X, y, "rf", seed=0, params={"seed": 1, "max_depth": 3})
+    m2 = train(X, y, "rf", seed=0, params={"seed": 2, "max_depth": 3})
+    assert not np.allclose(m1.predict_proba(X), m2.predict_proba(X))   # distinct bootstraps
+    # and the override is deterministic (same seed → same fit, regardless of ctx seed)
+    m3 = train(X, y, "rf", seed=555, params={"seed": 1, "max_depth": 3})
+    assert np.array_equal(m1.predict_proba(X), m3.predict_proba(X))
+
+
+# --- metis#65: ensemble model kind (soft-vote blend, scorable in nested CV) ---
+
+
+def _ensemble_params(seeds=None):
+    """Two-member ensemble bundle (rf + hist_gbm). `seeds` (optional) seed-bags the members."""
+    rf = {"n_estimators": 20, "max_depth": 3}
+    gbm = {"max_iter": 20, "max_leaf_nodes": 7}
+    if seeds is not None:
+        rf, gbm = {**rf, "seed": seeds[0]}, {**gbm, "seed": seeds[1]}
+    return {"members": [{"rf": rf}, {"hist_gbm": gbm}]}
+
+
+def test_parse_model_config_ensemble_bundle():
+    """The ensemble bundle normalizes like any $any-map: {"ensemble": {...}} → ("ensemble", {...})."""
+    raw = {"ensemble": _ensemble_params()}
+    kind, params = parse_model_config(raw)
+    assert kind == "ensemble"
+    assert params == _ensemble_params()
+
+
+def test_make_model_ensemble_requires_members():
+    for bad in ({}, {"members": []}, {"members": "rf"}, {"weights": [1, 1]}):
+        with pytest.raises(ValueError, match="members"):
+            make_model("ensemble", seed=0, params=bad)
+
+
+def test_ensemble_train_predict_shapes_and_classes():
+    X, y = _separable()
+    m = train(X, y, "ensemble", seed=42, params=_ensemble_params())
+    preds = predict(m, X)
+    assert preds.shape == (len(y),)
+    assert set(np.unique(preds)).issubset(set(np.unique(y)))
+    # named by kind (DRY complexity recovery); suffixed -<i> for uniqueness.
+    assert list(m.named_estimators_) == ["rf-0", "hist_gbm-1"]
+
+
+def test_ensemble_predict_proba_is_member_mean():
+    """Soft vote (unweighted) = the plain mean of member predict_probas over estimators_."""
+    X, y = _separable()
+    m = train(X, y, "ensemble", seed=42, params=_ensemble_params())
+    member_mean = np.mean([e.predict_proba(X) for e in m.estimators_], axis=0)
+    assert np.allclose(m.predict_proba(X), member_mean)
+
+
+def test_ensemble_weights_tilt_the_average():
+    """weights re-weight the soft vote: [3,1] → (3·p_rf + 1·p_gbm)/4."""
+    X, y = _separable()
+    params = {**_ensemble_params(), "weights": [3, 1]}
+    m = train(X, y, "ensemble", seed=42, params=params)
+    p_rf, p_gbm = (e.predict_proba(X) for e in m.estimators_)
+    assert np.allclose(m.predict_proba(X), (3 * p_rf + 1 * p_gbm) / 4)
+
+
+def test_ensemble_single_member_is_softvote_noop():
+    """A one-member ensemble is a degenerate no-op: the soft vote OF ONE == the lone member's
+    proba (mean of a single element), and its complexity == that member's."""
+    X, y = _separable()
+    m = train(X, y, "ensemble", seed=42, params={"members": [{"rf": {"n_estimators": 20, "max_depth": 3}}]})
+    (lone,) = m.estimators_
+    assert np.allclose(m.predict_proba(X), lone.predict_proba(X))
+    assert complexity(m, "ensemble") == complexity(lone, "rf")
+
+
+def test_ensemble_seed_propagates_to_seedless_members():
+    """The ensemble's eff_seed is each member's BASE seed: a member with no `seed` of its own
+    inherits it (a member's own `seed` still overrides — the seed-bagging path above)."""
+    m = make_model("ensemble", seed=13,
+                   params={"members": [{"rf": {"n_estimators": 5}}, {"rf": {"n_estimators": 5, "seed": 99}}]})
+    by_name = dict(m.estimators)   # the unfitted input (name, estimator) pairs
+    assert by_name["rf-0"].random_state == 13   # inherits ensemble eff_seed
+    assert by_name["rf-1"].random_state == 99   # own seed overrides
+
+
+def test_ensemble_complexity_is_sum_of_members():
+    """Aggregate capacity = Σ member realized complexities; member kind recovered from the name."""
+    X, y = _separable()
+    m = train(X, y, "ensemble", seed=42, params=_ensemble_params())
+    rf_fit, gbm_fit = m.estimators_
+    assert complexity(m, "ensemble") == complexity(rf_fit, "rf") + complexity(gbm_fit, "hist_gbm")
+
+
+def test_ensemble_seed_bagging_distinct_seeds_distinct_members():
+    """Seed-bagging (metis#65 ✕ ensemble): two rf members with DISTINCT seeds → distinct fits.
+    (rf, not hist_gbm — hist_gbm's random_state is a no-op below the 10k early-stopping cutoff.)"""
+    X, y = _noisy(seed=2)
+    params = {"members": [{"rf": {"n_estimators": 20, "max_depth": 3, "seed": 1}},
+                          {"rf": {"n_estimators": 20, "max_depth": 3, "seed": 2}}]}
+    m = train(X, y, "ensemble", seed=42, params=params)
+    a, b = m.estimators_
+    assert not np.allclose(a.predict_proba(X), b.predict_proba(X))   # the two seed-bags differ
+
+
+def test_ensemble_composes_with_decide_offsets():
+    """The decision layer tunes offsets on the ENSEMBLE's averaged proba (metis#60 ✕ #65)."""
+    import pandas as pd
+
+    X, y = _decide_frame()
+    folds = cv_folds(pd.DataFrame({"y": y}), 2, 0, stratify_col="y")
+    params = {"members": [{"rf": {"n_estimators": 20, "max_depth": 3}},
+                          {"logreg": {}}]}
+    score, model, offsets = fold_fit(X, y, folds, 0, "ensemble", 0, params,
+                                     metric="balanced_accuracy",
+                                     decide={"offsets": {"holdout": 0.2}})
+    assert offsets is not None and len(offsets) == 2   # per-class offsets on the blend
+    assert isinstance(model, type(train(X, y, "ensemble", 0, params)))  # a VotingClassifier
+    assert 0.0 <= score <= 1.0
+
+
+# --- metis#65 M2: catboost kind (the M5 mechanism bet) ---
+
+
+def _skewed_3class(n_major=180, n_mid=40, n_minor=20, seed=0):
+    """A 3-class skewed frame (≈s6e7's shape) with a weakly-informative feature — enough for
+    balanced weighting to visibly change the fit."""
+    rng = np.random.default_rng(seed)
+    X = np.concatenate([rng.normal(0.0, 1.0, n_major), rng.normal(1.2, 1.0, n_mid),
+                        rng.normal(2.4, 1.0, n_minor)]).reshape(-1, 1)
+    y = np.array([0] * n_major + [1] * n_mid + [2] * n_minor)
+    return X, y
+
+
+def test_catboost_train_predict_shapes_1d():
+    X, y = _separable()
+    m = train(X, y, "catboost", seed=42, params={"iterations": 20, "depth": 3})
+    preds = predict(m, X)
+    assert preds.shape == (len(y),)                       # raveled (catboost predict is (n,1))
+    assert set(np.unique(preds)).issubset(set(np.unique(y)))
+    assert predict_proba(m, X).shape == (len(y), 2)
+
+
+def test_catboost_deterministic_and_seed_override():
+    X, y = _skewed_3class()
+    p1 = predict_proba(train(X, y, "catboost", seed=7, params={"iterations": 20, "depth": 3}), X)
+    p2 = predict_proba(train(X, y, "catboost", seed=7, params={"iterations": 20, "depth": 3}), X)
+    assert np.array_equal(p1, p2)                         # deterministic (thread_count=1 + seed)
+    # params.seed overrides ctx seed (eff_seed → random_seed) and changes the fit
+    pa = predict_proba(train(X, y, "catboost", seed=0, params={"iterations": 20, "depth": 3, "seed": 1}), X)
+    pb = predict_proba(train(X, y, "catboost", seed=0, params={"iterations": 20, "depth": 3, "seed": 2}), X)
+    assert not np.allclose(pa, pb)
+
+
+def test_catboost_class_weight_balanced_changes_fit():
+    """class_weight: balanced → auto_class_weights='Balanced' → a different fit on skewed data;
+    an unknown class_weight is loud."""
+    X, y = _skewed_3class()
+    none = predict_proba(train(X, y, "catboost", seed=0, params={"iterations": 30, "depth": 3}), X)
+    bal = predict_proba(train(X, y, "catboost", seed=0,
+                              params={"iterations": 30, "depth": 3, "class_weight": "balanced"}), X)
+    assert not np.allclose(none, bal)                     # reweighting reached the fit
+    with pytest.raises(ValueError, match="class_weight"):
+        make_model("catboost", seed=0, params={"class_weight": "subsample"})
+
+
+def test_catboost_complexity_is_treecount_times_leaves():
+    X, y = _separable()
+    m = train(X, y, "catboost", seed=42, params={"iterations": 20, "depth": 3})
+    assert complexity(m, "catboost") == float(m.tree_count_ * (2 ** 3))
+    assert complexity(m, "catboost") > 0.0
+    # more iterations → more trees → strictly greater capacity
+    m40 = train(X, y, "catboost", seed=42, params={"iterations": 40, "depth": 3})
+    assert complexity(m40, "catboost") > complexity(m, "catboost")
+
+
+def test_catboost_no_side_effect_dir(tmp_path, monkeypatch):
+    """allow_writing_files=False → no catboost_info/ written (ARCH-PURE: no IO in the core)."""
+    monkeypatch.chdir(tmp_path)
+    X, y = _separable()
+    train(X, y, "catboost", seed=0, params={"iterations": 10, "depth": 3})
+    assert not (tmp_path / "catboost_info").exists()
+
+
+def test_catboost_fold_score_path_and_int_labels():
+    """The nested-CV path arena2 actually consumes (fold_score → fold_fit → predict) works for
+    catboost, and predictions come back as INT labels (not float '0.0' — the ship-submission
+    dtype the s6e7 submission step needs, review M2 Important #1)."""
+    import pandas as pd
+
+    X, y = _skewed_3class()
+    folds = cv_folds(pd.DataFrame({"y": y}), 3, 0, stratify_col="y")
+    s = fold_score(X, y, folds, 0, "catboost", 0,
+                   params={"iterations": 20, "depth": 3}, metric="balanced_accuracy")
+    assert 0.0 <= s <= 1.0
+    preds = predict(train(X, y, "catboost", 0, params={"iterations": 20, "depth": 3}), X)
+    assert preds.dtype.kind in "iu"                       # integer labels, NOT float
+    assert set(preds.tolist()) <= set(int(c) for c in np.unique(y))
+
+
+def test_catboost_as_ensemble_member():
+    """The compose seam (plan-review M2 note): catboost inside an ensemble — named catboost-<i>,
+    complexity recovered via the same rsplit dispatch (catboost is hyphen-free)."""
+    X, y = _separable()
+    params = {"members": [{"catboost": {"iterations": 15, "depth": 3}},
+                          {"rf": {"n_estimators": 15, "max_depth": 3}}]}
+    m = train(X, y, "ensemble", seed=42, params=params)
+    assert list(m.named_estimators_) == ["catboost-0", "rf-1"]
+    cb_fit, rf_fit = m.estimators_
+    assert complexity(m, "ensemble") == complexity(cb_fit, "catboost") + complexity(rf_fit, "rf")
+    assert predict(m, X).shape == (len(y),)
