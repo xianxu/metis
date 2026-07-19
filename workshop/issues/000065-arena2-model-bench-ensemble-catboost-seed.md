@@ -142,6 +142,7 @@ moving — flagged at start-plan.)
 ## Log
 
 ### 2026-07-19
+- 2026-07-19: closed M1 — ensemble kind + seed passthrough: 116 pytest green (soft-vote=member-mean, weights tilt, single-member≈bare, complexity=Σmembers, decide=offsets composition, seed override re-keys+changes-fit, seed-bagging distinct members, ensemble-through-step-path); go build -o bin/metis clean (zero Go edits — FamilyOf structural); real-binary+forkserver smoke on toy ensemble shape split→train→predict ok; atlas updated (ensemble+seed surface). --no-actual: session interleaves metis+kbench issues.; review verdict: SHIP
 - Opened + claimed. Enables arena2 M4-blend (ensemble outer-CV measurement) + M5 (catboost
   bench). Sibling kbench issue runs the sweeps. Cross-repo: kbench runs against the LOCAL
   metis tree, so metis need not be merged before the kbench smoke/runs (the merge is the

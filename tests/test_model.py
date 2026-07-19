@@ -409,13 +409,24 @@ def test_ensemble_weights_tilt_the_average():
     assert np.allclose(m.predict_proba(X), (3 * p_rf + 1 * p_gbm) / 4)
 
 
-def test_ensemble_single_member_matches_bare_model():
-    """A one-member ensemble is a degenerate no-op: its proba == the lone member's (a cheap pin)."""
+def test_ensemble_single_member_is_softvote_noop():
+    """A one-member ensemble is a degenerate no-op: the soft vote OF ONE == the lone member's
+    proba (mean of a single element), and its complexity == that member's."""
     X, y = _separable()
     m = train(X, y, "ensemble", seed=42, params={"members": [{"rf": {"n_estimators": 20, "max_depth": 3}}]})
     (lone,) = m.estimators_
     assert np.allclose(m.predict_proba(X), lone.predict_proba(X))
     assert complexity(m, "ensemble") == complexity(lone, "rf")
+
+
+def test_ensemble_seed_propagates_to_seedless_members():
+    """The ensemble's eff_seed is each member's BASE seed: a member with no `seed` of its own
+    inherits it (a member's own `seed` still overrides — the seed-bagging path above)."""
+    m = make_model("ensemble", seed=13,
+                   params={"members": [{"rf": {"n_estimators": 5}}, {"rf": {"n_estimators": 5, "seed": 99}}]})
+    by_name = dict(m.estimators)   # the unfitted input (name, estimator) pairs
+    assert by_name["rf-0"].random_state == 13   # inherits ensemble eff_seed
+    assert by_name["rf-1"].random_state == 99   # own seed overrides
 
 
 def test_ensemble_complexity_is_sum_of_members():
