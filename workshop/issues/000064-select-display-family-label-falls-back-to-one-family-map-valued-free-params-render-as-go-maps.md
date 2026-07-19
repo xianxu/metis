@@ -1,12 +1,13 @@
 ---
 id: 000064
-status: working
+status: codecomplete
 deps: []
 github_issue:
 created: 2026-07-19
 updated: 2026-07-19
 estimate_hours: 0.5
 started: 2026-07-19T00:11:37-07:00
+actual_hours: 0.23
 ---
 
 # select display: family label falls back to (one family); map-valued free-params render as Go maps
@@ -83,6 +84,7 @@ against `baseline-v3.1.md`. Method A only.)
 ## Log
 
 ### 2026-07-19
+- 2026-07-19: closed — pure bugfix, no new architectural surface (matcher canonicalization + display rendering). Regression tests green (null==absent, distinct unequal, JSON rendering); full Go+python suites; RETROACTIVE heal verified on the live kbench M4 ledger without re-run — both families label+list correctly incl. the previously-dropped cw=null gbm winner; review verdict: FIX-THEN-SHIP
 
 ### 2026-07-19 (fix)
 
@@ -94,3 +96,7 @@ against `baseline-v3.1.md`. Method A only.)
   (gbm winner = cw=null + offsets — the very row that was silently dropped), decide renders
   as JSON. The operator's --point workaround run (point-hist_gbm-501f3358) remains valid
   blend material.
+- Close-review FIX-THEN-SHIP fixes bundled: test (b) delivered (Encode→Decode round-trip
+  through the REAL cell/decode seam — found+fixed a test-data bug of its own: fixed params
+  are not free params), and the nil-drop made symmetric on `want` (fresh in-memory rows
+  with explicit nils now match too).

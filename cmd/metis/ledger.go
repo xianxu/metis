@@ -98,14 +98,23 @@ func freeParamsEqual(p shape.Point, want map[string]any) bool {
 	// so a round-tripped row is KEY-ABSENT where the expanded point carries an explicit nil.
 	// Canonicalize null ≡ absent by dropping nil-valued entries from the point's map — the
 	// matcher-side fix heals existing ledgers retroactively (no re-run, no format change).
+	// The drop is applied to BOTH sides: `want` normally comes from loadLedger (already
+	// key-absent), but a fresh in-memory row (e.g. manifest-derived) may carry explicit
+	// nils — symmetric normalization keeps the predicate total (close-review minor).
 	pm := freeParamMap(p) // reuses the sweep driver's renderer
 	for k, v := range pm {
 		if v == nil {
 			delete(pm, k)
 		}
 	}
+	wm := make(map[string]any, len(want))
+	for k, v := range want {
+		if v != nil {
+			wm[k] = v
+		}
+	}
 	gb, err1 := json.Marshal(pm)
-	wb, err2 := json.Marshal(want)
+	wb, err2 := json.Marshal(wm)
 	return err1 == nil && err2 == nil && bytes.Equal(gb, wb)
 }
 

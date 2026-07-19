@@ -148,3 +148,62 @@ func TestFreeParamStr_CompositeValuesRenderAsJSON(t *testing.T) {
 		t.Errorf("composite free-param rendering: got %q, want %q", s, want)
 	}
 }
+
+func TestFamilyEstimate_NullRungSurvivesCSVRoundTrip(t *testing.T) {
+	// The end-to-end symptom (metis#64): a family whose winner carries a NULL rung must keep
+	// its label after the ledger's Encode→Decode round-trip (cell(nil)="" + decode-skip →
+	// key-absent want vs explicit-nil point). Pins the cell/decode ↔ matcher SEAM — test (a)
+	// alone would miss a future change to cell's null encoding.
+	sh, err := experiment.ParseShape(`---
+type: experiment-shape
+id: nulltest
+seed: 1
+pipeline:
+  - id: train
+    uses: metis/train
+    with:
+      model:
+        $any:
+          hist_gbm: {class_weight: {$any: [null, balanced]}}
+          rf: {class_weight: balanced}
+sweeper:
+  sampler: grid
+  resample: {cv: {k: 2, stratify: false}}
+  objective: {metric: train.fold_score, direction: maximize}
+---
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	led := ledger.Ledger{Rows: []ledger.Row{
+		{CodeFingerprint: "fp1", PointAddr: "a1", Level: "outer", Status: "ok",
+			FreeParams: map[string]any{"train.model": "hist_gbm"}, // cw=null → key ABSENT post-roundtrip
+			Metrics:    map[string]float64{"train.fold_score": 0.9}},
+		{CodeFingerprint: "fp1", PointAddr: "a2", Level: "outer", Status: "ok",
+			FreeParams: map[string]any{"train.model": "rf"}, // cw FIXED in the shape → not a free param
+			Metrics:    map[string]float64{"train.fold_score": 0.8}},
+	}}
+	b, err := ledger.Encode(led)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt, err := ledger.Decode(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	est := familyEstimateFromLedger(sh, rt, "train.fold_score")
+	if _, ok := est["train.model=hist_gbm"]; !ok {
+		t.Errorf("null-rung family lost its label through the CSV round-trip; got keys %v", keysOf(est))
+	}
+	if _, ok := est["train.model=rf"]; !ok {
+		t.Errorf("rf family missing; got keys %v", keysOf(est))
+	}
+}
+
+func keysOf[V any](m map[string]V) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
+}
