@@ -1,11 +1,12 @@
 ---
 id: 000036
-status: open
+status: working
 deps: [metis#35]
 github_issue:
 created: 2026-07-14
-updated: 2026-07-14
+updated: 2026-07-19
 estimate_hours:
+started: 2026-07-19T16:22:10-07:00
 ---
 
 # channel split: y as runner-scoped keyed artifact — nested CV as domain restriction (metis-v3)
