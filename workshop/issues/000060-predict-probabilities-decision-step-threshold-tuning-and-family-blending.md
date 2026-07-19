@@ -112,7 +112,7 @@ folded; the honesty deviation confirmed sound by the reviewer).
 
 - [x] M1 — decision core (proba/tune/apply/parse, fold_fit 3-tuple) + train/predict wiring +
   dedicated decide frame tests + docs (two honest costs) + milestone-close
-- [ ] M2 — `metis blend` (weights-only) + close
+- [x] M2 — `metis blend` (weights-only) + close
 
 ## Log
 
@@ -135,3 +135,12 @@ folded; the honesty deviation confirmed sound by the reviewer).
   M4 decision-grid sweep) depends on it cross-repo — the operator sweep's cohort fingerprint
   should pin a published main commit, not a mutable branch checkout. M2 (blend) continues on
   a FRESH branch name per the #148 no-reuse rule.
+
+### 2026-07-19 (M2 — metis blend)
+
+- Fork commit 4a31b87 on 000060-m2-blend (manual fresh branch — change-code ran at M1; #148
+  no-reuse; loud continuation as planned): blend.go + 8 tests + main.go registration.
+  execStep.Execute fit exactly as the symbol-level review specified. Blend record embeds all
+  shape steps (runref first-slug-wins asserted in-test). Suites: blend 8/8, full Go, 104
+  python — independently re-verified. Provenance guard + --allow-mixed live; single-member
+  identity + slug-resolution + literal-path tests in.
