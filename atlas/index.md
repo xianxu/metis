@@ -161,7 +161,10 @@ identical on a non-Kaggle platform?* — if yes, it lives here.
   a `prioritySem` that dispatches leaves in a fold-numbered priority queue (fold 0 finishes first →
   the live mean±SE tightens fold-by-fold; backfill is emergent, no idle core), byte-identical to the
   default run; board **Q** = a clean graceful finalize (soft-latch, abandon in-flight folds, honest
-  partial `out<n>` + partial ledger). See `atlas/experiment.md`. The sweeper
+  partial `out<n>` + partial ledger). `--auto-stop` (implies `--live`) reads the incumbent from the
+  shape's prior ledger and, after each outer fold (n≥2), stops a family whose full-k mean is
+  <95%-likely to reach it (pure `shouldStop`, losers only, `stopped: auto` ledger marker; sequential
+  outer folds). See `atlas/experiment.md`. The sweeper
   (`GridConfigs ⊃ FixedKFolds`) is extracted as
   `runSweeper`/`sweepPass` (per-call accumulators) so `driver:cv` can run it once **per outer fold**,
   each pass repointed at that fold's sealed `analysis_i` + confined (`METIS_READ_ROOT`) — the flat

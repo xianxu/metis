@@ -285,6 +285,23 @@ wrapped by **thin step-executables** honoring the contract above. Hermetic via *
   outer folds drain fast and are ABANDONED (`ss.abandoned`, excluded from `driverEvent`/the estimate),
   and `finalizeStopped` reports an honest partial `out<n>` over the completed folds + writes the
   partial ledger (both the full and stopped tails funnel through `persistNestedAndReport`, ARCH-DRY).
+- **`--auto-stop` — incumbent-referenced loser stop (metis#66 M2) — `cmd/metis/autostop.go` + `sweep.go`:**
+  reads the incumbent ONCE at run start from the shape's EXISTING ledger (`readIncumbent`: the best
+  per-family OUTER aggregate mean by direction — no `--baseline`; prior-runs-only because
+  `writeSweepLedger` runs at finalize). Runs the OUTER folds SEQUENTIALLY (`outerParallel=false`;
+  inner sweeper/resample stay parallel — cores busy within a fold) so each fold's decision cleanly
+  gates the next. After each completed fold, `evaluateAutoStop` applies the PURE `shouldStop` rule:
+  a family with n≥2 scores whose one-sided 95% predictive bound on its full-k mean
+  (`SEpred² = s²·r/k²·(1+r/n)`, `t_{n-1}` via `tCrit`) can't reach the incumbent is added to
+  `stoppedFams` — **losers only** (a would-be winner's bound straddles the incumbent → runs full k;
+  a truncated optimistic estimate is never shippable). `activeConfigs` drops stopped families' configs
+  from later folds' sealed sweeps (the real budget reclaim — the inner sweep is the cost), never to
+  empty. `markStoppedRows` retroactively tags a stopped family's outer rows `stopped: auto`
+  (`ledger.Row.Stopped`, a ragged CSV column like fold/level/outer_fold). The rule is documented +
+  unit-tested (`autostop_test.go`: loser stops / winner never truncated / borderline spared / both
+  directions / `tCrit` table); the e2e (`autostop_e2e_test.go`) stops a known loser while the winner
+  runs full k. Composes with `--live` (`--auto-stop` implies it); the `--live` determinism guarantee
+  scopes to `--live` — an `--auto-stop` run is intentionally a smaller, different computation.
 - **Board banding + result-last (metis#55):** color lives in the PAINTER only (renderBoard
   stays plain — the paint/content split): `redraw` adds a dim full-width `─` separator rule
   above the frame (counted in the erase math), bolds the aggregate line, colors ✓/▸ glyphs

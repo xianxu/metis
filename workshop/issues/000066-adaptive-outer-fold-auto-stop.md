@@ -123,12 +123,30 @@ partial finalize); `method-b-decisions` = the predictive stop rule (2 decisions 
   clean stop-latch → abandon in-flight folds → partial ledger + honest `out<n>`).
   Determinism test (`--live` ≡ default, byte-identical), prioritySem unit test (grant
   order + backfill invariant + `-race`), Q-finalize test.
-- [ ] **M2** — `--auto-stop`: sequential-outer scheduling + per-fold family filtering; read
+- [x] **M2** — `--auto-stop`: sequential-outer scheduling + per-fold family filtering; read
   incumbent from the shape's existing ledger; documented predictive stopping rule (pure
   `shouldStop`, losers only, t_{n-1} one-sided 95%); `stopped: auto` ledger marker; e2e
   (loser stopped, winner runs full k).
 
 ## Log
+
+### 2026-07-19 — M2 implemented (`--auto-stop`)
+- **Incumbent** read ONCE at run start from the shape's existing ledger (`readIncumbent`: best
+  per-family OUTER aggregate mean by direction; no `--baseline`; prior-runs-only since
+  `writeSweepLedger` runs at finalize). Empty ledger → loud no-op (full sweep).
+- **Sequential outer folds** under `--auto-stop` (`outerParallel=false`; inner levels stay
+  parallel) so each fold's stop decision cleanly gates the next fold's config set — the review's
+  race-free requirement. `activeConfigs` drops stopped families' configs from later folds' sealed
+  sweeps (the real budget reclaim: the inner sweep is the cost), never to empty.
+- **Rule** (pure `shouldStop`/`tCrit`, `autostop.go`, documented): predictive one-sided 95% bound
+  on the full-k mean `SEpred² = s²·r/k²·(1+r/n)`, t_{n-1}. Stop iff even the best plausible full-k
+  mean can't reach the incumbent — LOSERS ONLY; a would-be winner's bound straddles → runs full k.
+- **Marker:** `ledger.Row.Stopped` ("" | "auto"), a ragged CSV column (mirrors fold/level/outer_fold);
+  set retroactively at finalize (`markStoppedRows`) on a stopped family's outer rows.
+- **Tests:** `autostop_test.go` (table: loser stops / winner never truncated / borderline spared /
+  n=1 no-stop / both directions / monotone-in-incumbent / `tCrit` table); `autostop_e2e_test.go`
+  (incumbent 0.80 seeded; loser logreg stopped at 2 folds + `stopped:auto`, winner rf full k=4).
+  Full suite green: cmd/metis `-race`, all pkg (incl. ledger), vet clean, 124 pytest.
 
 ### 2026-07-19 — M1 implemented
 - 2026-07-19: closed M1 — M1: leafBudget interface (chanSem default / prioritySem --live, prioritysem.go) + fold-priority threading (runOpts.priority->execStep) + board Q graceful-finalize (runControl.requestStop soft-latch, abandon in-flight folds, finalizeStopped honest out<n>). Tests: TestLive_ByteIdenticalToDefault (determinism: byte-identical ledger+manifest+estimate, budget exercised e2e under -race), prioritysem_test.go (grant order/FIFO/capacity/backfill -race), TestLive_QFinalizesHonestPartial (out1, folds 1/2 abandoned). go test ./... green, go vet clean, uv run pytest 124 passed. Actuals N/A — concurrent multi-agent session, active-time measurement contaminated.; review verdict: FIX-THEN-SHIP

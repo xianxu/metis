@@ -31,6 +31,7 @@ func rowsFromManifest(man sweepManifest, records map[string]record.RunRecord) []
 			Fold:            &fold,       // metis#18: a RAW per-fold row (AggregateView reduces read-time)
 			Level:           p.Level,     // metis#32: "" | inner | outer (enters the AggregateView key)
 			OuterFold:       p.OuterFold, // metis#32: the nested outer-fold coord (column, not key)
+			Stopped:         p.Stopped,   // metis#66 M2: "" | "auto" — the auto-stopped-family marker
 			Metrics:         namespacedMetrics(rec),
 			Status:          p.Status,
 		})
