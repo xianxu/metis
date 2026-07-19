@@ -365,3 +365,58 @@ func TestEncodeDecode_LevelOuterFoldRoundTrip(t *testing.T) {
 		t.Fatalf("round-trip lost level/fold/outer_fold: %+v", r)
 	}
 }
+
+// metis#66 M2: the `stopped` column round-trips AND stays column-clean when unused (the ragged
+// byte-identity guard — a ledger with no stopped rows must not emit the header).
+func TestEncodeDecode_StoppedRaggedColumn(t *testing.T) {
+	o0, o1 := 0, 1
+	// (a) present on ≥1 row → header + round-trip.
+	withStopped := Ledger{}
+	withStopped.Append(
+		Row{FreeParams: map[string]any{"train.model": "rf"}, CodeFingerprint: "cf", PointAddr: "o-rf-0",
+			Level: "outer", OuterFold: &o0, Metrics: map[string]float64{"train.fold_score": 0.90}, Status: "ok"},
+		Row{FreeParams: map[string]any{"train.model": "logreg"}, CodeFingerprint: "cf", PointAddr: "o-lr-0",
+			Level: "outer", OuterFold: &o1, Stopped: "auto",
+			Metrics: map[string]float64{"train.fold_score": 0.70}, Status: "ok"},
+	)
+	b, err := Encode(withStopped)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), "stopped") {
+		t.Fatalf("header missing the stopped column when a row carries it:\n%s", b)
+	}
+	out, err := Decode(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rf, lr Row
+	for _, r := range out.Rows {
+		switch r.PointAddr {
+		case "o-rf-0":
+			rf = r
+		case "o-lr-0":
+			lr = r
+		}
+	}
+	if rf.Stopped != "" {
+		t.Errorf("a non-stopped row must decode Stopped=\"\", got %q", rf.Stopped)
+	}
+	if lr.Stopped != "auto" {
+		t.Errorf("the stopped row must round-trip Stopped=\"auto\", got %q", lr.Stopped)
+	}
+
+	// (b) no stopped rows → NO stopped header (ragged byte-identity — a v1/non-auto-stop ledger
+	// stays column-clean; a regression that always emitted the column would fail here).
+	noStopped := Ledger{}
+	noStopped.Append(Row{FreeParams: map[string]any{"train.model": "rf"}, CodeFingerprint: "cf",
+		PointAddr: "p", Level: "outer", OuterFold: &o0,
+		Metrics: map[string]float64{"train.fold_score": 0.90}, Status: "ok"})
+	nb, err := Encode(noStopped)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(nb), "stopped") {
+		t.Fatalf("a ledger with no stopped rows must NOT emit the stopped column:\n%s", nb)
+	}
+}

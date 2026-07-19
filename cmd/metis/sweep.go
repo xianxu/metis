@@ -165,7 +165,9 @@ func (ss *shapeSweep) evaluateAutoStop(k int, direction string) {
 
 // markStoppedRows tags every auto-stopped family's OUTER rows `stopped: auto` before persistence
 // (metis#66 M2): a family stopped after fold i needs folds 0..i marked, so the marking is
-// retroactive at finalize (when stoppedFams is complete).
+// retroactive at finalize (when stoppedFams is complete). It reads ss.man.Points (elsewhere guarded
+// by manMu) but is called single-threaded at finalize — after sampler.Run has joined every outer
+// fold — so no concurrent writer exists; stopMu here guards only stoppedFams, its own domain.
 func (ss *shapeSweep) markStoppedRows() {
 	ss.stopMu.Lock()
 	defer ss.stopMu.Unlock()
@@ -323,6 +325,13 @@ func runShapeSweep(o runOpts, sh experiment.Shape, now func() time.Time, out io.
 	// crashes the driver:single ship late (a pipeline step with a nil `with`).
 	if len(configPts) == 0 {
 		return fmt.Errorf("%s: shape %q expands to 0 configs — an empty sweep has no winner (check the pipeline's $any choices)", o.expPath, sh.ID)
+	}
+	// metis#66 M2: --auto-stop decides which of the k outer folds to skip ITSELF (per the
+	// incumbent), so it runs against the full-k estimand — it does not compose with --sample/--fast
+	// (which fix a fold subset up front). The stopping rule models k−n remaining folds; a --sample
+	// subset would make that count wrong. Reject the combo loudly rather than silently mis-model.
+	if o.autoStop && (o.sample.Out != 0 || o.sample.In != 0 || o.fast) {
+		return fmt.Errorf("run: --auto-stop does not compose with --sample/--fast — it runs the full k outer folds and stops losers itself (drop --sample/--fast, or drop --auto-stop)")
 	}
 	// metis#32: the run mode is DERIVED from the config count, not a declared `driver:` field.
 	// >1 config → nested CV (the honest per-family measure); ==1 config → a flat single-level CV
@@ -597,7 +606,7 @@ func (ss *shapeSweep) runNestedCV(ctx sampler.Ctx, configPts []shape.Point, k, i
 	outerParallel := ss.parallel
 	if ss.o.autoStop {
 		outerParallel = false
-		ss.incumbent = readIncumbent(ss.o.expPath, obj.Metric, obj.Direction)
+		ss.incumbent = readIncumbent(ss.sh, ss.o.expPath, obj.Metric, obj.Direction)
 		if ss.incumbent.present {
 			fmt.Fprintf(ss.out, "metis: --auto-stop: incumbent %.4f (best prior estimate in the ledger) — a family <95%%-likely to reach it stops its remaining outer folds (losers only)\n", ss.incumbent.score)
 		} else {

@@ -130,7 +130,19 @@ partial finalize); `method-b-decisions` = the predictive stop rule (2 decisions 
 
 ## Log
 
+### 2026-07-19 — M2 boundary review fixes (FIX-THEN-SHIP)
+- **I1 (correctness):** `readIncumbent` used `ledger.AggregateView` (per-config, optimistic MAX
+  subgroup mean) instead of the per-family pooled reduce the Spec names. Fixed to
+  `familyEstimateFromLedger` + `sampler.FamilySelect` (`metis select`'s best-per-family), `ss.sh`
+  threaded in. Regression: `TestReadIncumbent_PoolsPerFamilyNotPerConfig` (0.85 pooled, not 0.90).
+- **I2 (test gap):** added `pkg/ledger` `TestEncodeDecode_StoppedRaggedColumn` (round-trip + the
+  no-stopped-rows → no-`stopped`-header byte-identity guard).
+- **Minors:** reject `--auto-stop`+`--sample`/`--fast` loudly; corrected atlas/comment wording;
+  `markStoppedRows` lock-domain comment; documented the cross-cohort incumbent limitation.
+- Suite green: cmd/metis `-race`, pkg/sampler, pkg/ledger, vet clean, 124 pytest.
+
 ### 2026-07-19 — M2 implemented (`--auto-stop`)
+- 2026-07-19: closed M2 — M2: --auto-stop incumbent-referenced loser-stop. readIncumbent (best prior per-family OUTER estimate, snapshot at run start), sequential-outer scheduling gating per-fold family filtering (activeConfigs), pure documented shouldStop rule (predictive one-sided 95% bound on full-k mean, losers only), stopped:auto ledger marker (ragged column). Tests: autostop_test.go (loser stops/winner never truncated/borderline spared/both directions/tCrit table), autostop_e2e_test.go (incumbent 0.80, logreg stopped at 2 folds, rf full k=4). go test ./... -race green, all pkg incl ledger, go vet clean, uv run pytest 124 passed. Actuals N/A — concurrent multi-agent session, active-time measurement contaminated.; review verdict: FIX-THEN-SHIP
 - **Incumbent** read ONCE at run start from the shape's existing ledger (`readIncumbent`: best
   per-family OUTER aggregate mean by direction; no `--baseline`; prior-runs-only since
   `writeSweepLedger` runs at finalize). Empty ledger → loud no-op (full sweep).

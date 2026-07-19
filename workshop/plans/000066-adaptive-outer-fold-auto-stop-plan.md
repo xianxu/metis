@@ -179,5 +179,23 @@ the reduce is order-independent and `sortPointRuns` normalizes on-disk order.
 - Q-finalize test strengthened to `out2` (n≥2) so the non-zero-SE branch of
   `completedOuterEstimate` is covered.
 
+### 2026-07-19 — M2 boundary review (FIX-THEN-SHIP → fixed in the close commit)
+- **M2.1 incumbent source correction (the substantive fix).** M2.1 above specified
+  `ledger.AggregateView → best`, which contradicts the Spec's "`metis select`'s best-per-family"
+  and `family.go`'s documented reason that AggregateView is the WRONG per-family reducer (a family's
+  winning config varies across outer folds, so it splits one family into per-config subgroups and
+  takes an optimistic MAX subgroup mean → an inflated bar that over-stops would-be winners).
+  **Corrected:** `readIncumbent` now reads `familyEstimateFromLedger(sh, led, metric)` → the honest
+  pooled per-family outer estimate → `sampler.FamilySelect` (the exact reduce `metis select` ships),
+  with `ss.sh` threaded in. Regression test `TestReadIncumbent_PoolsPerFamilyNotPerConfig` (rf's
+  winner varies across folds → incumbent = 0.85 pooled, not 0.90 per-config max).
+- `--auto-stop` now rejects `--sample`/`--fast` loudly (it runs the full-k estimand and stops
+  losers itself — the `shouldStop` `k−n` model would mis-count under a sampled subset).
+- Added the missing `pkg/ledger` unit test for the `stopped` ragged column (round-trip + the
+  no-stopped-rows→no-header byte-identity guard).
+- Doc/lock-domain minors corrected: atlas + `autostop.go` wording ("best-per-family via
+  FamilyEstimate/FamilySelect", not AggregateView); `markStoppedRows` lock-domain comment; a
+  documented cohort limitation (the incumbent pools across fingerprint cohorts, unlike `metis select`).
+
 ## Estimate
 See the issue's `## Estimate` block (authoritative).

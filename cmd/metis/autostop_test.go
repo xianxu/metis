@@ -2,8 +2,56 @@ package main
 
 import (
 	"math"
+	"os"
 	"testing"
+
+	"github.com/xianxu/metis/pkg/experiment"
+	"github.com/xianxu/metis/pkg/ledger"
 )
+
+// TestReadIncumbent_PoolsPerFamilyNotPerConfig is the metis#66 M2 I1 regression: the incumbent must
+// be `metis select`'s best-per-family POOLED outer estimate, NOT ledger.AggregateView's per-config
+// max. A prior run where family rf's winning config VARIES across outer folds (rf md=4 wins fold 0
+// at 0.80, rf md=8 wins fold 1 at 0.90) has honest pooled rf = 0.85 — but AggregateView (grouping by
+// exact free-params) would split it and report the max subgroup mean 0.90, an inflated bar that
+// over-stops would-be winners. This test fails against the old AggregateView read, passes with
+// familyEstimateFromLedger + FamilySelect.
+func TestReadIncumbent_PoolsPerFamilyNotPerConfig(t *testing.T) {
+	dir := t.TempDir()
+	shapePath := writeShapeFile(t, dir, taggedShapeForSelect) // ledgerPath keys the sidecar off this path
+
+	outer := func(addr string, fp map[string]any, ofold int, score float64) ledger.Row {
+		of := ofold
+		return ledger.Row{CodeFingerprint: "cf", PointAddr: addr, FreeParams: fp, Level: "outer", OuterFold: &of,
+			Metrics: map[string]float64{"train.fold_score": score}, Status: "ok"}
+	}
+	var led ledger.Ledger
+	// rf: winning config VARIES across folds (rf4 fold 0 = 0.80, rf8 fold 1 = 0.90) → pooled 0.85.
+	// logreg: a clear lower family (pooled ~0.71) so FamilySelect unambiguously picks rf.
+	led.Append(
+		outer("o-rf-0", rf4, 0, 0.80), outer("o-rf-1", rf8, 1, 0.90),
+		outer("o-lr-0", lr1, 0, 0.70), outer("o-lr-1", lr1, 1, 0.72),
+	)
+	b, err := ledger.Encode(led)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ledgerPath(shapePath), b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	sh, err := experiment.ParseShape(taggedShapeForSelect)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inc := readIncumbent(sh, shapePath, "train.fold_score", "maximize")
+	if !inc.present {
+		t.Fatal("incumbent must be present (the ledger has prior outer rows)")
+	}
+	if math.Abs(inc.score-0.85) > 1e-9 {
+		t.Errorf("incumbent = %.4f, want 0.85 (pooled per-family rf estimate); 0.90 = the AggregateView per-config bug", inc.score)
+	}
+}
 
 // TestShouldStop_LosersOnly is the metis#66 M2 safety table: the predictive rule must stop a
 // clear loser, NEVER a would-be winner, and hold its fire while the estimate is too green — the

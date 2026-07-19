@@ -286,9 +286,10 @@ wrapped by **thin step-executables** honoring the contract above. Hermetic via *
   and `finalizeStopped` reports an honest partial `out<n>` over the completed folds + writes the
   partial ledger (both the full and stopped tails funnel through `persistNestedAndReport`, ARCH-DRY).
 - **`--auto-stop` — incumbent-referenced loser stop (metis#66 M2) — `cmd/metis/autostop.go` + `sweep.go`:**
-  reads the incumbent ONCE at run start from the shape's EXISTING ledger (`readIncumbent`: the best
-  per-family OUTER aggregate mean by direction — no `--baseline`; prior-runs-only because
-  `writeSweepLedger` runs at finalize). Runs the OUTER folds SEQUENTIALLY (`outerParallel=false`;
+  reads the incumbent ONCE at run start from the shape's EXISTING ledger (`readIncumbent`: `metis
+  select`'s best-per-family estimate — `familyEstimateFromLedger` → `FamilySelect`, the honest
+  POOLED per-family outer estimate, NOT `AggregateView` which `family.go` documents as the wrong
+  per-family reducer — no `--baseline`; prior-runs-only because `writeSweepLedger` runs at finalize). Runs the OUTER folds SEQUENTIALLY (`outerParallel=false`;
   inner sweeper/resample stay parallel — cores busy within a fold) so each fold's decision cleanly
   gates the next. After each completed fold, `evaluateAutoStop` applies the PURE `shouldStop` rule:
   a family with n≥2 scores whose one-sided 95% predictive bound on its full-k mean

@@ -3,7 +3,8 @@ package main
 import (
 	"math"
 
-	"github.com/xianxu/metis/pkg/ledger"
+	"github.com/xianxu/metis/pkg/experiment"
+	"github.com/xianxu/metis/pkg/sampler"
 )
 
 // metis#66 M2: incumbent-referenced early stop of LOSING families. The incumbent is read ONCE
@@ -23,28 +24,32 @@ type incumbentRef struct {
 	present   bool
 }
 
-// readIncumbent snapshots the best per-family OUTER estimate already in the shape's ledger:
-// AggregateView reduces the raw outer rows to per-(family-winning-config) means, and the best by
-// direction is the score to beat. The OUTER estimate (not the optimistic inner CV) is the honest
-// reference. Empty / prior-less ledger ⇒ present=false.
-func readIncumbent(shapePath, metric, direction string) incumbentRef {
+// readIncumbent snapshots `metis select`'s best-per-family estimate already in the shape's ledger
+// (the Spec's incumbent). It reuses the SAME reduce the select path ships — `familyEstimateFromLedger`
+// (the honest per-family POOLED outer estimate) → `sampler.FamilySelect` — NOT `ledger.AggregateView`:
+// `family.go` documents why AggregateView is wrong here (a family's winning config differs across
+// outer folds, so grouping by exact free-params splits one family into per-config subgroups and
+// takes an optimistic MAX subgroup mean → an inflated bar that would over-stop a would-be winner).
+// Empty / prior-less ledger ⇒ present=false (a loud no-op — full sweep).
+//
+// LIMITATION (documented, minor): unlike `metis select`, this does NOT filter by fingerprint cohort
+// — the incumbent pools every prior code version's outer rows. A stale cohort could set the bar; the
+// stop cost is a re-run, so this is acceptable until a `--auto-stop --fingerprint` knob is wanted.
+func readIncumbent(sh experiment.Shape, shapePath, metric, direction string) incumbentRef {
 	ref := incumbentRef{direction: direction}
 	led, err := loadLedger(shapePath)
 	if err != nil {
 		return ref
 	}
-	for _, r := range ledger.AggregateView(led, metric).Rows {
-		if r.Level != "outer" || r.Status == "failed" {
-			continue
-		}
-		v, ok := r.Metrics[metric]
-		if !ok {
-			continue
-		}
-		if !ref.present || betterMeanSE(v, ref.score, direction) {
-			ref.score, ref.present = v, true
-		}
+	est := familyEstimateFromLedger(sh, led, metric)
+	if len(est) == 0 {
+		return ref
 	}
+	fam, _, ok := sampler.FamilySelect(direction, est)
+	if !ok {
+		return ref
+	}
+	ref.score, ref.present = est[fam].Mean, true
 	return ref
 }
 
