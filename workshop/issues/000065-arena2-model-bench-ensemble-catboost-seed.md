@@ -41,26 +41,37 @@ offsets tune on the ensemble's AVERAGED probabilities, the correct place for a b
 decision tilt), the metric knob (metis#59), the nested-CV seal, and the parallel executor.
 `complexity` = SUM of member realized complexities (aggregate capacity; the parsimony axis).
 Members are parsed by `parse_model_config` (ARCH-DRY — the same normalizer the top-level
-model knob uses; the ensemble recurses one level).
+model knob uses; the ensemble recurses one level). **DRY complexity recovery (plan-review
+finding #2):** each `VotingClassifier` member is NAMED by its kind (the `parse_model_config`
+label, suffixed `-<i>` for uniqueness), so `complexity(ensemble, "ensemble")` recovers each
+member's kind from the member NAME and recurses through the existing per-kind dispatch — NO
+estimator-type→kind reverse map (which would be a second source of truth for kind identity).
 
 This is NOT a parallel mechanism to `metis blend` (feedback_minimum_mechanism): the ensemble
 KIND *measures* a blend honestly inside the sweep (an OOF estimate); `metis blend` *combines*
 heterogeneous cross-cohort PROMOTED artifacts post-hoc (different fingerprints, no shared
 fold structure). They share the soft-vote math, which sklearn owns here — no code duplicated.
 
-**M2 — `catboost` kind + seed passthrough.**
-- `catboost` — new MODELS branch + dependency (cp312 macOS wheel confirmed). `make_model`
-  maps `class_weight: "balanced"` → `auto_class_weights="Balanced"` (CatBoost's spelling of
-  the same inverse-frequency reweighting); `predict_proba` + `random_seed` mean the decide
-  layer, metric knob, and seed override all compose. `complexity` = `tree_count × 2^depth`
-  (oblivious/symmetric trees are full binary at fixed depth — the total-leaves capacity
-  proxy, analogous to hist_gbm's summed leaves).
-- **seed passthrough** — `make_model` currently pins `random_state = ctx.seed` for every
-  kind. Add a single `eff_seed = params.get("seed", seed)` override applied at each estimator
-  (random_state / CatBoost random_seed / passed down to ensemble members). Absent `seed` =
-  byte-identical to today (no cohort re-key). Present `seed` re-keys the leaf (it rides
-  `with.model` → Kpre), so a shape can sweep seed as a dimension — and an `ensemble` of one
-  config × several seeds IS seed-bagging (the two features compose).
+**seed passthrough (part of M1 — see Revisions).** `make_model` currently pins
+`random_state = ctx.seed` for every kind. Add a single `eff_seed = params.get("seed", seed)`
+override applied at each estimator (random_state / — M2 — CatBoost random_seed / passed down
+to ensemble members). Absent `seed` = byte-identical to today (no cohort re-key). Present
+`seed` re-keys the leaf (it rides `with.model` → Kpre), so a shape can sweep seed as a
+dimension — and an `ensemble` of one config × several seeds IS seed-bagging (the two features
+compose; this is why seed passthrough lands WITH ensemble in M1, so seed-bagging is testable
+there — plan-review finding #3).
+
+**M2 — `catboost` kind.** New MODELS branch + dependency (cp312 macOS wheel confirmed).
+`make_model` maps `class_weight: "balanced"` → `auto_class_weights="Balanced"` (CatBoost's
+spelling of the same inverse-frequency reweighting); `predict_proba` + `random_seed` mean the
+decide layer, metric knob, and seed override all compose. **Purity/determinism pins
+(plan-review finding #1, ARCH-PURE):** `allow_writing_files=False` (CatBoost's default writes
+a `catboost_info/` dir — an IO side-effect inside the pure core), `logging_level="Silent"`
+(no stdout), and a fixed `thread_count` (determinism under the single-thread-per-leaf
+invariant, metis#48). `complexity` = `tree_count × 2^depth` (oblivious/symmetric trees are
+full binary at fixed depth — the total-leaves capacity proxy, analogous to hist_gbm's summed
+leaves). CatBoost's `.predict()` may return shape `(n,1)` — ravel at the make_model boundary
+so the generic `predict()` stays 1-D.
 
 ## Done when
 
@@ -78,12 +89,32 @@ fold structure). They share the soft-vote math, which sklearn owns here — no c
 
 ## Plan
 
-- [ ] **M1** — `ensemble` kind in `metis/model.py` (make_model VotingClassifier-soft, member
-  parse via parse_model_config, complexity=sum, MODELS += ensemble) + unit tests; kbench
-  ensemble-smoke through the step path; `sdlc milestone-close --milestone M1`.
-- [ ] **M2** — `catboost` dep (uv add) + kind (make_model, complexity, class_weight→auto) +
-  `params.seed` passthrough in make_model + unit tests (catboost determinism, seed override
-  re-keys, balanced maps through); `sdlc milestone-close --milestone M2`.
+- [ ] **M1** — `ensemble` kind + seed passthrough in `metis/model.py`: make_model
+  VotingClassifier-soft (members named `<kind>-<i>`), member parse via parse_model_config,
+  complexity=sum via member-name dispatch, MODELS += ensemble, `params.seed` override
+  (`eff_seed`) at each estimator. Unit tests: soft-vote average = member mean, WEIGHTS tilt,
+  single-member ≈ bare model, complexity = sum-of-members, decide=offsets composition,
+  `params.seed` re-keys + changes fit, **seed-bagging (distinct member seeds → distinct
+  fitted members)**. Metis step-path test (train step over a fixture with an ensemble config).
+  `sdlc milestone-close --milestone M1`.
+- [ ] **M2** — `catboost` dep (uv add) + kind (make_model with `allow_writing_files=False` +
+  `logging_level="Silent"` + fixed `thread_count`, class_weight→`auto_class_weights`, predict
+  ravel; complexity = tree_count×2^depth) + unit tests (determinism, balanced maps through,
+  complexity finite, catboost usable as an ensemble member). `sdlc milestone-close --milestone M2`.
+
+## Revisions
+
+### 2026-07-19 — plan-review findings adopted (change-code plan-quality: INFO)
+The plan-quality judge passed INFO (safe to start) with three non-blocking refinements, all
+folded in before implementation:
+1. **CatBoost purity/determinism pins (ARCH-PURE)** — pin `allow_writing_files=False`,
+   `logging_level="Silent"`, fixed `thread_count` in make_model (M2 spec updated).
+2. **DRY complexity recovery** — recover member kind from the VotingClassifier member NAME
+   (derived from the single `parse_model_config` source), NOT an estimator-type→kind reverse
+   map (M1 spec updated).
+3. **Seed-bagging testability** — seed passthrough MOVED M2→M1 so an ensemble with distinct
+   member seeds (seed-bagging, the point of composing seed×ensemble) is testable in M1; M2 is
+   now purely the CatBoost external-dep add (isolating that risk — the split's stated rationale).
 
 ## Estimate
 
