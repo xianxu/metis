@@ -35,9 +35,9 @@ type execStep struct {
 	//                        spawn ONLY (a cache HIT never reaches here). One shared budget across
 	//                        all nesting levels ⇒ ≤ capacity concurrent step subprocesses no matter
 	//                        how driver×sweeper×resample fans out. nil = unbounded (the serial path).
-	//                        chanSem = global fan-out (default); prioritySem = --live fold-ordered.
+	//                        prioritySem = fold-ordered (default, #67); chanSem = --global-fanout.
 	priority int // metis#66: this leaf's outer-fold index — the prioritySem grant key (lower =
-	//              higher priority). 0 on the flat/preamble path (chanSem ignores it anyway).
+	//              higher priority). 0 on the flat/preamble path (the default prioritySem sees them all at priority 0 → FIFO).
 	pool *serverPool // metis#44: when non-nil, convention-conforming wrappers route through the
 	//                  warm fork-server (one per project root) instead of a fresh uv/python spawn;
 	//                  non-conforming wrappers + broken servers fall back to the legacy path below.

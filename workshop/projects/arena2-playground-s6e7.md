@@ -43,10 +43,18 @@ friction (kbench layering). Everything else is out unless the competition says o
   answer), M4-blend (kbench#16: ensemble soft-vote outer-CV), M5-bench (kbench#16: catboost +
   seed-bag). The demand list held: the competition demanded only model-layer additions the
   workbench absorbs Python-only (ensemble/catboost/seed kinds — zero Go edits).
-- [ ] **M6 — close the ~0.003 gap (or declare the noise floor):** the model-space is
-  EXHAUSTED (every family/blend/mechanism converges to honest OUTER ~0.950-0.951); the residual
-  gap to the ~0.953 pack is a FEATURE/DATA problem. Hypotheses ranked below. Deferred to
-  operator go/no-go (the project's done_when was met at M2; this is optional gap-chasing).
+- [x] **M6 — noise floor DECLARED (kbench#17, 2026-07-19):** the model-space was already
+  EXHAUSTED; M6 tested the two feature/data levers and both hit the floor. Non-tree class on
+  clinical features — decisive NO (by-class minority-recovery gate: recovers ~6-8% of true-minority
+  consensus errors, hurts the blend). Feature-v2 through the honest flow (`s6e7-feateng-v2.md`,
+  each family at its own best hyperparameters) — FLAT (gbm Δ≈0). **Noise floor confirmed across
+  model classes + features + capacity.** The gap is a DATA/source-augmentation problem, not a
+  model or feature one. done_when was met at M2; M6 is the honest close of the model+feature space.
+- [ ] **M7 — chase the leaderboard (explicitly off-mission, operator-sanctioned 2026-07-19):**
+  the generalization thesis is proven; M7 is a deliberate gap-chase whose learnings are LESS
+  generalizable. Diagnostic-first (§ M7 plan below): step 1 = two cheap, submission-free
+  diagnostics (adversarial validation for train/test shift; generator forensics for
+  dupes/quantization/ID-order leaks); step 2 (gated) = source-dataset augmentation.
 
 ## Log
 
@@ -221,11 +229,53 @@ record; scripts in `kbench/competition/playground-s6e7/analysis/`):
   recovery** diagnostic (does a non-tree on engineered features recover the at-risk/unhealthy
   rows all three trees miss?) BEFORE any build. Features grounded in the health literature
   (U-shaped sleep, BMI J-curve + fat-but-fit `bmi×activity`, step dose-response, RHR threshold).
-- **Tooling shipped this session (metis#66, merged PR#48):** `--live` fold-ordered scheduling
-  (live per-fold mean±SE + board Q graceful-finalize) + `--auto-stop` (incumbent-referenced
-  loser-stop) — future arena runs get live partial estimates and can auto-drop losing configs.
+- **Tooling shipped this session (metis#66, merged PR#48):** fold-ordered scheduling (live per-fold
+  mean±SE + board Q graceful-finalize; shipped as `--live`, then graduated to the DEFAULT in
+  metis#67 — flag removed) + `--auto-stop` (incumbent-referenced loser-stop) — future arena runs
+  get live partial estimates and can auto-drop losing configs.
 
-**Standing status:** the model-space answer is COMPLETE and honest (noise floor confirmed at the
-row level; even the blend evaporates at k=10). arena2's done_when was met at M2. M6 is optional
-gap-chasing: EITHER the kbench#17 non-tree×features minority-recovery probe, OR source
-augmentation (#1) for real minority signal — both feature/data moves, not model moves.
+**Standing status (post-M6):** the model+feature space is CLOSED and honest — M6 confirmed the
+noise floor across model classes (kbench#17 non-tree gate = NO) AND engineered features
+(`s6e7-feateng-v2.md` = flat) AND capacity. done_when was met at M2. The only lever that adds
+INFORMATION is source-dataset augmentation → M7.
+
+### M7 — the leaderboard-gap chase (opened 2026-07-19, operator-sanctioned off-mission)
+
+Framing: the workbench-generalization thesis is proven, so M7's learnings are deliberately LESS
+generalizable — it's a gap-chase, run diagnostic-first (the operator's discipline). Ranked from a
+fresh-context brainstorm (codex, file-grounded, 2026-07-19; both the model+feature exhaustion and
+the "gap is an INFORMATION problem" diagnosis constrain it).
+
+**Step 1 — two cheap, submission-free diagnostics FIRST** (`analysis/m7_shift_forensics.py`):
+- **Adversarial validation** — train a classifier `train-rows vs test-rows` on the 13 features +
+  missingness flags; the CV AUC measures covariate shift. `<0.55` → no shift (abandon test-weighting);
+  `0.55-0.65` → mild density-ratio importance weights (clip 0.5-2.0); `>0.65` → real shift, weighting
+  becomes high-value. Adds test-distribution leverage without new labels.
+- **Generator forensics** — exact + near-duplicate counts (within train, within test, across
+  train↔test); label purity of dup groups; per-feature quantization/decimal patterns by class;
+  ID/row-order class-prior drift; missingness-pattern label rates. Exploits generator artifacts if
+  the synthetic process leaked structure (non-model information). Usually negative, cheap, sometimes
+  decisive on synthetic tabular.
+
+**Step 2 — source-dataset augmentation (gated on step 1 + the source hunt)** — the highest-prior
+gap-closer and the ONE information-adding lever. Sequence:
+0. **Confirm the source** — the S6E7 competition OVERVIEW almost certainly names it (Playground
+   pattern: "generated from a deep learning model trained on the [X] dataset"). NOT yet fetched
+   (the README/data don't state it) — step 0 is reading the overview to get the named dataset +
+   locating it (Kaggle/UCI). If unnamed → adversarial-search or abandon.
+1. **Schema-align** the original to the 13-feature adapted schema (column/unit match; classes to
+   {at-risk, fit, unhealthy}).
+2. **Distribution diagnostic** — adversarial validation synthetic-train vs original + per-class
+   feature-distribution compare (shift magnitude → whether naive concat helps or needs weighting).
+3. **Orthogonality diagnostic** — does an original-ONLY model recover the M6 consensus-error rows
+   (true fit/unhealthy)? If its errors are orthogonal to the trees' shared mode → real added signal.
+4. **Weighted-concat OOF gate** — synthetic + original at source-weights {0.1, 0.25, 0.5, 1.0},
+   honest nested-CV, per-class recall. **Proceed only if +0.0015 on the same folds, esp. minorities.**
+5. **Ship** (iff positive) — wire into the honest flow (needs the dormant metis#63 `weight` role for
+   importance weights), full sweep → promote → submit. If the source is heavily shifted, use it as
+   TEACHER/calibration (source-model probs as meta-features, or source class-centroid/KNN features)
+   rather than raw concat.
+
+Lower-priority / likely-noise (codex-flagged, gated behind step 1-2): pseudo-labeling the test set,
+LB threshold-probing, submission ensembling, rule-mining, TTA, more thresholds. Run only if a
+diagnostic surfaces signal; do not burn submissions speculatively.

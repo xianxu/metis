@@ -363,3 +363,21 @@ the thrash: starts ≫ completions with the process alive (throughput ≈ 0) —
   (the two reducers coincide there) — the boundary review did. Lesson: if the Spec says "the same
   X that Y uses," literally call Y's function; and add a test whose fixture EXERCISES the divergence
   (multi-fold rows with a varying winner), not just the degenerate case where the twins agree.
+
+## Multi-agent SDLC coordination (metis#66, 2026-07-19)
+
+- **A subagent that "waits for a review verdict via a Monitor" can stall silently.** The #66
+  subagent implemented well but kept stopping/re-notifying without progressing — its Monitor-based
+  verdict-wait never delivered. Do NOT keep re-resuming a stalled subagent (it re-enters the same
+  wait). Instead: INSPECT the repo state (`git log --oneline`, `ls workshop/plans/*review*`,
+  `sdlc state`), verify tests YOURSELF, and drive the remaining gates directly.
+- **Two agents driving the same issue's closes RACE.** While one agent's `sdlc close` was mid-
+  review (lock released for the LLM subprocess), the other committed a milestone-close, moving
+  HEAD — so the first close refused to finalize as "reviewed state changed / stale". Rule:
+  `TaskStop` the other agent BEFORE taking over, confirm HEAD is stable, then run the gate once.
+  A close that applied its file mutations but refused to finalize (concurrency) can be committed
+  by hand (the close "does NOT commit; the agent commits") + `sdlc merge` — the publish gate's
+  anchor check accepts the hand-committed codecomplete when HEAD is stable.
+- The fresh-eyes boundary review still caught the one real bug (I1: `readIncumbent` used
+  `AggregateView` — a per-config MAX — instead of the canonical per-family `FamilyEstimate`,
+  biasing the incumbent optimistic → over-stop). The review discipline held through the mess.

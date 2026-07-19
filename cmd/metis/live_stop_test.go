@@ -59,8 +59,7 @@ func TestLive_QFinalizesHonestPartial(t *testing.T) {
 		git:        fakeGitProbe{name: "metis", sha: "sha"},
 		exec:       exec,
 		out:        &out,
-		live:       true,
-		stopSignal: fire,
+		stopSignal: fire, // metis#67: the sweep consumes stopSignal off non-nil alone (no --live)
 		runControl: ctrl,
 	})
 	if err != nil {
