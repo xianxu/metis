@@ -1,12 +1,13 @@
 ---
 id: 000066
-status: working
+status: codecomplete
 deps: []
 github_issue:
 created: 2026-07-19
 updated: 2026-07-19
 estimate_hours: 7.6
 started: 2026-07-19T08:32:12-07:00
+actual_hours: N/A
 ---
 
 # adaptive outer-fold scheduling + --auto-stop (incumbent-referenced early stop of losing configs)
@@ -131,6 +132,7 @@ partial finalize); `method-b-decisions` = the predictive stop rule (2 decisions 
 ## Log
 
 ### 2026-07-19 — M2 boundary review fixes (FIX-THEN-SHIP)
+- 2026-07-19: closed — metis#66 complete. M1: --live fold-ordered priority scheduling (prioritySem/leafBudget) + board Q graceful-finalize (honest partial out<n>), byte-identical to default (TestLive_ByteIdenticalToDefault). M2: --auto-stop incumbent-referenced loser stop (readIncumbent via metis-selects best-per-family, sequential-outer + activeConfigs family filtering, pure documented shouldStop, stopped:auto marker); e2e loser-stopped/winner-full + shouldStop table + readIncumbent regression + ledger stopped-column test. Both milestone boundaries SHIP/FIX-THEN-SHIP-resolved. go test ./cmd/metis -race + ./pkg/sampler ./pkg/ledger green, go vet clean, uv run pytest 124 passed. Actuals N/A — concurrent multi-agent session, active-time measurement contaminated.; review verdict: SHIP
 - 2026-07-19: closed M2 — M2 + boundary-review fixes. readIncumbent now uses familyEstimateFromLedger + FamilySelect (metis select best-per-family, I1 fix; regression TestReadIncumbent_PoolsPerFamilyNotPerConfig), pkg/ledger stopped-column round-trip test (I2), --auto-stop rejects --sample/--fast, doc/lock-comment minors. sequential-outer + activeConfigs family filtering + pure documented shouldStop + stopped:auto marker; e2e loser-stopped/winner-full. go test ./pkg/sampler ./cmd/metis ./pkg/ledger green (-race on cmd/metis), vet clean, uv run pytest 124 passed. Actuals N/A — concurrent multi-agent session, active-time measurement contaminated.; review verdict: SHIP
 - **I1 (correctness):** `readIncumbent` used `ledger.AggregateView` (per-config, optimistic MAX
   subgroup mean) instead of the per-family pooled reduce the Spec names. Fixed to
