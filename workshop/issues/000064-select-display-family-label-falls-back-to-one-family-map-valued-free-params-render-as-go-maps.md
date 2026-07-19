@@ -77,9 +77,20 @@ against `baseline-v3.1.md`. Method A only.)
 
 (Simple work — issue-level plan.)
 
-- [ ] matcher nil-drop + display JSON rendering + 3 regression tests; verify against the
+- [x] matcher nil-drop + display JSON rendering + 3 regression tests; verify against the
   live M4 ledger; pr/merge/close
 
 ## Log
 
 ### 2026-07-19
+
+### 2026-07-19 (fix)
+
+- Matcher nil-drop in freeParamsEqual (null ≡ absent, canonical with the CSV round-trip's
+  empty-cell skip); renderFreeParamValue: composites → compact JSON, nil → `null`; wired
+  into freeParamStrFromParams + freeParamMapStr. 3 regression tests. Full Go + python green.
+- RETROACTIVE HEAL VERIFIED on the live kbench M4 ledger (a50b6f25), no re-run:
+  `train.model=hist_gbm` labels correctly, BOTH families in --best-per-model-class
+  (gbm winner = cw=null + offsets — the very row that was silently dropped), decide renders
+  as JSON. The operator's --point workaround run (point-hist_gbm-501f3358) remains valid
+  blend material.

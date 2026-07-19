@@ -7,6 +7,8 @@ import (
 	"github.com/xianxu/metis/pkg/experiment"
 	"github.com/xianxu/metis/pkg/ledger"
 	"github.com/xianxu/metis/pkg/record"
+
+	"github.com/xianxu/metis/pkg/shape"
 )
 
 // rowsFromManifest is pure: it turns a sweep manifest + the per-point records into
@@ -108,5 +110,41 @@ func TestPromote_RowFreeParamsMatchPoint(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got.Rows[0].FreeParams, want) {
 		t.Errorf("free-params must round-trip for match-by-free-params: got %v want %v", got.Rows[0].FreeParams, want)
+	}
+}
+
+// ── metis#64: null free-params vs the CSV round-trip ─────────────────────────
+
+func TestFreeParamsEqual_NullEqualsAbsent(t *testing.T) {
+	// A cw=null rung: the expanded point carries an explicit nil; the CSV round-trip
+	// (empty cell, skipped at decode) leaves the row's map KEY-ABSENT. Must match.
+	p := shape.Point{FreeParams: []shape.FreeParam{
+		{Path: "train.model", Value: "hist_gbm"},
+		{Path: "train.model.hist_gbm.class_weight", Value: nil},
+	}}
+	if !freeParamsEqual(p, map[string]any{"train.model": "hist_gbm"}) {
+		t.Error("nil-valued free param must equal key-absent (the CSV round-trip)")
+	}
+	// Distinct configs stay unequal: a different value on the surviving key.
+	if freeParamsEqual(p, map[string]any{"train.model": "rf"}) {
+		t.Error("distinct configs must not match")
+	}
+	// And a NON-null param must still require presence.
+	p2 := shape.Point{FreeParams: []shape.FreeParam{
+		{Path: "train.model", Value: "hist_gbm"},
+		{Path: "train.model.hist_gbm.class_weight", Value: "balanced"},
+	}}
+	if freeParamsEqual(p2, map[string]any{"train.model": "hist_gbm"}) {
+		t.Error("a real (non-null) param must not be droppable")
+	}
+}
+
+func TestFreeParamStr_CompositeValuesRenderAsJSON(t *testing.T) {
+	s := freeParamStrFromParams([]shape.FreeParam{
+		{Path: "train.decide", Value: map[string]any{"offsets": map[string]any{"holdout": 0.2}}},
+	})
+	want := `train.decide={"offsets":{"holdout":0.2}}`
+	if s != want {
+		t.Errorf("composite free-param rendering: got %q, want %q", s, want)
 	}
 }
