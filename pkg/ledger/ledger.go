@@ -49,8 +49,14 @@ type Row struct {
 	// inner/outer rows already differ by PointAddr (distinct content-addresses), and inner
 	// rows POOL across outer folds by design (the pooled inner-CV config-selection signal).
 	OuterFold *int
-	Metrics   map[string]float64
-	Status    string // "ok" | "failed"
+	// Stopped is the metis#66 auto-stop marker — "" (normal) | "auto" (the family's remaining
+	// outer folds were cut by --auto-stop because it was <95%-likely to reach the incumbent). A
+	// ragged COLUMN (present only when ≥1 row carries it), not part of the key/dedup — it's
+	// provenance a reader uses to tell a truncated loser from a --sample-limited run. AggregateView
+	// passes it through untouched (NOT treated as failed — a stopped fold's rows are honest).
+	Stopped string
+	Metrics map[string]float64
+	Status  string // "ok" | "failed"
 }
 
 // Ledger is an ordered, append-only set of rows (CSV-backed by the caller).
@@ -97,9 +103,9 @@ const (
 // view (Decode → Filter/TopN), never a storage concern — the file stays append-order.
 func Encode(l Ledger) ([]byte, error) {
 	fpCols, metricCols := unionColumns(l.Rows)
-	// The `fold`/`level`/`outer_fold` columns are present only when ≥1 row carries them (a
-	// per-fold or nested sweep) — so a v1-shaped ledger stays byte-identical (ragged, ARCH-DRY).
-	hasFold, hasLevel, hasOuterFold := false, false, false
+	// The `fold`/`level`/`outer_fold`/`stopped` columns are present only when ≥1 row carries them
+	// (a per-fold or nested sweep) — so a v1-shaped ledger stays byte-identical (ragged, ARCH-DRY).
+	hasFold, hasLevel, hasOuterFold, hasStopped := false, false, false, false
 	for _, r := range l.Rows {
 		if r.Fold != nil {
 			hasFold = true
@@ -109,6 +115,9 @@ func Encode(l Ledger) ([]byte, error) {
 		}
 		if r.OuterFold != nil {
 			hasOuterFold = true
+		}
+		if r.Stopped != "" {
+			hasStopped = true
 		}
 	}
 	header := append([]string{"code_fingerprint", "point_addr", "status"}, fpCols...)
@@ -120,6 +129,9 @@ func Encode(l Ledger) ([]byte, error) {
 	}
 	if hasOuterFold {
 		header = append(header, "outer_fold")
+	}
+	if hasStopped {
+		header = append(header, "stopped")
 	}
 	header = append(header, metricCols...)
 
@@ -150,6 +162,9 @@ func Encode(l Ledger) ([]byte, error) {
 			} else {
 				rec = append(rec, "")
 			}
+		}
+		if hasStopped {
+			rec = append(rec, r.Stopped) // "" for a normal row
 		}
 		for _, c := range metricCols {
 			if v, ok := r.Metrics[strings.TrimPrefix(c, metricPrefix)]; ok {
@@ -201,6 +216,8 @@ func Decode(b []byte) (Ledger, error) {
 				if f, err := strconv.Atoi(rec[i]); err == nil {
 					row.OuterFold = &f
 				}
+			case col == "stopped":
+				row.Stopped = rec[i]
 			case strings.HasPrefix(col, fpPrefix):
 				row.FreeParams[strings.TrimPrefix(col, fpPrefix)] = parseCell(rec[i])
 			case strings.HasPrefix(col, metricPrefix):

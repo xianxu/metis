@@ -55,9 +55,9 @@ func TestExecStep_SemaphoreSerializesRealSubprocess(t *testing.T) {
 		}
 		return mx
 	}
-	runTwo := func(t *testing.T, sem chan struct{}) int {
+	runTwo := func(t *testing.T, budget leafBudget) int {
 		sp, expDir := mkStep(t)
-		e := execStep{stepPath: sp, expDir: expDir, out: io.Discard, sem: sem}
+		e := execStep{stepPath: sp, expDir: expDir, out: io.Discard, budget: budget}
 		var wg sync.WaitGroup
 		for i := 0; i < 2; i++ {
 			wg.Add(1)
@@ -70,7 +70,7 @@ func TestExecStep_SemaphoreSerializesRealSubprocess(t *testing.T) {
 		wg.Wait()
 		return peak(filepath.Join(expDir, "concurrency.log"))
 	}
-	if p := runTwo(t, make(chan struct{}, 1)); p != 1 {
+	if p := runTwo(t, newChanSem(1)); p != 1 {
 		t.Fatalf("cap-1 semaphore: peak concurrency = %d, want 1 (execStep acquire not wired?)", p)
 	}
 	if p := runTwo(t, nil); p != 2 {

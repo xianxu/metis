@@ -334,7 +334,7 @@ func TestNestedCV_PeakConcurrencyWithinCap(t *testing.T) {
 			exec:        pe,
 			out:         io.Discard,
 			maxParallel: cap,
-			leafSem:     sem, // runExperiment reuses my sem (maxParallel>1 & non-nil)
+			leafBudget:  &chanSem{ch: sem}, // metis#66: wrap peakExec's own channel so runExperiment reuses it
 			runControl:  control,
 		})
 		result <- err

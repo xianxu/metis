@@ -402,6 +402,36 @@ func (sp *sweepProgress) driverEvent(ev sampler.ProgressEvent[sampler.OuterFoldP
 	sp.maybeEmit(true)
 }
 
+// completedOuterCount is the number of outer folds that reported an honest held-out score
+// (metis#66 finalize): the count driverEvent accumulated, excluding folds abandoned by a
+// clean stop (those never reach driverEvent).
+func (sp *sweepProgress) completedOuterCount() int {
+	if sp == nil {
+		return 0
+	}
+	sp.mu.Lock()
+	defer sp.mu.Unlock()
+	return len(sp.st.outerScores)
+}
+
+// completedOuterEstimate aggregates the completed outer folds' ship-family scores into the
+// honest partial mean±SE (metis#66 board Q). Reuses sampler.Aggregate (ARCH-DRY) over the
+// same scores driverEvent collected; positional addrs (the reported mean±SE doesn't depend
+// on the content-address, unlike the persisted told-set). Called after sampler.Run returns,
+// so no goroutine races the read.
+func (sp *sweepProgress) completedOuterEstimate() sampler.MeanSE {
+	if sp == nil {
+		return sampler.MeanSE{}
+	}
+	sp.mu.Lock()
+	defer sp.mu.Unlock()
+	fs := make([]sampler.FoldScore, len(sp.st.outerScores))
+	for i, s := range sp.st.outerScores {
+		fs[i] = sampler.FoldScore{Addr: fmt.Sprintf("outer#%d", i), Score: s}
+	}
+	return sampler.Aggregate(fs)
+}
+
 // finish emits the terminal state line (always).
 func (sp *sweepProgress) finish() {
 	if sp == nil {

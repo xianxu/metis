@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -61,6 +62,12 @@ type pointRun struct {
 	// outer-fold coordinate (nil on the flat path). Both propagate into the ledger.Row.
 	Level     string `json:"level,omitempty"`
 	OuterFold *int   `json:"outer_fold,omitempty"`
+	// metis#66 M2: on an OUTER row, Family is the per-family key (set under --auto-stop so the
+	// finalize can retroactively mark a stopped family's rows); Stopped is "" | "auto" — the
+	// stopped-family marker that reaches the ledger. Both omitempty → non-auto-stop manifests are
+	// byte-identical to the pre-#66-M2 format.
+	Family  string `json:"family,omitempty"`
+	Stopped string `json:"stopped,omitempty"`
 }
 
 // configScore pairs an expanded config-point with its honest inner-resample estimate —
@@ -87,6 +94,110 @@ type shapeSweep struct {
 	manMu         sync.Mutex     // metis#32: guards man.Points — concurrent outer folds (ParExec) each record rows
 	prog          *sweepProgress // metis#30: the live-progress sink (nil = silent)
 	start         time.Time      // metis#50: sweep wall-clock start (injected clock)
+	abandonMu     sync.Mutex     // metis#66: guards abandoned
+	abandoned     map[int]bool   // metis#66: outer folds cut short by a clean stop (Q) — excluded from the honest estimate
+	incumbent     incumbentRef   // metis#66 M2: --auto-stop reference score (snapshotted from the prior ledger at run start)
+	stopMu        sync.Mutex     // metis#66 M2: guards familyScores + stoppedFams (updated per completed outer fold)
+	familyScores  map[string][]float64 // metis#66 M2: per-family held-out outer scores accumulated across completed folds
+	stoppedFams   map[string]bool      // metis#66 M2: families auto-stopped — their remaining outer folds are filtered out
+}
+
+// activeConfigs drops auto-stopped families' configs from an outer fold's sealed sweep (metis#66
+// M2) — the real budget reclamation (the inner sweep for a stopped family never runs on later
+// folds). Under --auto-stop the outer folds run sequentially, so the stopped set reflects every
+// prior fold's decision. Never returns empty (an empty sweep would have no winner): if every
+// family is stopped, the fold keeps them all — an all-losers shape still records honest rows.
+func (ss *shapeSweep) activeConfigs(configPts []shape.Point) []shape.Point {
+	if !ss.o.autoStop {
+		return configPts
+	}
+	ss.stopMu.Lock()
+	defer ss.stopMu.Unlock()
+	if len(ss.stoppedFams) == 0 {
+		return configPts
+	}
+	active := make([]shape.Point, 0, len(configPts))
+	for _, p := range configPts {
+		if !ss.stoppedFams[sampler.FamilyOf(p)] {
+			active = append(active, p)
+		}
+	}
+	if len(active) == 0 {
+		return configPts
+	}
+	return active
+}
+
+// recordFamilyScore accumulates a family's held-out outer-fold score (metis#66 M2).
+func (ss *shapeSweep) recordFamilyScore(family string, score float64) {
+	ss.stopMu.Lock()
+	defer ss.stopMu.Unlock()
+	if ss.familyScores == nil {
+		ss.familyScores = map[string][]float64{}
+	}
+	ss.familyScores[family] = append(ss.familyScores[family], score)
+}
+
+// evaluateAutoStop applies the predictive loser-stop rule after an outer fold completes (metis#66
+// M2): a not-yet-stopped family whose full-k mean is <95%-likely to reach the incumbent stops its
+// remaining outer folds. Losers only — a would-be winner (whose bound straddles the incumbent)
+// keeps running. Announced loudly (never silent). No-op without an incumbent.
+func (ss *shapeSweep) evaluateAutoStop(k int, direction string) {
+	if !ss.o.autoStop || !ss.incumbent.present {
+		return
+	}
+	ss.stopMu.Lock()
+	defer ss.stopMu.Unlock()
+	if ss.stoppedFams == nil {
+		ss.stoppedFams = map[string]bool{}
+	}
+	for fam, scores := range ss.familyScores {
+		if ss.stoppedFams[fam] {
+			continue
+		}
+		if shouldStop(scores, k, ss.incumbent.score, direction) {
+			ss.stoppedFams[fam] = true
+			fmt.Fprintf(ss.out, "metis: auto-stop — family %q (mean over %d fold(s)) is <95%%-likely to reach the incumbent %.4f; skipping its remaining outer folds\n",
+				fam, len(scores), ss.incumbent.score)
+		}
+	}
+}
+
+// markStoppedRows tags every auto-stopped family's OUTER rows `stopped: auto` before persistence
+// (metis#66 M2): a family stopped after fold i needs folds 0..i marked, so the marking is
+// retroactive at finalize (when stoppedFams is complete). It reads ss.man.Points (elsewhere guarded
+// by manMu) but is called single-threaded at finalize — after sampler.Run has joined every outer
+// fold — so no concurrent writer exists; stopMu here guards only stoppedFams, its own domain.
+func (ss *shapeSweep) markStoppedRows() {
+	ss.stopMu.Lock()
+	defer ss.stopMu.Unlock()
+	for i := range ss.man.Points {
+		if ss.man.Points[i].Level == "outer" && ss.stoppedFams[ss.man.Points[i].Family] {
+			ss.man.Points[i].Stopped = "auto"
+		}
+	}
+}
+
+// stopRequested reports whether the operator asked for a clean graceful finalize (Q).
+func (ss *shapeSweep) stopRequested() bool {
+	return ss.o.runControl != nil && ss.o.runControl.stopRequested()
+}
+
+// markAbandoned records that outer fold i was cut short by a clean stop (so driverEvent
+// and the final estimate exclude it — a partial fold is not an honest held-out score).
+func (ss *shapeSweep) markAbandoned(i int) {
+	ss.abandonMu.Lock()
+	if ss.abandoned == nil {
+		ss.abandoned = map[int]bool{}
+	}
+	ss.abandoned[i] = true
+	ss.abandonMu.Unlock()
+}
+
+func (ss *shapeSweep) isAbandoned(i int) bool {
+	ss.abandonMu.Lock()
+	defer ss.abandonMu.Unlock()
+	return ss.abandoned[i]
 }
 
 // addManPoints appends a batch of manifest rows under the manifest lock (metis#32: the
@@ -133,6 +244,7 @@ type sweepPass struct {
 	stratify bool // the cv-split stratify flag for this pass
 	partRef  sampler.PartitionRef // this pass's partition identity (fed into each point's address)
 	runRole  runRole              // concrete-run role for every pipeline fold in this pass
+	priority int                  // metis#66: the outer-fold index — the prioritySem grant key for this pass's leaves
 	hooks    passHooks            // metis#30: this pass's progress hooks, closure-bound to its outer fold
 	// metis#31: under ParExec the sweeper fans out over configs and each config's
 	// resample fans out over folds — all appending to this ONE pass. `mu` guards the
@@ -213,6 +325,13 @@ func runShapeSweep(o runOpts, sh experiment.Shape, now func() time.Time, out io.
 	// crashes the driver:single ship late (a pipeline step with a nil `with`).
 	if len(configPts) == 0 {
 		return fmt.Errorf("%s: shape %q expands to 0 configs — an empty sweep has no winner (check the pipeline's $any choices)", o.expPath, sh.ID)
+	}
+	// metis#66 M2: --auto-stop decides which of the k outer folds to skip ITSELF (per the
+	// incumbent), so it runs against the full-k estimand — it does not compose with --sample/--fast
+	// (which fix a fold subset up front). The stopping rule models k−n remaining folds; a --sample
+	// subset would make that count wrong. Reject the combo loudly rather than silently mis-model.
+	if o.autoStop && (o.sample.Out != 0 || o.sample.In != 0 || o.fast) {
+		return fmt.Errorf("run: --auto-stop does not compose with --sample/--fast — it runs the full k outer folds and stops losers itself (drop --sample/--fast, or drop --auto-stop)")
 	}
 	// metis#32: the run mode is DERIVED from the config count, not a declared `driver:` field.
 	// >1 config → nested CV (the honest per-family measure); ==1 config → a flat single-level CV
@@ -448,6 +567,22 @@ func (ss *shapeSweep) runNestedCV(ctx sampler.Ctx, configPts []shape.Point, k, i
 	fmt.Fprintf(ss.out, "metis: nested-CV %s (%s) — %s outer fold(s) × (%d configs × %s inner folds)\n",
 		ss.sh.ID, shapeRunID[:12], fmtLevel(runFolds, k), len(configPts), fmtLevel(runInnerK, innerK))
 
+	// metis#66: the graceful-stop bridge — a Q on the board latches runControl.requestStop so
+	// admitted-but-not-yet-run leaves short-circuit (in-flight outer folds drain fast, no new
+	// leaf starts). Armed BEFORE the preamble so a Q during the (single, long) outer-split short-
+	// circuits its leaves too. done closes on return so the watcher goroutine never leaks.
+	done := make(chan struct{})
+	defer close(done)
+	if ss.o.stopSignal != nil && ss.o.runControl != nil {
+		go func() {
+			select {
+			case <-ss.o.stopSignal:
+				ss.o.runControl.requestStop()
+			case <-done:
+			}
+		}()
+	}
+
 	// Preamble: materialize the k outer-analysis subset dirs ONCE (unconfined — outer-split reads
 	// the full dataset to split it). Always split into k dirs (a stable partition); --fast just runs
 	// fewer of them (runFolds ≤ k). Deterministic run id → the analysis_i refs are locatable.
@@ -456,16 +591,43 @@ func (ss *shapeSweep) runNestedCV(ctx sampler.Ctx, configPts []shape.Point, k, i
 		if first := ss.firstError(); first != nil {
 			return first
 		}
+		if errors.Is(err, errRunStopped) { // metis#66: Q during the preamble — clean finalize, no folds
+			return ss.finalizeStopped(0)
+		}
 		return ss.fail("nested-CV preamble", err)
 	}
 	outerPart := sampler.PartitionRef(fmt.Sprintf("outer-cv-k%d-strat%t-seed%d", k, stratify, ss.sh.Seed))
+
+	// metis#66 M2: --auto-stop snapshots the incumbent ONCE from the shape's EXISTING ledger
+	// (prior runs — writeSweepLedger runs only at finalize, so no current-run row leaks in) and
+	// runs the OUTER folds SEQUENTIALLY so each fold's stop decision cleanly gates the next fold's
+	// config set (the inner sweeper/resample stay parallel — cores stay busy within a fold).
+	obj := ss.sh.Sweeper.Objective
+	outerParallel := ss.parallel
+	if ss.o.autoStop {
+		outerParallel = false
+		ss.incumbent = readIncumbent(ss.sh, ss.o.expPath, obj.Metric, obj.Direction)
+		if ss.incumbent.present {
+			fmt.Fprintf(ss.out, "metis: --auto-stop: incumbent %.4f (best prior estimate in the ledger) — a family <95%%-likely to reach it stops its remaining outer folds (losers only)\n", ss.incumbent.score)
+		} else {
+			fmt.Fprintf(ss.out, "metis: --auto-stop: no incumbent in the ledger (no prior run) — nothing to stop against; running the full sweep. Run once to establish a baseline.\n")
+		}
+	}
 
 	est := sampler.Run(ctx, sampler.CVDriver{K: runFolds, Stratify: stratify},
 		func(p sampler.OuterFoldPoint) float64 {
 			if ss.firstError() != nil {
 				return 0
 			}
+			if ss.stopRequested() { // metis#66: a fold not yet started when Q lands is abandoned outright
+				ss.markAbandoned(p.Idx)
+				return 0
+			}
 			score, ferr := ss.runOuterFold(ctx, configPts, k, innerK, runInnerK, stratify, analysisRefs[p.Idx], outerPart, p.Idx)
+			if errors.Is(ferr, errRunStopped) { // metis#66: cut short mid-fold by Q — abandon cleanly (not a failure)
+				ss.markAbandoned(p.Idx)
+				return 0
+			}
 			if ferr != nil {
 				if ss.firstError() == nil {
 					ss.fail(fmt.Sprintf("outer fold %d", p.Idx), ferr)
@@ -474,21 +636,49 @@ func (ss *shapeSweep) runNestedCV(ctx sampler.Ctx, configPts []shape.Point, k, i
 			}
 			return score
 		},
-		sampler.ExecFor[sampler.OuterFoldPoint, float64](ss.parallel),
+		sampler.ExecFor[sampler.OuterFoldPoint, float64](outerParallel),
 		// metis#30: outer-fold completions always emit. Error-gated: once runControl
 		// latches, remaining closures return sentinel zeros — don't fold those into
 		// the displayed est (the run is aborting; a fake 0 would tank the line).
+		// metis#66: a fold abandoned by a clean stop is likewise excluded (its 0 is not a score).
 		func(ev sampler.ProgressEvent[sampler.OuterFoldPoint, float64]) {
+			if ss.isAbandoned(ev.Point.Idx) {
+				return
+			}
 			ss.whileHealthy(func() { ss.prog.driverEvent(ev) })
 		})
+	// done is closed by the deferred close above (armed before the preamble); the watcher
+	// goroutine exits on it whether we return here or via a stop/error path.
 	if err := ss.firstError(); err != nil {
 		return err
 	}
+	// metis#66: a clean stop (Q) finalizes over the folds that DID complete — an honest out<n>.
+	if ss.stopRequested() {
+		return ss.finalizeStopped(ss.prog.completedOuterCount())
+	}
 	ss.whileHealthy(ss.prog.finish) // metis#30: the terminal progress line, before the estimate report
+	return ss.persistNestedAndReport(est, runFolds, false)
+}
 
-	// metis#32: the nested run now RECORDS (unlike metis#23's estimation-only path) — persist the
-	// inner + per-family outer rows accumulated in ss.man.Points so `metis select` can reduce them
-	// (family from the outer rows, config from the inner rows). Sort to a stable content key first
+// finalizeStopped is the metis#66 graceful-stop tail (board Q): the honest estimate is
+// aggregated over the n outer folds that COMPLETED before the stop (abandoned in-flight
+// folds contribute neither a row nor a score), then the partial manifest + ledger are
+// persisted exactly like a full run — a partial nested run is honestly an `out<n>` estimate.
+func (ss *shapeSweep) finalizeStopped(n int) error {
+	ss.whileHealthy(ss.prog.finish)
+	return ss.persistNestedAndReport(ss.prog.completedOuterEstimate(), n, true)
+}
+
+// persistNestedAndReport is the shared nested-CV tail (ARCH-DRY): sort the completion-order
+// rows to a stable content key, write the manifest + capture the code + write the ledger,
+// then report the estimate + the paste-ready summary. Both the full run and the Q-stop
+// finalize funnel through here so the persistence path is single-sourced.
+func (ss *shapeSweep) persistNestedAndReport(est sampler.MeanSE, folds int, stopped bool) error {
+	// metis#66 M2: retroactively tag every auto-stopped family's outer rows `stopped: auto`
+	// (a family stopped after fold i needs folds 0..i marked). No-op when nothing was stopped.
+	ss.markStoppedRows()
+	// metis#32: the nested run RECORDS the inner + per-family outer rows accumulated in
+	// ss.man.Points so `metis select` can reduce them. Sort to a stable content key first
 	// (the outer folds appended concurrently under ParExec) for byte-deterministic artifacts.
 	sortPointRuns(ss.man.Points)
 	if err := writeManifest(ss.o.expPath, ss.man); err != nil {
@@ -504,7 +694,7 @@ func (ss *shapeSweep) runNestedCV(ctx sampler.Ctx, configPts []shape.Point, k, i
 		return ss.fail("write nested sweep ledger", err)
 	}
 	ss.whileHealthy(func() {
-		ss.reportEstimate(est, runFolds)
+		ss.reportEstimate(est, folds, stopped)
 		printRunSummary(summaryWriter(ss.out), ss.o.expPath, ss.now().Sub(ss.start), len(ss.man.Points), cohort)
 	})
 	return ss.firstError()
@@ -555,13 +745,24 @@ func (ss *shapeSweep) runOuterFold(ctx sampler.Ctx, configPts []shape.Point, k, 
 		return 0, ss.fail(fmt.Sprintf("outer fold %d analysis path", i), err)
 	}
 	// (a) sealed selection: the sweeper's inner-CV runs entirely within analysis_i (inner k/stratify).
+	// metis#66 M2: --auto-stop drops already-stopped families' configs — the real budget reclamation
+	// (their inner sweep never runs on this fold). No-op without --auto-stop.
+	activePts := ss.activeConfigs(configPts)
 	pass := &sweepPass{ss: ss, baseRef: analysisRef, readRoot: analysisAbs, splitK: innerK, runK: runInnerK,
 		stratify: stratify, partRef: ss.partRef,
-		runRole: runRoleNestedInnerCV,
-		hooks:   ss.prog.forPass(i)} // metis#30/#38: outer-fold identity via closure binding
-	sres := ss.runSweeper(ctx, configPts, pass)
+		runRole:  runRoleNestedInnerCV,
+		priority: i,                  // metis#66: this outer fold's leaves acquire the budget at priority i
+		hooks:    ss.prog.forPass(i)} // metis#30/#38: outer-fold identity via closure binding
+	sres := ss.runSweeper(ctx, activePts, pass)
 	if err := pass.firstError(); err != nil {
 		return 0, err
+	}
+	// metis#66: a clean stop (Q) landed while this fold's sealed sweep was in flight — its
+	// leaves short-circuited, so the sweep is PARTIAL and its winner untrustworthy. Abandon
+	// the fold cleanly (no rows, no held-out scoring): the estimate stays honest over the
+	// folds that fully completed. Signalled to the driver as errRunStopped, not a failure.
+	if ss.stopRequested() {
+		return 0, errRunStopped
 	}
 	// Guard (metis#19/#23 I1): the parsimony select rule needs a measured complexity for every
 	// swept family — same guard the flat path runs before trusting its winner. Without it, a
@@ -605,12 +806,14 @@ func (ss *shapeSweep) runOuterFold(ctx sampler.Ctx, configPts []shape.Point, k, 
 				Fold:       of, // the outer fold this held-out score is on
 				Level:      "outer",
 				OuterFold:  &of,
+				Family:     fam, // metis#66 M2: so a later auto-stop can mark this family's rows
 				Status:     status,
 				// Metrics filled read-time from the run's record.json (namespaced), like inner rows.
 			})
 			if fam == shipFamily {
 				shipScore = score
 			}
+			ss.recordFamilyScore(fam, score) // metis#66 M2: accumulate the per-family outer scores
 			fmt.Fprintf(ss.out, "  outer fold %d: %s winner %s → held-out %.4f\n",
 				i, fam, freeParamStrFromParams(w.Point.FreeParams), score)
 		}) {
@@ -620,6 +823,10 @@ func (ss *shapeSweep) runOuterFold(ctx sampler.Ctx, configPts []shape.Point, k, 
 	if !ss.addManPoints(rows) {
 		return 0, errRunAborted
 	}
+	// metis#66 M2: with this fold's per-family scores in, decide which losers stop their
+	// remaining outer folds. Under --auto-stop the outer level is sequential, so this decision
+	// cleanly gates the NEXT fold's activeConfigs.
+	ss.evaluateAutoStop(k, ss.sh.Sweeper.Objective.Direction)
 	return shipScore, nil
 }
 
@@ -637,6 +844,7 @@ func (ss *shapeSweep) scoreOnOuterFold(point shape.Point, i, k int, stratify boo
 	scoreOpts.readRoot = "" // the outer-assessment eval reads full data legitimately
 	scoreOpts.runLabel = fmt.Sprintf("outer fold %d family %s score (%s)", i, fam, scoreID)
 	scoreOpts.runRole = runRoleOuterScore
+	scoreOpts.priority = i // metis#66: the held-out score leaf shares this outer fold's priority
 	run, err := runResolvedExperiment(scoreExp, scoreOpts, scoreID, ss.now, ss.out)
 	if err != nil {
 		return 0, "", "", err
@@ -657,10 +865,16 @@ func sortedFamilies(perFamily map[string]sampler.Winner) []string {
 
 // reportEstimate prints the honest procedure estimate — mean±SE over the outer folds — and the
 // standing reminder that driver:cv produces NO shippable winner (estimation ≠ selection).
-func (ss *shapeSweep) reportEstimate(est sampler.MeanSE, outerK int) {
+// metis#66: `stopped` reframes the line as an honest partial `out<n>` estimate (board Q).
+func (ss *shapeSweep) reportEstimate(est sampler.MeanSE, outerK int, stopped bool) {
 	out := summaryWriter(ss.out) // metis#55: the RESULT lands after the footer in board mode
-	fmt.Fprintf(out, "metis: nested-CV estimate — mean %.4f (SE %.4f) over %d outer fold(s) — the HONEST procedure estimate (argmax-mean family)\n",
-		est.Mean, est.SE, outerK)
+	if stopped {
+		fmt.Fprintf(out, "metis: STOPPED by request — honest partial estimate: mean %.4f (SE %.4f) over %d completed outer fold(s) (an out%d estimate; in-flight folds were abandoned)\n",
+			est.Mean, est.SE, outerK, outerK)
+	} else {
+		fmt.Fprintf(out, "metis: nested-CV estimate — mean %.4f (SE %.4f) over %d outer fold(s) — the HONEST procedure estimate (argmax-mean family)\n",
+			est.Mean, est.SE, outerK)
+	}
 	fmt.Fprintf(out, "  (per-family honest estimates recorded to the ledger; choose + ship via `metis select --best --promote`)\n")
 }
 
@@ -709,6 +923,7 @@ func (p *sweepPass) runPipelineFold(c shape.Point, f sampler.FoldPoint) sampler.
 	pointOpts.readRoot = p.readRoot // metis#23: confine a sealed outer-fold pass to its analysis root
 	pointOpts.runLabel = fmt.Sprintf("config %s fold %d (%s)", freeParamStr(c), f.Idx, runID)
 	pointOpts.runRole = p.runRole
+	pointOpts.priority = p.priority // metis#66: this outer fold's prioritySem grant key
 	run, runErr := runResolvedExperiment(exp, pointOpts, runID, ss.now, ss.out)
 	// A failing fold is FATAL to the sweep, unlike a v1 flat point: a config scored over a
 	// PARTIAL fold set is not an honest (mean, SE) estimate. Any error (a step failure, a

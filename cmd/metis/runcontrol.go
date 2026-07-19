@@ -10,19 +10,44 @@ import (
 
 var errRunAborted = errors.New("run aborted after earlier sweep failure")
 
+// errRunStopped is the metis#66 CLEAN-STOP sentinel (board Q → graceful finalize): a leaf
+// admitted after a stop-request returns this WITHOUT latching a failure — an intentional
+// abort, not an error. runPipelineFold treats it like errRunAborted (return a zero
+// FoldOutcome); runOuterFold/materializeOuterAnalysis detect the stop via stopRequested()
+// and abandon their fold cleanly (no rows, no score) so the estimate stays honest over the
+// folds that DID complete.
+var errRunStopped = errors.New("run stopped by operator request (graceful finalize)")
+
 // runControl bounds admitted concrete runs independently of leaf subprocess
 // parallelism and latches the first whole-run failure. Observation callbacks
 // must not call back into the controller or block production work.
 type runControl struct {
 	slots chan struct{}
 
-	mu  sync.Mutex
-	err error
+	mu      sync.Mutex
+	err     error
+	stopped bool // metis#66: a clean operator stop-request (NOT a failure) — gates new leaves
 
 	beforeFailureLock   func()
 	beforeFailureUnlock func()
 	afterAcquire        func(label string)
 	beforeRelease       func(label string)
+}
+
+// requestStop latches a clean graceful-stop (metis#66): admitted-but-not-yet-run leaves
+// return errRunStopped so in-flight outer folds drain fast and no new leaf starts. Distinct
+// from fail() — no error is recorded, so the run finalizes over its completed folds.
+func (c *runControl) requestStop() {
+	c.mu.Lock()
+	c.stopped = true
+	c.mu.Unlock()
+}
+
+// stopRequested reports whether a clean stop was requested.
+func (c *runControl) stopRequested() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.stopped
 }
 
 func newRunControl(maxParallel int) *runControl {
@@ -91,6 +116,11 @@ func (c *runControl) run(label string, fn func() (experiment.Run, error)) (exper
 
 	if c.firstError() != nil {
 		return experiment.Run{}, errRunAborted
+	}
+	// metis#66: a clean stop-request short-circuits the leaf before it spawns anything —
+	// the in-flight outer folds drain fast; runOuterFold then abandons them cleanly.
+	if c.stopRequested() {
+		return experiment.Run{}, errRunStopped
 	}
 
 	run, err := fn()

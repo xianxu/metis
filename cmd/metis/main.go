@@ -6,11 +6,13 @@
 package main
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
 	"os"
 	"runtime"
 	"strconv"
+	"strings"
 )
 
 func main() {
@@ -47,6 +49,8 @@ func cmdRun(args []string) error {
 	sampleStr := fs.String("sample", "", "metis#58: run a subset of the declared CV folds — out<M> (M of the k outer folds), in<N> (N of the inner_k per-config inner folds), or out<M>in<N>. Deterministic prefix subsets of the SAME partitions, so subset runs cache-escalate into full runs. k/inner_k stay the estimand; sampling only trades precision for cost (probe with it, don't re-select what ships on it). Nested (multi-config) runs only; errors loudly out of range or with --fast.")
 	forkserver := fs.Bool("forkserver", true, "metis#44: run convention-conforming step wrappers through a warm per-root fork-server (pre-imported pandas/sklearn; ~1s spawn tax removed per leaf). --forkserver=false = legacy per-step uv/python spawn (the escape hatch); non-conforming wrappers and failed servers fall back to legacy automatically (loud, once).")
 	noTUI := fs.Bool("no-tui", false, "metis#38: force the plain progress lines even on a TTY (the live board is default for a sweep when stdout is a terminal; piped/redirected output always gets plain lines)")
+	live := fs.Bool("live", false, "metis#66: fold-ordered scheduling — outer folds finish lowest-index-first (a priority queue over the leaf budget, backfill preserved so no core idles) so the mean±SE tightens fold-by-fold; press q+Enter to finalize an honest partial out<n> estimate early. Byte-identical result to the default full run (scheduling-only). DEFAULT keeps global fan-out for unattended runs; a nested (multi-config) run benefits, a flat run is unaffected (all leaves are one priority).")
+	autoStop := fs.Bool("auto-stop", false, "metis#66: incumbent-referenced early stop of losing families (implies --live). Reads the incumbent from the shape's existing ledger (best prior per-family estimate — no --baseline). After each outer fold (n≥2) a family <95%-likely to reach it (one-sided predictive bound on its full-k mean) stops its remaining outer folds — LOSERS ONLY, a would-be winner runs full k — reclaiming the budget for survivors; stopped families are marked `stopped: auto` in the ledger. Schedules outer folds sequentially (clean per-fold decision). No prior run in the ledger → no incumbent → runs the full sweep (loud no-op).")
 	parallel := fs.Int("parallel", defaultParallel(), "metis#31: max concurrent step subprocesses across ALL sweep levels (driver×sweeper×resample share one global cap); <=1 = serial (exact pre-#31 behavior). Default runtime.NumCPU(), overridable by METIS_MAX_PARALLEL. Leaf BLAS is pinned single-thread by default (metis#48; export a *_NUM_THREADS value yourself to override), so n is the ONE parallelism knob. On a COLD cache the first batch's ≤n points may each recompute the shared upstream (a bounded thundering herd).")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -61,7 +65,7 @@ func cmdRun(args []string) error {
 	}
 	// cmdRun just passes maxParallel; runExperiment establishes the parallel invariant
 	// (leafSem + syncWriter) in one home so no runOpts caller can forget it (#31).
-	_, err = runExperiment(runOpts{
+	o := runOpts{
 		expPath:     rest[0],
 		runID:       *runID,
 		stepPath:    stepPath(rest[0]),
@@ -73,8 +77,36 @@ func cmdRun(args []string) error {
 		tui:         !*noTUI && isCharDevice(os.Stdout), // metis#38: board iff a real terminal
 		out:         os.Stdout,
 		maxParallel: *parallel,
-	})
+		live:        *live || *autoStop, // metis#66: --auto-stop implies --live (fold-ordered scheduling)
+		autoStop:    *autoStop,
+	}
+	// metis#66: in board mode a stdin reader turns a `q`/`Q` line into the graceful-finalize
+	// signal (an intentional clean Ctrl-C). Stdlib-only; the sweep owns the finalize.
+	if o.live && o.tui {
+		o.stopSignal = stdinStopSignal()
+	}
+	_, err = runExperiment(o)
 	return err
+}
+
+// stdinStopSignal spawns a goroutine that scans stdin for a quit line (q / quit / stop,
+// case-insensitive) and fires the returned channel ONCE — the metis#66 board graceful-
+// finalize trigger (an intentional clean Ctrl-C). Line-buffered (q+Enter), stdlib-only (no
+// raw-mode / x/term, matching the board's charter). In board mode stdin is the terminal; a
+// piped or closed stdin simply never fires (the scan ends at EOF and the sweep runs full).
+func stdinStopSignal() <-chan struct{} {
+	ch := make(chan struct{})
+	go func() {
+		sc := bufio.NewScanner(os.Stdin)
+		for sc.Scan() {
+			switch strings.TrimSpace(strings.ToLower(sc.Text())) {
+			case "q", "quit", "stop":
+				close(ch)
+				return
+			}
+		}
+	}()
+	return ch
 }
 
 // isCharDevice is the stdlib isatty: a terminal is a character device; a pipe,

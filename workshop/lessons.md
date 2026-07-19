@@ -336,3 +336,30 @@ the thrash: starts ≫ completions with the process alive (throughput ≈ 0) —
 - **Estimate block grammar (ariadne #182-branch parser):** `item:` lines must be BARE
   (`item: <slug>  design=<f> impl=<f>`) — a trailing `# comment` breaks `itemRE` and the line
   falls through to "unknown estimate field". Total must reconcile: `total = Σdesign×(1+buffer) + Σimpl`.
+  Slugs are a CLOSED vocabulary (`helptext/estimate.md` / `internal/estimate/vocab.go`) — invented
+  slugs are rejected; map work to `greenfield-go-module`/`smaller-go-module`/`tui-screen`/
+  `method-b-decisions`/`milestone-review`/`atlas-docs`/…
+- **Commit the milestone's CODE before `sdlc milestone-close`/`sdlc close`.** The boundary review
+  reviews the COMMITTED window (`BASE^..HEAD`); uncommitted working-tree code is invisible to it, so
+  a close run with dirty code gets a meaningless review (I ran M1's close on spec-only commits once —
+  had to stop it, commit, and re-run). Flow: implement → `go test`/`vet` → COMMIT → milestone-close.
+- **Don't edit the issue/plan/atlas files WHILE a close's review subprocess runs.** `milestone-close`/
+  `close` release the SDLC lock during the (multi-minute) LLM review and reacquire at finalization; if
+  the issue file or HEAD changed meanwhile they REFUSE ("reviewed state changed"). Commit ALL
+  issue/doc/plan edits BEFORE launching the close; let the binary own its own log-line/trailer write.
+- **FIX-THEN-SHIP is fixed in the SAME close commit, not a re-review loop (#174).** Fix the findings,
+  bundle them + the issue-file close mutations into ONE commit carrying the `Review-Verdict:`/
+  `Review-Window:` trailers; do not re-run the same close. (A genuinely wrong review window — e.g.
+  codeless — IS a legitimate re-run.)
+
+## Reuse the domain reducer — don't hand-roll a biased twin
+- **When a codebase already has a dedicated reducer for a concept, reuse it; a hand-rolled "close
+  enough" version silently drifts.** metis#66 M2's `readIncumbent` reduced the ledger's per-family
+  incumbent with `ledger.AggregateView` (groups by EXACT free-params) — but `family.go` documents
+  that a family's winning config varies across outer folds, so AggregateView splits one family into
+  per-config subgroups and returns the optimistic MAX subgroup mean, inflating the bar and
+  over-stopping would-be winners. The correct reducer (`FamilyEstimate`/`familyEstimateFromLedger`,
+  what `metis select` ships) already existed. The single-config-per-family e2e couldn't catch it
+  (the two reducers coincide there) — the boundary review did. Lesson: if the Spec says "the same
+  X that Y uses," literally call Y's function; and add a test whose fixture EXERCISES the divergence
+  (multi-fold rows with a varying winner), not just the degenerate case where the twins agree.
