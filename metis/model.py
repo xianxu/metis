@@ -53,6 +53,12 @@ def parse_decide(raw):
         return "argmax", {}
     if isinstance(raw, dict) and len(raw) == 1 and "offsets" in raw:
         p = dict(raw["offsets"] or {})
+        # Closed config, exactly one legal key today — unlike parse_model_config's params
+        # (an open sweep surface), a typo here must be LOUD, not a silent default.
+        unknown = set(p) - {"holdout"}
+        if unknown:
+            raise ValueError(
+                f"decide offsets bundle has unknown key(s) {sorted(unknown)}; known: ['holdout']")
         holdout = p.get("holdout", 0.2)
         if not (isinstance(holdout, (int, float)) and not isinstance(holdout, bool)
                 and 0 < holdout <= 0.5):

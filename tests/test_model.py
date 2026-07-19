@@ -251,7 +251,7 @@ def test_tune_class_offsets_recovers_balanced_optimum():
     tuned_score = scorer(y, apply_offsets(proba, offsets))
     assert offsets[0] == 0.0                                  # class 0 pinned
     assert tuned_score > argmax_score
-    assert tuned_score >= prior_score - 0.02                  # 80/12/8-style priors: optima inside the ±4 grid
+    assert tuned_score >= prior_score - 0.02                  # 270/74/56 (≈67.5/18.5/14%) priors — optima ≈1.29/1.57, inside the ±4 grid: optima inside the ±4 grid
 
 
 def test_tune_class_offsets_deterministic_and_noop_on_uniform():
@@ -282,6 +282,8 @@ def test_parse_decide_table():
         with pytest.raises(ValueError, match="decide"):
             parse_decide(bad)
 
+    with pytest.raises(ValueError, match="holdour"):   # typo'd inner key must be LOUD (close-review)
+        parse_decide({"offsets": {"holdour": 0.25}})
 
 def test_fold_fit_offsets_on_decide_frame_and_loud_small_frame():
     import pandas as pd

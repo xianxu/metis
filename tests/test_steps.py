@@ -264,6 +264,10 @@ def test_predict_probabilities_and_offsets_application(tmp_path, monkeypatch):
     assert list(proba.columns) == ["id", "proba_0", "proba_1"] and len(proba) == 40
     assert np.allclose(proba[["proba_0", "proba_1"]].sum(axis=1), 1.0)
     payload = json.loads((run / "train" / "offsets.json").read_text())
+    # Anti-vacuity (close-review Important 2, the plan's dropped flip-check): all-zero
+    # offsets would make the expectation below plain argmax — assert tuning actually tilted
+    # the decision on this frame (deterministic under the fixed seed).
+    assert any(o != 0 for o in payload["offsets"])
     preds = pd.read_csv(ps / "predictions.csv")
     expect = np.array(payload["classes"])[
         apply_offsets(proba[["proba_0", "proba_1"]].to_numpy(), np.array(payload["offsets"]))]
@@ -278,3 +282,19 @@ def test_predict_probabilities_and_offsets_application(tmp_path, monkeypatch):
     assert np.array_equal(preds2["prediction"].to_numpy(),
                           proba2[["proba_0", "proba_1"]].to_numpy().argmax(axis=1))
     assert json.loads((ps2 / "metrics.json").read_text())["has_offsets"] == 0.0
+
+
+def test_predict_offsets_class_mismatch_fails_loud(tmp_path, monkeypatch):
+    """The classes validation is the honesty guarantee for applying a persisted decision
+    rule (close-review Important 3): a wrong-model/wrong-offsets pairing must refuse, not
+    silently produce garbage labels."""
+    run = tmp_path / "runs" / "r-mismatch"
+    _save_decide_dataset(run)
+    _run_step(monkeypatch, run, "train",
+              {"dataset": "decide", "model": "logreg", "metric": "balanced_accuracy",
+               "decide": {"offsets": {"holdout": 0.2}}}, train.main)
+    payload = json.loads((run / "train" / "offsets.json").read_text())
+    payload["classes"] = list(reversed(payload["classes"]))  # mangle the pairing
+    (run / "train" / "offsets.json").write_text(json.dumps(payload))
+    with pytest.raises(ValueError, match="classes"):
+        _run_step(monkeypatch, run, "predict", {"dataset": "decide", "model": "train"}, predict.main)

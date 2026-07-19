@@ -51,6 +51,8 @@ def main() -> None:
     if has_offsets:
         with open(offsets_path) as f:
             payload = json.load(f)
+        # int() normalization rides the numeric-int target contract; float-coded labels
+        # would collide (0.4 vs 0.6 → 0) — acceptable under the contract, noted (review minor).
         if [int(c) for c in payload["classes"]] != [int(c) for c in model.classes_]:
             raise ValueError(
                 f"offsets.json classes {payload['classes']} != model.classes_ "
