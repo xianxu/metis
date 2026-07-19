@@ -21,10 +21,10 @@ two submissions, zero machine-readable trace of either fact at the shape level).
 
 ## Spec
 
-- **Verb:** operator proposal `metis select --promoted <shape.md>`; open naming question —
-  as a READ-ONLY inspection it may belong in the metis#61 `debug` family
-  (`metis debug runs <shape.md>`), keeping `select` purely a chooser. Decide at plan time;
-  one home only.
+- **Verb: `metis select --promoted <shape.md>`** — SETTLED (operator, 2026-07-19): this is
+  status-checking on the selection surface, not debugging — it answers "what did select
+  materialize and what happened to it," so it lives on `select`. (The #61 debug family stays
+  model/data inspection.)
 - **Output:** one row per materialized run of the shape: run id · point (family + free-param
   tuple, the ledger's `fp.*` rendering) · cohort fingerprint (prefix) · created · submission
   status — from **kaggle#7's receipt sidecar** (`runs/<id>/submission/receipt*.json`):
