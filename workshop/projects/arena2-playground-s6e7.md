@@ -121,3 +121,20 @@ friction (kbench layering). Everything else is out unless the competition says o
   ExtraTrees > LightGBM/XGBoost > deep tabular (TabPFN public 0.94756 < our GBM — evidence
   against). Demand gate for M5: the residual gap after M4 (decision grid) + metis#60 M2
   (blend).
+
+### 2026-07-19 (M4 complete — decision layer + blend shipped)
+
+- kbench#15 M4 decision grid run: the loss-vs-decision answer — REPLACE no (representation
+  effect real: offsets+None 0.9480 < argmax+balanced 0.9494); ADD-ON-TOP family-dependent
+  (gbm ≈no-op, rf +0.10 pts); parsimony picked gbm's pure decision-space winner. Honest
+  OUTER: rf 0.9500±0.0004, gbm 0.9496±0.0006 (lower than M3 by REDUCED selection optimism —
+  4-config pools vs 12, incumbent cell reproduces exactly).
+- metis#64 closed same-day (null-rung ledger round-trip — select healed retroactively).
+  metis#60 CLOSED: M1 decision layer + M2 `metis blend` (tilted-log soft vote; provenance
+  guard; kaggle submit-compatible). Demands #3–#5 all shipped.
+- READY FOR OPERATOR: the blend submission —
+  `metis blend competition/playground-s6e7/pipelines/s6e7-sweep.md --runs point-hist_gbm-501f3358,best-rf-d4c852d3`
+  (if the provenance guard refuses on mixed fingerprints: --allow-mixed, loud, or re-promote
+  both under current code). Then `kaggle submit --run blend-<hash>`. Optional first: solo rf
+  M4 winner submit (honest 0.9500±0.0004). M5 gate: the residual gap after blend
+  (pensive: brain/workshop/pensive/2026-07-19-01-pensive-s6e7-classifier-candidates-m5.md).
