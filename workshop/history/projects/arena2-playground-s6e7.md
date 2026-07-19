@@ -3,13 +3,13 @@ type: project
 name: arena2-playground-s6e7
 goal: "Second arena: run Kaggle Playground Series S6E7 (Predicting Student Health Risk) through the metis workbench end-to-end — prove the workbench GENERALIZES beyond titanic with zero new features until the competition demands them (the v1→v2 pattern's next turn)."
 done_when: "A live S6E7 submission produced entirely by the honest flow (metis run → select --best --promote → kaggle submit -C), on a content-pinned dataset, with the nested-CV honest estimate recorded — and a Log entry stating which workbench features the competition actually DEMANDED (possibly none). Leaderboard position is evidence, not the goal (the tight ~0.953 pack makes flips noise; the deliverable is the generalization proof + the demand list)."
-status: executing
+status: done
 deadline: 2026-07-31
 planned_finish: 2026-07-24
 operator: xianxu
 explicitly_out: [new workbench features built speculatively]
 created: 2026-07-18
-updated: 2026-07-18
+updated: 2026-07-19
 sources: [brain/data/project/metis-v2-experiment-algebra.md]
 ---
 
@@ -279,3 +279,70 @@ gap-closer and the ONE information-adding lever. Sequence:
 Lower-priority / likely-noise (codex-flagged, gated behind step 1-2): pseudo-labeling the test set,
 LB threshold-probing, submission ensembling, rule-mining, TTA, more thresholds. Run only if a
 diagnostic surfaces signal; do not burn submissions speculatively.
+
+### M7 CLOSED — leaderboard chase exhausted, honest end (2026-07-19)
+
+Every M7 information lever was cheaply GATED and failed its gate (diagnostic-first discipline —
+no speculative pipeline built for a dead idea):
+- **#4 generator forensics** (`m7_shift_forensics.py`): clean generator — 0 exact dupes
+  (train/test/cross), no id-order class drift, no missingness→label signal, numerics not gridded.
+- **#3 train/test shift** (`m7_shift_characterize.py`): real (adversarial AUC 0.654) but
+  **METRIC-ADVERSE** — test-like train rows are MORE majority (minority rate 0.133→0.107 as
+  test-likeness rises), so importance-weighting would HURT minority recall. Dead for balanced accuracy.
+- **source augmentation** (`m7_source_augment.py`): the named source (College Student Health
+  Behavior Dataset, 50k — identical schema+target+skew) is **distributionally DISTANT** (adversarial
+  synthetic-vs-original AUC 0.954 raw / 0.952 median-imputed — a real feature-dist gap, NOT the
+  missingness tell); concat HURTS the synthetic OOF (w=1 Δ−0.0005) and drops both minority recalls;
+  leakage 0. The competition test is synthetic, so the distant original pulls away from it.
+
+**Verdict:** the ~0.003 gap to the 0.953 pack is **noise floor + public-LB variance/overfit**, not
+a principled signal recoverable from our position. The recurring decisive test — *does the signal
+align with the minority classes?* — killed M6 (non-tree recovers majority) AND M7-#3 (shift toward
+majority); a real signal that doesn't help the minority-driven metric is not exploitable.
+
+### 2026-07-19 — project close (DONE, done_when MET)
+
+**done_when MET at M2** (2026-07-18): a live S6E7 submission by the honest flow
+(`hist_gbm{cw=balanced}` → **public 0.94903**, 0.14% within the honest OUTER estimate) on a
+content-pinned dataset, nested-CV estimate recorded, with the DEMAND LIST — the competition
+demanded exactly two workbench features (metis#59 balanced-accuracy metric knob, metis#58
+`--sample outMinN` dial); NOT demanded: metis#33/#54, per-competition step-reuse (the kbench
+layering absorbed a second competition with zero new abstractions). **The generalization thesis
+held** — the metis substrate ran a 100×-larger, 3-class, skewed arena end-to-end on Python-only
+model-layer additions (ensemble/catboost/seed kinds — zero Go edits until the *demanded* ones).
+
+M3–M7 were optional post-done_when gap-chasing: they mapped the noise floor exhaustively (model
+space, features, capacity, blend, shift, source) and produced a clean, well-evidenced set of
+negatives + reusable diagnostics (the cascade + adversarial + source-gate scripts). The
+leaderboard was never the deliverable (the ~0.953 pack is noise); the generalization proof + the
+demand list are, and both are delivered. Third-arena candidate for a step-type lift:
+rogii-wellbore (grouped sequence data).
+
+### 2026-07-19 — retro
+
+**board:** 0/0 done · Σ remaining ≈ 0h · deadline 2026-07-31 · frontier: — (arena2 CLOSING — done_when met at M2; M3–M7 gap-chase exhausted, honest end)
+
+- **The generalization thesis PROVED cleanly.** A 100×-larger, 3-class, skewed arena went through
+  the metis substrate end-to-end demanding only TWO features (metis#59 metric knob, metis#58 sample
+  dial) + Python-only model-layer additions — zero Go edits beyond the demanded ones. Framing
+  done_when around the THESIS (not the leaderboard) was right: it let the project close honestly
+  even though the leaderboard chase produced only negatives.
+- **Diagnostic-first discipline was the MVP.** M6 and M7 each cheaply GATED every lever
+  (cascade oracle, by-class recovery, adversarial validation, concat gate) and let the gate fail
+  before any production pipeline was built. Net effect: a complete map of the noise floor for
+  ~nothing, and a reusable "is-this-the-floor?" toolkit (`analysis/cascade_*.py`, `m7_*.py`).
+- **The recurring decisive test: "does the signal align with the MINORITY class?"** It killed the
+  non-tree probe (recovers majority, M6), the feature-v2 lever (flat), the train/test shift (toward
+  majority, M7), and framed the source gate (per-class recall). For a minority-driven metric, the
+  by-class breakdown is THE gate — an aggregate/overall number repeatedly hid a majority-collapse
+  or metric-adverse reality.
+- **The noise floor is real and over-determined** — model space, features, capacity, blend, shift,
+  AND a distributionally-distant "inspired by" source all bottom out at honest OUTER ~0.950. The
+  ~0.003 pack gap is synthetic-label-noise floor + public-LB variance, not recoverable signal.
+- **Estimation caveat:** most M6/M7 issue actuals are N/A — a single session interleaved many
+  issues (contaminated active-time) — so the arena's effort ledger is partly unmeasurable by design
+  rather than launder a guessed number (per the lessons rule).
+
+### 2026-07-19 — close
+
+- fog: n/a
