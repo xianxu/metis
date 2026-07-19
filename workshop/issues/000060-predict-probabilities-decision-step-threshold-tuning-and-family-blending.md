@@ -1,12 +1,13 @@
 ---
 id: 000060
-status: working
+status: codecomplete
 deps: []
 github_issue:
 created: 2026-07-18
-updated: 2026-07-18
+updated: 2026-07-19
 estimate_hours: 1.6
 started: 2026-07-18T22:35:41-07:00
+actual_hours: 1.98
 ---
 
 # predict probabilities + decision step: threshold tuning and family blending
@@ -120,6 +121,7 @@ folded; the honesty deviation confirmed sound by the reviewer).
 - 2026-07-18: closed M1 — 103 python tests + go test ./cmd/metis green (fork + independent re-run); decision core on dedicated 40-row frame; per-fold tuned-vs-argmax bound, offsets.json presence/absence, eager foldless refusal, probabilities + compat anchor (byte-identical argmax) all pass; atlas carries the two honest costs; review verdict: FIX-THEN-SHIP
 
 ### 2026-07-19 (M1 implementation + close)
+- 2026-07-19: closed — M1: decision layer shipped (104 py + Go green; leaf-local tuning; retroactive M4 sweep proved it live). M2: metis blend 8/8 tests + full suites; execStep.Execute seam; runref slug + literal-path asserted; provenance guard; single-member identity pins clip+offsets. Both milestones fresh-eyes reviewed; deviations recorded in Revisions; review verdict: FIX-THEN-SHIP
 
 - Fork commits dbb881d (decision core; ±4 grid, no-op-anchored strict-improvement tie-break,
   fold_fit 3-tuple both unpack sites, cv_score threads decide) + f53f446 (train/predict
@@ -144,3 +146,6 @@ folded; the honesty deviation confirmed sound by the reviewer).
   shape steps (runref first-slug-wins asserted in-test). Suites: blend 8/8, full Go, 104
   python — independently re-verified. Provenance guard + --allow-mixed live; single-member
   identity + slug-resolution + literal-path tests in.
+- Close-review FIX-THEN-SHIP fixes bundled: atlas blend-verb bullet (the docs gate),
+  realignColumns order-invariance + column-mismatch tests (the untested permutation path),
+  normalizeWeights refuses NaN/±Inf loudly, plan-doc checkboxes ticked (housekeeping).

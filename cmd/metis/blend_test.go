@@ -274,3 +274,35 @@ func TestBlend_MissingProbabilitiesRefusal(t *testing.T) {
 		t.Fatalf("missing probabilities.csv must refuse naming re-promote, got %v", err)
 	}
 }
+
+func TestBlend_ColumnRealignmentIsOrderInvariant(t *testing.T) {
+	// close-review Important 2: the by-name permutation path shipped untested — a mis-indexed
+	// realign silently permutes class probabilities into garbage. Feed a member with REVERSED
+	// columns; the combine must be value-identical to the aligned case.
+	have := []string{"proba_2", "proba_1", "proba_0"}
+	want := []string{"proba_0", "proba_1", "proba_2"}
+	m := [][]float64{{0.3, 0.5, 0.2}, {0.1, 0.2, 0.7}}
+	re, err := realignColumns(m, have, want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantM := [][]float64{{0.2, 0.5, 0.3}, {0.7, 0.2, 0.1}}
+	for i := range wantM {
+		for j := range wantM[i] {
+			if re[i][j] != wantM[i][j] {
+				t.Fatalf("realign[%d][%d]=%v want %v", i, j, re[i][j], wantM[i][j])
+			}
+		}
+	}
+	if _, err := realignColumns(m, []string{"proba_9", "proba_1", "proba_0"}, want); err == nil {
+		t.Error("column-set mismatch must refuse loudly")
+	}
+}
+
+func TestNormalizeWeights_NonFiniteRefused(t *testing.T) {
+	for _, bad := range []float64{math.NaN(), math.Inf(1), math.Inf(-1), 0, -1} {
+		if _, err := normalizeWeights(2, []float64{1, bad}); err == nil {
+			t.Errorf("weight %v must be refused", bad)
+		}
+	}
+}

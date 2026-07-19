@@ -220,6 +220,17 @@ wrapped by **thin step-executables** honoring the contract above. Hermetic via *
   and/or N of the inner_k per-config folds (metis#42/#58 — probe-cost control; an M<k SE has M−1 df
   and an in<N run selects on a noisier N-fold mean: probe with it, never re-select what ships on
   it). Retired `metis ledger select` + `metis promote`.
+- **`metis blend <shape.md> --runs a,b[,...] [--weights ...] [--allow-mixed]`** (metis#60 M2,
+  `cmd/metis/blend.go`): weights-only soft vote over PROMOTED runs — members averaged in
+  TILTED log-space (`w_i·(log(clip(p_i)) + o_i)`, each member's persisted offsets baked in;
+  zeros when absent), argmax → `runs/blend-<hash>/` (hash over member+normalized-weight
+  pairs) with a blend-flavored `record.json` (embeds RunRecord + members/weights; carries
+  the shape's steps so `kaggle submit --run blend-...` resolves the slug), then the shape's
+  ship `submission` step execs via `execStep.Execute` → the literal
+  `submission/submission.csv`. Guards: id/column agreement by NAME; per-member
+  offsets↔columns by class label; missing probabilities.csv → "re-promote"; mixed
+  `code_fingerprint`/`experiment` refused without `--allow-mixed`. HONESTY (printed): blends
+  have no in-sweep OOF — leaderboard-measured only.
 - **Parallel batch executor (metis#31) — `pkg/sampler/exec.go` + `cmd/metis/{exec,run,sweep}.go`:**
   `Run` takes an injected `exec(batch, runPoint) []O` that runs one `Ask` batch and returns outputs
   **in batch order** (`SeqExec` serial default · `ParExec` goroutine fan-out · `ExecFor(parallel)`

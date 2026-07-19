@@ -372,8 +372,10 @@ func normalizeWeights(n int, raw []float64) ([]float64, error) {
 	}
 	sum := 0.0
 	for _, v := range raw {
-		if v <= 0 {
-			return nil, fmt.Errorf("blend: weights must be positive, got %v", v)
+		// !(v > 0) also catches NaN (all comparisons false); IsInf catches ±Inf — either
+		// would silently NaN every score and pick the first class for every row (close-review).
+		if !(v > 0) || math.IsInf(v, 0) {
+			return nil, fmt.Errorf("blend: weights must be positive and finite, got %v", v)
 		}
 		sum += v
 	}
