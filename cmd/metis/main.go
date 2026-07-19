@@ -31,8 +31,10 @@ func run(args []string) error {
 		return cmdSelect(args[1:])
 	case "ledger":
 		return cmdLedger(args[1:])
+	case "blend":
+		return cmdBlend(args[1:])
 	default:
-		return fmt.Errorf("unknown subcommand %q (want: run | select | ledger)", args[0])
+		return fmt.Errorf("unknown subcommand %q (want: run | select | ledger | blend)", args[0])
 	}
 }
 
