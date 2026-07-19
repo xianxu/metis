@@ -37,11 +37,12 @@ fold's leaves run when) is a pure scheduling change, in the same class as `SeqEx
 an `out<n-done>` estimate.
 
 **M1 — priority scheduling + live incremental estimate (+ human Q-to-stop).** Replace the flat
-global fan-out with a **fold-ordered priority queue with backfill**: the semaphore always
-prefers the lowest-numbered INCOMPLETE outer fold's leaves, but when that fold has no more
-schedulable leaves (its remainder is in-flight) and a slot is free, it **backfills** with the
-next fold's leaves — so fold 0 finishes ASAP for the early checkpoint AND no core ever idles
-(operator: "don't create bottlenecks"). After each outer fold completes, emit the running
+global fan-out with a **fold-numbered priority queue**: the leaf semaphore dispatches the
+lowest-numbered incomplete outer fold's leaves first. That's the whole rule — "backfill" is
+emergent, not separate logic: once fold 0's leaves are all in-flight, the next-highest-priority
+ready leaves are fold 1's, so a free slot never idles and fold 0 still finishes first for the
+early checkpoint (operator: "really just a priority queue based on fold number, don't create
+bottlenecks"). After each outer fold completes, emit the running
 `Aggregate` (mean±SE over completed folds — SE withheld until n≥2) to the board (metis#55) /
 `--sample` progress. A `--live` (or `--sequential-outer`) mode gates it; the default keeps
 global fan-out for unattended runs. `Q` on the board = a CLEAN abort: stop scheduling new
