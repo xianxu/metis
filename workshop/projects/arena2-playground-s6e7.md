@@ -196,3 +196,36 @@ Recommendation: if the operator wants the leaderboard, **#1 (source augmentation
 accepting it's a provenance experiment, not a workbench one. If the goal stays "prove the
 workbench generalizes" (the project's actual done_when, met at M2), arena2 is **DONE** — the
 model bench is the honest, complete answer: the workbench measured the noise floor correctly.
+
+### M6 update — the cascade diagnostic + out10 confirmation (2026-07-19, operator design session)
+
+The ranked list above was refined by two diagnostics run this session (kbench#17 is the plan of
+record; scripts in `kbench/competition/playground-s6e7/analysis/`):
+
+- **#2 RESOLVED — the blend edge is NOISE.** The out10 confirmation (`s6e7-blend-out10.md`,
+  `--sample out10in5`, cohort 460e219c): ensemble **0.9496±0.0006** > rf 0.9492±0.0005 > gbm
+  0.9483±0.0006. The blend's point edge over rf shrank to +0.0004 (within 1 SE) → `select` ships
+  rf. Everything dropped ~0.001 vs out3 because folds {0,1,2} were a favorable subsample
+  regressing to the honest mean (an `--sample out<M>` optimism datum). The blend does not beat
+  solo rf even at full k=10.
+- **The cascade diagnostic KILLED routing/blending/specialists over trees** (`cascade_diag.py`,
+  5-fold OOF on all 690k rows): 87% of gbm's errors are CONSENSUS errors (rf+catboost also wrong
+  — correlated axis-aligned bias); the recoverable 12.8% is UNROUTABLE (oracle 0.661 needs
+  per-row omniscience; best real router −0.0010) AND METRIC-ORTHOGONAL (the uncertain rows are
+  majority-heavy, balanced accuracy is minority-driven). So #3 (stacking) is bounded by the same
+  oracle ceiling — a smarter combiner over these trees won't move the metric.
+- **The one open lever, sharpened (kbench#17):** the diagnostic only tested TREES, so a DIFFERENT
+  model CLASS (non-tree: logreg/MLP) whose bias sits off the trees' shared failure mode is
+  untested — and it's synergistic with #4 (clinical features: a linear model NEEDS them; trees
+  get univariate non-linearity free). The decisive gate is a **minority-class consensus-error
+  recovery** diagnostic (does a non-tree on engineered features recover the at-risk/unhealthy
+  rows all three trees miss?) BEFORE any build. Features grounded in the health literature
+  (U-shaped sleep, BMI J-curve + fat-but-fit `bmi×activity`, step dose-response, RHR threshold).
+- **Tooling shipped this session (metis#66, merged PR#48):** `--live` fold-ordered scheduling
+  (live per-fold mean±SE + board Q graceful-finalize) + `--auto-stop` (incumbent-referenced
+  loser-stop) — future arena runs get live partial estimates and can auto-drop losing configs.
+
+**Standing status:** the model-space answer is COMPLETE and honest (noise floor confirmed at the
+row level; even the blend evaporates at k=10). arena2's done_when was met at M2. M6 is optional
+gap-chasing: EITHER the kbench#17 non-tree×features minority-recovery probe, OR source
+augmentation (#1) for real minority signal — both feature/data moves, not model moves.
