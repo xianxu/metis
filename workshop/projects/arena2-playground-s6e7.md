@@ -99,3 +99,19 @@ friction (kbench layering). Everything else is out unless the competition says o
   run** (`--sample out3`; fresh cohort by construction — adapt/features re-key). Queued
   after the run: results + honesty protocol → M2 close; kbench guard issue (session-scoped
   fingerprint; measured 24s/test tax); metis#60/#61 as the next demanded builds.
+
+### 2026-07-19 (M3 round complete — kbench#13 closed SHIP)
+
+- Operator decision run (24 configs, cohort 05c28781): **NaN-through beats imputation**
+  (+0.14 pts marginal; top-5 all impute=none) — the round's durable win; **interaction
+  encodings flat** ([] ≡ pairs ≡ pairs+triple) — the cross-fit ladder is CLOSED, no 4-way;
+  rf honest jumped to parity (0.9506 ≈ hist_gbm 0.9507) on d12+NaN routing.
+- Dual honest submissions: **hist_gbm public 0.94966** (honest 0.9507±0.0007, 1.5 SE —
+  leaderboard gain from NaN-through realized: 0.94903 → 0.94966) · **rf public 0.94906**
+  (honest 0.9506±0.0008, 1.9 SE). Honesty held for BOTH families; public ordering matched
+  honest ordering. Submission diff: 99.40% agree; the 0.60% concentrated on minority-class
+  boundaries — the exact rows metis#60's decision layer targets.
+- Housekeeping: kbench#14 filed (session-scoped test guard; measured 24s/test tax).
+- **Next (operator-framed M4): the measurement/decision layer** — metis#60 (predict-proba +
+  decide step: per-class thresholds FIRST, then blending; the two compose on the same
+  boundary rows).
