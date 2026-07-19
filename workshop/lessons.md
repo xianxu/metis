@@ -281,3 +281,14 @@ the thrash: starts ≫ completions with the process alive (throughput ≈ 0) —
 - **A plan that deviates from its spec must carry the artifact-reconciliation task itself**
   (issue ## Revisions) — deviation rationale only in the plan leaves the issue lying by
   aspiration at close.
+
+## Implementation lessons (metis#60 M1, 2026-07-19)
+
+- **Verify WHY each new test is red, not just that the suite fails.** One of four step tests
+  was green pre-implementation (the unknown `with` key was silently ignored → both compared
+  runs identical); a vacuously-green test is a spec bug unless a sibling carries its red.
+- **Tie-breaking in grid searches is a contract, not an accident.** "The grid includes the
+  no-op" doesn't make the no-op win ties — initialize best AT the no-op and replace only on
+  strict improvement, else uninformative inputs return an arbitrary grid corner.
+- **Pin indices-vs-labels in any decision function's docstring** — index returns silently
+  coincide with labels for 0..K-1 int codes and explode otherwise; callers map via classes_.

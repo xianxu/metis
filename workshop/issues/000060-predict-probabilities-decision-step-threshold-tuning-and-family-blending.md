@@ -110,10 +110,28 @@ sees a scalar per-fold score of the declared procedure.
 Durable plan: `workshop/plans/000060-decide-step-plan.md` (fresh-eyes reviewed; 8 findings
 folded; the honesty deviation confirmed sound by the reviewer).
 
-- [ ] M1 — decision core (proba/tune/apply/parse, fold_fit 3-tuple) + train/predict wiring +
+- [x] M1 — decision core (proba/tune/apply/parse, fold_fit 3-tuple) + train/predict wiring +
   dedicated decide frame tests + docs (two honest costs) + milestone-close
 - [ ] M2 — `metis blend` (weights-only) + close
 
 ## Log
 
 ### 2026-07-18
+- 2026-07-18: closed M1 — 103 python tests + go test ./cmd/metis green (fork + independent re-run); decision core on dedicated 40-row frame; per-fold tuned-vs-argmax bound, offsets.json presence/absence, eager foldless refusal, probabilities + compat anchor (byte-identical argmax) all pass; atlas carries the two honest costs; review verdict: FIX-THEN-SHIP
+
+### 2026-07-19 (M1 implementation + close)
+
+- Fork commits dbb881d (decision core; ±4 grid, no-op-anchored strict-improvement tie-break,
+  fold_fit 3-tuple both unpack sites, cv_score threads decide) + f53f446 (train/predict
+  wiring; eager parse; offsets.json+classes; class-labeled probabilities.csv; compat
+  anchor). 103→104 python tests + Go green (independent re-run).
+- M1 review FIX-THEN-SHIP; fixes bundled: parse_decide closed key-set (typo'd inner key
+  loud + test), anti-vacuity assert on the predict offsets test (the dropped flip-check —
+  the vacuously-green lesson closing its own loop), NEW class-mismatch loud test (the
+  honesty guarantee path), priors comment corrected, int-normalization comment.
+- Deltas logged by fork: docs folded into Task 2 commit; apply_offsets returns indices
+  (callers map via classes_); no-op tie-break implemented as init-at-zeros.
+- EARLY MERGE (loud, deliberate): M1 publishes ahead of issue close because kbench#15 (the
+  M4 decision-grid sweep) depends on it cross-repo — the operator sweep's cohort fingerprint
+  should pin a published main commit, not a mutable branch checkout. M2 (blend) continues on
+  a FRESH branch name per the #148 no-reuse rule.

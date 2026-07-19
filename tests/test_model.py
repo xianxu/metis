@@ -4,8 +4,9 @@ import numpy as np
 import pytest
 from sklearn.datasets import make_classification
 
-from metis.model import (complexity, cv_score, fold_score, make_model, parse_model_config,
-                         predict, resolve_scorer, train)
+from metis.model import (apply_offsets, complexity, cv_score, fold_fit, fold_score, make_model,
+                         parse_decide, parse_model_config, predict, resolve_scorer,
+                         train, tune_class_offsets)
 from metis.split import cv_folds
 
 
@@ -206,3 +207,114 @@ def test_make_model_class_weight_reaches_estimators():
         m = make_model(kind, seed=0, params={"class_weight": "balanced"})
         assert m.class_weight == "balanced"
         assert make_model(kind, seed=0).class_weight is None  # default unchanged
+
+
+# --- metis#60: decision layer (probabilities + offsets) ---
+
+
+def _decide_frame(seed=0):
+    """40 rows, 30/10 skew, ONE weak-but-informative feature (overlapping normals) — the
+    dedicated decide test frame (#60 plan review issue 1: the 12-row constant-feature frame
+    is both illegal for the internal stratified holdout and vacuous for tuning)."""
+    rng = np.random.default_rng(seed)
+    X = np.concatenate([rng.normal(0.0, 1.0, 30), rng.normal(1.5, 1.0, 10)]).reshape(-1, 1)
+    y = np.array([0] * 30 + [1] * 10)
+    return X, y
+
+
+def _posterior_matrix():
+    """400 rows of hand-built TRUE posteriors: 4 distinct posterior vectors, each tiled
+    100x with labels matching the vector's frequencies exactly. Deterministic, RNG-free."""
+    blocks = [
+        ([0.85, 0.09, 0.06], (85, 9, 6)),
+        ([0.70, 0.20, 0.10], (70, 20, 10)),
+        ([0.55, 0.15, 0.30], (55, 15, 30)),
+        ([0.60, 0.30, 0.10], (60, 30, 10)),
+    ]
+    proba, y = [], []
+    for vec, counts in blocks:
+        for cls, c in enumerate(counts):
+            proba.extend([vec] * c)
+            y.extend([cls] * c)
+    return np.array(proba), np.array(y)
+
+
+def test_tune_class_offsets_recovers_balanced_optimum():
+    proba, y = _posterior_matrix()
+    scorer = resolve_scorer("balanced_accuracy")
+    argmax_score = scorer(y, proba.argmax(axis=1))            # all-majority: 1/3
+    # the Bayes plug-in for balanced accuracy: argmax p(k|x)/prior_k
+    priors = np.bincount(y) / len(y)
+    prior_offsets = -np.log(priors) + np.log(priors[0])       # pinned to class 0
+    prior_score = scorer(y, apply_offsets(proba, prior_offsets))
+    offsets = tune_class_offsets(proba, y, metric="balanced_accuracy")
+    tuned_score = scorer(y, apply_offsets(proba, offsets))
+    assert offsets[0] == 0.0                                  # class 0 pinned
+    assert tuned_score > argmax_score
+    assert tuned_score >= prior_score - 0.02                  # 270/74/56 (≈67.5/18.5/14%) priors — optima ≈1.29/1.57, inside the ±4 grid: optima inside the ±4 grid
+
+
+def test_tune_class_offsets_deterministic_and_noop_on_uniform():
+    proba, y = _posterior_matrix()
+    o1 = tune_class_offsets(proba, y, metric="balanced_accuracy")
+    o2 = tune_class_offsets(proba, y, metric="balanced_accuracy")
+    assert np.array_equal(o1, o2)
+    uniform = np.full((60, 3), 1 / 3)
+    yu = np.array([0, 1, 2] * 20)
+    assert np.array_equal(tune_class_offsets(uniform, yu, metric="balanced_accuracy"),
+                          np.zeros(3))                        # no improvement -> no-op zeros
+
+
+def test_apply_offsets_zero_is_plain_argmax_incl_zero_proba():
+    proba = np.array([[0.7, 0.3, 0.0], [0.0, 0.5, 0.5], [0.2, 0.2, 0.6]])
+    assert np.array_equal(apply_offsets(proba, np.zeros(3)), proba.argmax(axis=1))
+
+
+def test_parse_decide_table():
+    assert parse_decide(None) == ("argmax", {})
+    assert parse_decide("argmax") == ("argmax", {})
+    rule, p = parse_decide({"offsets": {}})
+    assert rule == "offsets" and p["holdout"] == pytest.approx(0.2)
+    rule, p = parse_decide({"offsets": {"holdout": 0.5}})
+    assert p["holdout"] == pytest.approx(0.5)
+    for bad in ("foo", {"offsets": {"holdout": 0.6}}, {"offsets": {"holdout": 0}},
+                {"blend": {}}, {"offsets": {}, "extra": 1}):
+        with pytest.raises(ValueError, match="decide"):
+            parse_decide(bad)
+
+    with pytest.raises(ValueError, match="holdour"):   # typo'd inner key must be LOUD (close-review)
+        parse_decide({"offsets": {"holdour": 0.25}})
+
+def test_fold_fit_offsets_on_decide_frame_and_loud_small_frame():
+    import pandas as pd
+
+    X, y = _decide_frame()
+    folds = cv_folds(pd.DataFrame({"y": y}), 2, 0, stratify_col="y")
+    score_argmax, _, off_none = fold_fit(X, y, folds, 0, "logreg", 0,
+                                         metric="balanced_accuracy")
+    assert off_none is None
+    score_tuned, _, offsets = fold_fit(X, y, folds, 0, "logreg", 0,
+                                       metric="balanced_accuracy",
+                                       decide={"offsets": {"holdout": 0.2}})
+    assert offsets is not None and len(offsets) == 2
+    assert score_tuned >= score_argmax - 0.1                  # no-op grid point bounds the tune slice
+
+    # too-small frame: 6 training rows / 1 minority row -> internal k=5 illegal, LOUD
+    Xs = np.ones((12, 1))
+    ys = np.array([0] * 10 + [1] * 2)
+    fs = cv_folds(pd.DataFrame({"y": ys}), 2, 0, stratify_col="y")
+    with pytest.raises(ValueError, match="training rows"):
+        fold_fit(Xs, ys, fs, 0, "logreg", 0, metric="balanced_accuracy",
+                 decide={"offsets": {"holdout": 0.2}})
+
+
+def test_fold_fit_offsets_main_model_is_all_training_rows():
+    import pandas as pd
+
+    X, y = _decide_frame()
+    folds = cv_folds(pd.DataFrame({"y": y}), 2, 0, stratify_col="y")
+    _, m_argmax, _ = fold_fit(X, y, folds, 0, "logreg", 0, metric="balanced_accuracy")
+    _, m_tuned, _ = fold_fit(X, y, folds, 0, "logreg", 0, metric="balanced_accuracy",
+                             decide={"offsets": {"holdout": 0.2}})
+    # same seed + same (all) training rows -> identical main model predictions
+    assert np.array_equal(m_argmax.predict(X), m_tuned.predict(X))
