@@ -221,9 +221,10 @@ record; scripts in `kbench/competition/playground-s6e7/analysis/`):
   recovery** diagnostic (does a non-tree on engineered features recover the at-risk/unhealthy
   rows all three trees miss?) BEFORE any build. Features grounded in the health literature
   (U-shaped sleep, BMI J-curve + fat-but-fit `bmi×activity`, step dose-response, RHR threshold).
-- **Tooling shipped this session (metis#66, merged PR#48):** `--live` fold-ordered scheduling
-  (live per-fold mean±SE + board Q graceful-finalize) + `--auto-stop` (incumbent-referenced
-  loser-stop) — future arena runs get live partial estimates and can auto-drop losing configs.
+- **Tooling shipped this session (metis#66, merged PR#48):** fold-ordered scheduling (live per-fold
+  mean±SE + board Q graceful-finalize; shipped as `--live`, then graduated to the DEFAULT in
+  metis#67 — flag removed) + `--auto-stop` (incumbent-referenced loser-stop) — future arena runs
+  get live partial estimates and can auto-drop losing configs.
 
 **Standing status:** the model-space answer is COMPLETE and honest (noise floor confirmed at the
 row level; even the blend evaporates at k=10). arena2's done_when was met at M2. M6 is optional

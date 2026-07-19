@@ -1,9 +1,9 @@
 package main
 
-// metis#66: the leaf-subprocess budget as an INTERFACE, so the executor's one global
-// budget (metis#31) can either fan leaves out globally (the default) or dispatch them in
-// a fold-numbered priority queue (the --live scheduler). The budget is the ONLY budgeted
-// resource — a cache HIT never reaches it — so ordering it is the whole of the fold-
+// metis#66/#67: the leaf-subprocess budget as an INTERFACE, so the executor's one global
+// budget (metis#31) can either dispatch leaves in a fold-numbered priority queue (the DEFAULT
+// since #67) or fan them out globally (the --global-fanout escape hatch). The budget is the ONLY
+// budgeted resource — a cache HIT never reaches it — so ordering it is the whole of the fold-
 // ordered scheduling (no ParExec change: all leaves still fan out as goroutines; the
 // budget's grant policy is what makes fold 0 finish first).
 
@@ -23,8 +23,9 @@ type leafBudget interface {
 }
 
 // chanSem is the pre-#66 counting semaphore (a `chan struct{}` of cap = maxParallel):
-// priority-BLIND, so any waiting leaf may win a freed slot — today's global fan-out, the
-// DEFAULT for unattended runs. gauge() reads the live occupancy straight off the channel.
+// priority-BLIND, so any waiting leaf may win a freed slot — the global fan-out reachable via
+// the --global-fanout escape hatch (metis#67 made prioritySem the default). gauge() reads the
+// live occupancy straight off the channel.
 type chanSem struct{ ch chan struct{} }
 
 func newChanSem(capacity int) *chanSem { return &chanSem{ch: make(chan struct{}, capacity)} }
@@ -55,6 +56,22 @@ type prioritySem struct {
 }
 
 func newPrioritySem(capacity int) *prioritySem { return &prioritySem{capacity: capacity} }
+
+// selectLeafBudget is the pure scheduler decision (metis#67). Fold-ordered prioritySem is the
+// DEFAULT (fold 0 finishes first, backfill preserved so no core idles → the live mean±SE tightens
+// fold-by-fold); --global-fanout reverts to the pre-#66 priority-blind chanSem; a serial run
+// (maxParallel<=1) is unbudgeted (nil). Byte-identical artifacts either way — this only picks
+// WHICH leaf runs when (the determinism test proves it). Pure (no IO), so the default is
+// unit-testable by concrete type without mocks.
+func selectLeafBudget(maxParallel int, globalFanout bool) leafBudget {
+	if maxParallel <= 1 {
+		return nil // serial / cache-only path — unbounded
+	}
+	if globalFanout {
+		return newChanSem(maxParallel)
+	}
+	return newPrioritySem(maxParallel)
+}
 
 func (s *prioritySem) acquire(priority int) {
 	s.mu.Lock()

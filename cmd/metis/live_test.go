@@ -28,9 +28,9 @@ func (b budgetFakeExec) Execute(step experiment.Step, runDir string) (experiment
 	return b.in.Execute(step, runDir)
 }
 
-// TestLive_ByteIdenticalToDefault is the metis#66 M1 determinism gate: `--live` (prioritySem,
-// fold-ordered) MUST produce byte-identical artifacts to the default full run (chanSem, global
-// fan-out) — the reduce is order-independent (metis#18/#31) and sortPointRuns normalizes the
+// TestLive_ByteIdenticalToDefault is the metis#66/#67 determinism gate: the default prioritySem
+// (fold-ordered) MUST produce byte-identical artifacts to the --global-fanout chanSem — the reduce
+// is order-independent (metis#18/#31) and sortPointRuns normalizes the
 // on-disk order, so changing WHICH leaf runs when cannot change the numbers. Runs the same
 // nested shape through both budgets (each fake leaf actually acquiring its budget) in isolated
 // workspaces and asserts the ledger bytes, the manifest bytes, and the reported estimate match.
@@ -56,7 +56,6 @@ func TestLive_ByteIdenticalToDefault(t *testing.T) {
 			out:         &out,
 			maxParallel: 4,
 			leafBudget:  budget, // runExperiment reuses this (non-nil); the fake acquires the SAME one
-			live:        live,
 		})
 		if err != nil {
 			t.Fatalf("live=%v run failed: %v", live, err)

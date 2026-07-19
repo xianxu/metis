@@ -67,10 +67,10 @@ type runOpts struct {
 	stepPath []string
 	now      func() time.Time
 	git      gitProbe
-	cache    bool // enable the metis#2 validating-trace cache (<expDir>/.metis-cache)
-	dryRun   bool // metis#18: list the swept configs without running them
-	fast   bool       // metis#32: nested run does ONE outer fold (a ~1/k-cost honest single-point) instead of k
-	sample sampleSpec // metis#58: prefix-subsample the CV levels — Out of the k outer folds, In of the
+	cache    bool       // enable the metis#2 validating-trace cache (<expDir>/.metis-cache)
+	dryRun   bool       // metis#18: list the swept configs without running them
+	fast     bool       // metis#32: nested run does ONE outer fold (a ~1/k-cost honest single-point) instead of k
+	sample   sampleSpec // metis#58: prefix-subsample the CV levels — Out of the k outer folds, In of the
 	//               inner_k per-config inner folds (0 = all). k/inner_k stay the estimand knobs
 	//               (train fraction / partition); sampling is the precision/cost knob, and prefix
 	//               subsets of the SAME partitions cache-escalate into full runs.
@@ -86,14 +86,14 @@ type runOpts struct {
 	readRoot    string          // metis#23: when set, the production execStep confines base-dataset reads to this root
 	maxParallel int             // metis#31: >1 ⇒ ParExec batches + a leaf semaphore; sizes leafBudget
 	leafBudget  leafBudget      // metis#31/#66: the shared global subprocess budget (nil = serial/cache-only);
-	//                           chanSem (default global fan-out) | prioritySem (--live fold-ordered)
-	priority    int             // metis#66: the outer-fold index threaded to execStep as the prioritySem key
-	live        bool            // metis#66: --live — fold-ordered priority scheduling + live incremental estimate
-	autoStop    bool            // metis#66: --auto-stop — sequential-outer + incumbent-referenced loser stop
-	stopSignal  <-chan struct{} // metis#66: board Q → graceful finalize (test seam; production reads stdin)
-	runControl  *runControl     // one per shape run: global abort + optional 2n admission slots
-	runLabel    string          // config/fold/preamble context captured with the first error
-	forkserver  bool            // metis#44: warm fork-server leaf executor (cmdRun default true;
+	//                           prioritySem (default fold-ordered, #67) | chanSem (--global-fanout)
+	priority     int             // metis#66: the outer-fold index threaded to execStep as the prioritySem key
+	globalFanout bool            // metis#67: --global-fanout — the escape hatch back to priority-blind chanSem
+	autoStop     bool            // metis#66: --auto-stop — sequential-outer + incumbent-referenced loser stop
+	stopSignal   <-chan struct{} // metis#66: board Q → graceful finalize (test seam; production reads stdin)
+	runControl   *runControl     // one per shape run: global abort + optional 2n admission slots
+	runLabel     string          // config/fold/preamble context captured with the first error
+	forkserver   bool            // metis#44: warm fork-server leaf executor (cmdRun default true;
 	//                           zero-value false keeps direct runOpts callers/tests on legacy exec)
 	forkPool *serverPool // metis#44: the per-root warm-server pool, created once per runExperiment
 	//                      when forkserver is set; threaded through nested runOpts copies.
@@ -146,14 +146,12 @@ func runExperiment(o runOpts) (experiment.Run, error) {
 	// non-nil SHARED leaf budget AND a serialized writer. Doing it here (not in
 	// cmdRun) means no direct-runOpts caller (the tests) can enable maxParallel>1 yet
 	// forget the budget or race the fan-out's progress writes on a bare buffer.
-	// metis#66: --live ⇒ a prioritySem (freed slots go to the lowest outer-fold index →
-	// fold 0 finishes first, backfill preserved); default ⇒ chanSem (global fan-out).
-	if o.maxParallel > 1 && o.leafBudget == nil {
-		if o.live || o.autoStop {
-			o.leafBudget = newPrioritySem(o.maxParallel)
-		} else {
-			o.leafBudget = newChanSem(o.maxParallel)
-		}
+	// metis#67: fold-ordered scheduling (prioritySem: freed slots go to the lowest outer-fold
+	// index → fold 0 finishes first, backfill preserved) is the DEFAULT; --global-fanout reverts
+	// to the priority-blind chanSem. Byte-identical either way (scheduling-only). selectLeafBudget
+	// is the pure seam (maxParallel<=1 → nil serial); a direct-injected budget (tests) is kept.
+	if o.leafBudget == nil {
+		o.leafBudget = selectLeafBudget(o.maxParallel, o.globalFanout)
 	}
 	if b := o.leafBudget; b != nil && o.leafGauge == nil {
 		o.leafGauge = func() (int, int) { return b.gauge() } // metis#38/#66: occupancy IS the budget

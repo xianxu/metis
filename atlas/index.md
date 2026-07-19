@@ -157,11 +157,12 @@ identical on a non-Kaggle platform?* — if yes, it lives here.
   `runResolvedExperiment`) also owns the experiment-wide first failure, so queued runs produce no
   observable state after cancellation; the scheduling and cancellation regressions in
   `cmd/metis/parallel_test.go` pin both budgets and the failure boundary. **metis#66:** the leaf
-  semaphore is now a `leafBudget` interface — `chanSem` (default global fan-out) or, under `--live`,
-  a `prioritySem` that dispatches leaves in a fold-numbered priority queue (fold 0 finishes first →
-  the live mean±SE tightens fold-by-fold; backfill is emergent, no idle core), byte-identical to the
-  default run; board **Q** = a clean graceful finalize (soft-latch, abandon in-flight folds, honest
-  partial `out<n>` + partial ledger). `--auto-stop` (implies `--live`) reads the incumbent from the
+  semaphore is now a `leafBudget` interface — `prioritySem` (the **default** since metis#67), which
+  dispatches leaves in a fold-numbered priority queue (fold 0 finishes first →
+  the live mean±SE tightens fold-by-fold; backfill is emergent, no idle core), or `chanSem` (the
+  `--global-fanout` escape hatch), byte-identical to each other (pure `selectLeafBudget` seam);
+  board **Q** = a clean graceful finalize (soft-latch, abandon in-flight folds, honest
+  partial `out<n>` + partial ledger). `--auto-stop` reads the incumbent from the
   shape's prior ledger and, after each outer fold (n≥2), stops a family whose full-k mean is
   <95%-likely to reach it (pure `shouldStop`, losers only, `stopped: auto` ledger marker; sequential
   outer folds). See `atlas/experiment.md`. The sweeper

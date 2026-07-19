@@ -90,7 +90,6 @@ func TestAutoStop_LoserStoppedWinnerFull(t *testing.T) {
 		exec:        familyFakeExec{},
 		out:         &out,
 		autoStop:    true,
-		live:        true,
 		maxParallel: 1,
 	})
 	if err != nil {

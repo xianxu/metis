@@ -269,17 +269,22 @@ wrapped by **thin step-executables** honoring the contract above. Hermetic via *
   `sweepPass` mutex guards the shared `configs`/`points`/`err` bookkeeping (the honest reduce stays pure
   in the sampler). Caveats (flag help): a COLD cache thundering-herds the shared upstream; clean
   per-`k/n` progress is deferred to metis#30.
-- **Live fold-ordered scheduling + graceful Q (metis#66) — `cmd/metis/prioritysem.go` + `{exec,run,sweep,main,progress,runcontrol}.go`:**
-  the metis#31 `chan struct{}` semaphore became a `leafBudget` interface with two impls: `chanSem`
-  (the DEFAULT — priority-blind global fan-out, today's behavior) and `prioritySem` (a min-heap
-  semaphore that grants a freed slot to the LOWEST outer-fold index waiting). `execStep.priority` =
+- **Fold-ordered scheduling (the DEFAULT since metis#67) + graceful Q (metis#66) — `cmd/metis/prioritysem.go` + `{exec,run,sweep,main,progress,runcontrol}.go`:**
+  the metis#31 `chan struct{}` semaphore became a `leafBudget` interface with two impls: `prioritySem`
+  (a min-heap semaphore that grants a freed slot to the LOWEST outer-fold index waiting — **the
+  default**) and `chanSem` (priority-blind global fan-out — the `--global-fanout` escape hatch).
+  The pure `selectLeafBudget(maxParallel, globalFanout)` seam picks between them (nil when serial);
+  `run.go` calls it, and it's unit-tested by concrete type (`TestSelectLeafBudget`). `execStep.priority` =
   the leaf's outer-fold index (threaded via `runOpts.priority`/`sweepPass.priority`;
-  `runOuterFold`/`scoreOnOuterFold` set it). `--live` (implied by `--auto-stop`) builds the
-  prioritySem so **outer fold 0 finishes first → the running mean±SE tightens fold-by-fold**, while
+  `runOuterFold`/`scoreOnOuterFold` set it). The default prioritySem makes **outer fold 0 finish
+  first → the running mean±SE tightens fold-by-fold**, while
   the backfill invariant (`len(waiters)>0 ⟹ inflight==capacity`) keeps every core busy — "backfill"
-  is emergent from the priority queue, not separate logic. **CRITICAL invariant: `--live` is
-  byte-identical to the default run** (scheduling-only; the reduce is order-independent + sortPointRuns
-  normalizes) — locked by `TestLive_ByteIdenticalToDefault`. Board **Q** (a `q`/`Q` line on stdin →
+  is emergent from the priority queue, not separate logic. **CRITICAL invariant: the default
+  prioritySem is byte-identical to `--global-fanout` chanSem** (scheduling-only; the reduce is
+  order-independent + sortPointRuns normalizes) — locked by `TestLive_ByteIdenticalToDefault`.
+  (metis#67 graduated fold-ordering from the opt-in `--live` flag to the default — the scheduler is
+  free observability, never slower; `--global-fanout` keeps the old behavior reachable.) Board **Q**
+  (a `q`/`Q` line on stdin →
   `stdinStopSignal` → `runControl.requestStop`, a clean soft-latch distinct from a failure) is a
   graceful finalize: admitted-but-unstarted leaves short-circuit with `errRunStopped`, in-flight
   outer folds drain fast and are ABANDONED (`ss.abandoned`, excluded from `driverEvent`/the estimate),
@@ -301,8 +306,11 @@ wrapped by **thin step-executables** honoring the contract above. Hermetic via *
   (`ledger.Row.Stopped`, a ragged CSV column like fold/level/outer_fold). The rule is documented +
   unit-tested (`autostop_test.go`: loser stops / winner never truncated / borderline spared / both
   directions / `tCrit` table); the e2e (`autostop_e2e_test.go`) stops a known loser while the winner
-  runs full k. Composes with `--live` (`--auto-stop` implies it); the `--live` determinism guarantee
-  scopes to `--live` — an `--auto-stop` run is intentionally a smaller, different computation.
+  runs full k. Runs on the default prioritySem (no longer needs `--live`, gone since #67); the
+  determinism guarantee scopes to the full sweep — an `--auto-stop` run is intentionally a smaller,
+  different computation. (`--auto-stop --global-fanout` resolves to chanSem — a harmless no-op:
+  auto-stop enforces sequential-outer in `sweep.go` independent of the budget type, and the two
+  sems are byte-identical.)
 - **Board banding + result-last (metis#55):** color lives in the PAINTER only (renderBoard
   stays plain — the paint/content split): `redraw` adds a dim full-width `─` separator rule
   above the frame (counted in the erase math), bolds the aggregate line, colors ✓/▸ glyphs

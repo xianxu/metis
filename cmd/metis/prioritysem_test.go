@@ -7,6 +7,26 @@ import (
 	"time"
 )
 
+// TestSelectLeafBudget pins the metis#67 default: fold-ordered prioritySem out of the box,
+// chanSem only under --global-fanout, nil (unbudgeted) when serial. The choice is byte-identical
+// in run output (the determinism test), so the concrete return type is the only observable — which
+// is exactly why the decision is a pure function: it's unit-testable here without a run or mocks.
+func TestSelectLeafBudget(t *testing.T) {
+	if b := selectLeafBudget(4, false); b == nil {
+		t.Fatal("maxParallel>1 must return a budget, got nil")
+	} else if _, ok := b.(*prioritySem); !ok {
+		t.Errorf("default budget = %T, want *prioritySem (fold-ordered is the #67 default)", b)
+	}
+	if b := selectLeafBudget(4, true); b == nil {
+		t.Fatal("--global-fanout must return a budget, got nil")
+	} else if _, ok := b.(*chanSem); !ok {
+		t.Errorf("--global-fanout budget = %T, want *chanSem (the priority-blind escape hatch)", b)
+	}
+	if b := selectLeafBudget(1, false); b != nil {
+		t.Errorf("maxParallel<=1 budget = %T, want nil (serial / unbudgeted)", b)
+	}
+}
+
 // TestPrioritySem_GrantsLowestPriorityFirst: with the budget saturated, freed slots must
 // go to the lowest-priority (lowest outer-fold index) waiter first — the property that
 // makes fold 0 finish first under --live. We saturate capacity=1 with one holder, queue

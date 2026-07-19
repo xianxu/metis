@@ -49,8 +49,8 @@ func cmdRun(args []string) error {
 	sampleStr := fs.String("sample", "", "metis#58: run a subset of the declared CV folds — out<M> (M of the k outer folds), in<N> (N of the inner_k per-config inner folds), or out<M>in<N>. Deterministic prefix subsets of the SAME partitions, so subset runs cache-escalate into full runs. k/inner_k stay the estimand; sampling only trades precision for cost (probe with it, don't re-select what ships on it). Nested (multi-config) runs only; errors loudly out of range or with --fast.")
 	forkserver := fs.Bool("forkserver", true, "metis#44: run convention-conforming step wrappers through a warm per-root fork-server (pre-imported pandas/sklearn; ~1s spawn tax removed per leaf). --forkserver=false = legacy per-step uv/python spawn (the escape hatch); non-conforming wrappers and failed servers fall back to legacy automatically (loud, once).")
 	noTUI := fs.Bool("no-tui", false, "metis#38: force the plain progress lines even on a TTY (the live board is default for a sweep when stdout is a terminal; piped/redirected output always gets plain lines)")
-	live := fs.Bool("live", false, "metis#66: fold-ordered scheduling — outer folds finish lowest-index-first (a priority queue over the leaf budget, backfill preserved so no core idles) so the mean±SE tightens fold-by-fold; press q+Enter to finalize an honest partial out<n> estimate early. Byte-identical result to the default full run (scheduling-only). DEFAULT keeps global fan-out for unattended runs; a nested (multi-config) run benefits, a flat run is unaffected (all leaves are one priority).")
-	autoStop := fs.Bool("auto-stop", false, "metis#66: incumbent-referenced early stop of losing families (implies --live). Reads the incumbent from the shape's existing ledger (best prior per-family estimate — no --baseline). After each outer fold (n≥2) a family <95%-likely to reach it (one-sided predictive bound on its full-k mean) stops its remaining outer folds — LOSERS ONLY, a would-be winner runs full k — reclaiming the budget for survivors; stopped families are marked `stopped: auto` in the ledger. Schedules outer folds sequentially (clean per-fold decision). No prior run in the ledger → no incumbent → runs the full sweep (loud no-op).")
+	globalFanout := fs.Bool("global-fanout", false, "metis#67: the escape hatch back to the pre-#66 priority-blind global fan-out (all waiting leaves compete equally for the budget). The DEFAULT is fold-ordered scheduling — outer folds finish lowest-index-first (a priority queue over the leaf budget, backfill preserved so no core idles) so the mean±SE tightens fold-by-fold; on a TTY, press q+Enter to finalize an honest partial out<n> estimate early. Byte-identical result either way (scheduling-only, not a speedup); a flat (1-config) shape is unaffected (all leaves are one priority).")
+	autoStop := fs.Bool("auto-stop", false, "metis#66: incumbent-referenced early stop of losing families. Reads the incumbent from the shape's existing ledger (best prior per-family estimate — no --baseline). After each outer fold (n≥2) a family <95%-likely to reach it (one-sided predictive bound on its full-k mean) stops its remaining outer folds — LOSERS ONLY, a would-be winner runs full k — reclaiming the budget for survivors; stopped families are marked `stopped: auto` in the ledger. Schedules outer folds sequentially (clean per-fold decision). No prior run in the ledger → no incumbent → runs the full sweep (loud no-op). A flat (1-config) shape is a no-op (nothing to stop against).")
 	parallel := fs.Int("parallel", defaultParallel(), "metis#31: max concurrent step subprocesses across ALL sweep levels (driver×sweeper×resample share one global cap); <=1 = serial (exact pre-#31 behavior). Default runtime.NumCPU(), overridable by METIS_MAX_PARALLEL. Leaf BLAS is pinned single-thread by default (metis#48; export a *_NUM_THREADS value yourself to override), so n is the ONE parallelism knob. On a COLD cache the first batch's ≤n points may each recompute the shared upstream (a bounded thundering herd).")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -66,23 +66,25 @@ func cmdRun(args []string) error {
 	// cmdRun just passes maxParallel; runExperiment establishes the parallel invariant
 	// (leafSem + syncWriter) in one home so no runOpts caller can forget it (#31).
 	o := runOpts{
-		expPath:     rest[0],
-		runID:       *runID,
-		stepPath:    stepPath(rest[0]),
-		cache:       *cache,
-		dryRun:      *dryRun,
-		fast:        *fast,
-		sample:      sample,
-		forkserver:  *forkserver,
-		tui:         !*noTUI && isCharDevice(os.Stdout), // metis#38: board iff a real terminal
-		out:         os.Stdout,
-		maxParallel: *parallel,
-		live:        *live || *autoStop, // metis#66: --auto-stop implies --live (fold-ordered scheduling)
-		autoStop:    *autoStop,
+		expPath:      rest[0],
+		runID:        *runID,
+		stepPath:     stepPath(rest[0]),
+		cache:        *cache,
+		dryRun:       *dryRun,
+		fast:         *fast,
+		sample:       sample,
+		forkserver:   *forkserver,
+		tui:          !*noTUI && isCharDevice(os.Stdout), // metis#38: board iff a real terminal
+		out:          os.Stdout,
+		maxParallel:  *parallel,
+		globalFanout: *globalFanout, // metis#67: default is fold-ordered; this is the escape hatch
+		autoStop:     *autoStop,
 	}
-	// metis#66: in board mode a stdin reader turns a `q`/`Q` line into the graceful-finalize
-	// signal (an intentional clean Ctrl-C). Stdlib-only; the sweep owns the finalize.
-	if o.live && o.tui {
+	// metis#66/#67: in board mode a stdin reader turns a `q`/`Q` line into the graceful-finalize
+	// signal (an intentional clean Ctrl-C). Gated on tui alone now that fold-ordered scheduling is
+	// the default — any interactive TTY sweep can finalize early; a non-sweep run ignores it
+	// (sweep.go consumes stopSignal only on the nested path). Stdlib-only; the sweep owns finalize.
+	if o.tui {
 		o.stopSignal = stdinStopSignal()
 	}
 	_, err = runExperiment(o)

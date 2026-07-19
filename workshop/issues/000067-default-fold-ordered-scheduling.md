@@ -1,12 +1,13 @@
 ---
 id: 000067
-status: working
+status: codecomplete
 deps: []
 github_issue:
 created: 2026-07-19
 updated: 2026-07-19
-estimate_hours:
+estimate_hours: 0.61
 started: 2026-07-19T11:44:40-07:00
+actual_hours: 0.24
 ---
 
 # Default fold-ordered scheduling (graduate --live); --global-fanout escape hatch
@@ -49,20 +50,66 @@ happen to know to pass `--live`. Graduate it to the default.
 - Tests green (`go test ./... -race` incl. prioritysem + run scheduler-selection + determinism);
   help text + code comments + atlas updated.
 
+## Estimate
+
+```estimate
+model: estimate-logic-v3.1
+familiarity: 1.0
+item: smaller-go-module   design=0.2 impl=0.25
+item: atlas-docs          design=0.0 impl=0.1
+design-buffer: 0.30
+total: 0.61
+```
+
+Small extend of an existing Go module (scheduler default + flag rename + one field threaded +
+scheduler-selection tests; the design is fully specced above and the code was read this session),
+plus comment/atlas reconciliation. No new abstraction (the `leafBudget` interface already exists).
+
 ## Plan
 
-- [ ] `run.go`: default scheduler `prioritySem`, `chanSem` only under `o.globalFanout`; drop
-  `o.live`. `main.go`: replace `--live` with `--global-fanout`, thread `o.globalFanout`, gate
-  `q`-finalize on `o.tui`. Update the `--auto-stop` help (drop "implies --live").
-- [ ] Tests: default-uses-prioritySem + `--global-fanout`-uses-chanSem + auto-stop-unchanged +
-  determinism still byte-identical. Update/rename any `--live` scheduler-selection test.
-- [ ] Sweep comments (`run.go`/`exec.go`/`prioritysem.go`) + atlas (`experiment.md` scheduler
-  note) reconciled to the new default.
+- [x] **Extract the pure selector seam (ARCH-PURE; the plan-quality finding).** New
+  `selectLeafBudget(maxParallel int, globalFanout bool) leafBudget` — the pure decision:
+  `maxParallel<=1 → nil`; else `globalFanout → newChanSem` else `newPrioritySem`. `run.go:151-157`
+  shrinks to call it. Drop the `o.live` field. (The selection is byte-identical in run output by
+  design, so it's untestable from artifacts — the pure function is the seam that makes the
+  default-uses-prioritySem assertion writeable.)
+- [x] `main.go`: replace the `--live` flag with `--global-fanout` (the loud escape hatch); thread
+  `o.globalFanout`; drop the `live: *live || *autoStop` line (auto-stop threads `autoStop`
+  directly). Gate `q`-finalize on `o.tui` alone (was `o.live && o.tui`). Update the `--auto-stop`
+  help (drop "implies --live"; note the flat-shape no-op the #66 close-review flagged).
+- [x] Tests: (a) NEW `selectLeafBudget` unit test — default→`*prioritySem`, `globalFanout`→
+  `*chanSem`, `maxParallel<=1`→nil (assert concrete type). (b) KEEP `live_test.go` byte-identity
+  determinism test — it injects both budgets directly, so it's a *prioritySem-vs-chanSem
+  determinism* check (NOT a selection test); just drop the vestigial `live: live` line. (c) NEW:
+  `q`-finalize on a NON-sweep TTY run (`maxParallel<=1`) is a safe no-op — the broadened `o.tui`
+  gate must not hang a plain experiment (`stopSignal` ignored off the sweep path). (d) auto-stop
+  tests still green — swap `live: true` → `autoStop: true` where the removed field was set
+  (`autostop_e2e_test.go:93`, `live_stop_test.go:62`).
+- [x] Comments/atlas — reconcile the exact stale `--live` anchors: `run.go:89,91,149-150`;
+  `exec.go:38,39-40,147`; `prioritysem.go:5,25`; `main.go:53` (`--auto-stop` help); atlas
+  `experiment.md` scheduler note. `go test ./... -race` + `go vet` green.
 
 ## Log
 
 ### 2026-07-19
+- 2026-07-19: closed — go vet clean; go test ./cmd/metis ./pkg/sampler ./pkg/ledger -race green (cmd/metis 34.8s incl. TestLive_ByteIdenticalToDefault determinism + new TestSelectLeafBudget + TestQFinalize_NonSweepIgnoresStopSignal); CLI verified: run --help shows --global-fanout, run --live errors (removed); no stale --live in non-test code or atlas; review verdict: FIX-THEN-SHIP
 - Filed from the arena2 session: operator observed "all folds at once" on a normal `metis run`,
   diagnosed --live as opt-in, and directed graduating the priority queue to default while keeping
   `--auto-stop` explicit. Scope confirmed: `o.live` is used in exactly 2 places (scheduler select
   in run.go:152, q-finalize gate in main.go:85); no runbook uses `--live`.
+- change-code plan-quality judge (FAILURE, correctly): the promised "default-uses-prioritySem"
+  test was unwriteable — the selection is byte-identical AND buried in `runExperiment`'s IO glue.
+  Folded in the fix: extract a pure `selectLeafBudget(maxParallel, globalFanout)` seam and unit-test
+  that. Also folded the 3 minors (determinism-vs-selection test split; a q-finalize-no-op-on-
+  non-sweep test for the broadened `o.tui` gate; the exact comment anchors).
+- **Implemented + verified.** Pure `selectLeafBudget` in `prioritysem.go` (default `*prioritySem`,
+  `--global-fanout`→`*chanSem`, serial→nil); `run.go` calls it, `o.live` field dropped; `main.go`
+  `--live`→`--global-fanout`, `q`-finalize regated on `o.tui`; `--auto-stop` help updated. Tests:
+  `TestSelectLeafBudget` (concrete-type), determinism test kept (`live: live` line dropped),
+  `TestQFinalize_NonSweepIgnoresStopSignal` (plain run ignores a fired stopSignal), auto-stop tests
+  green (vestigial `live: true` removed). `go vet` clean; `go test ./cmd/metis ./pkg/sampler
+  ./pkg/ledger -race` green (cmd/metis 34.8s incl. the determinism test). CLI verified: `run --help`
+  shows `--global-fanout`, `run --live` errors (flag removed). Atlas (`experiment.md` + `index.md`)
+  reconciled. **Co-existence note (judge minor):** `--auto-stop --global-fanout` → chanSem, a
+  harmless no-op — auto-stop enforces sequential-outer in `sweep.go` independent of the budget type,
+  and the two sems are byte-identical (determinism test).
