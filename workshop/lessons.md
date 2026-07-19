@@ -269,3 +269,15 @@ the thrash: starts ≫ completions with the process alive (throughput ≈ 0) —
 - **An empty Done-when at plan time is a finding.** Synthesize it from the Spec when planning —
   it's the acceptance contract the close gate demands; writing it late invites post-hoc
   rationalization.
+
+## Plan-review lessons (metis#60, 2026-07-19)
+
+- **Check split legality against the smallest frame a test will actually feed it** — per-fold
+  training-row and per-class counts, not full-frame counts (12-row frame → 6 training rows →
+  StratifiedKFold(4+) illegal; the full-frame arithmetic looked fine).
+- **When a test asserts recovery of an analytically known optimum, compute the optimum and
+  confirm it lies inside the search grid** (−log-prior 3.11 vs grid max 3.0) before writing
+  the assertion — else ε silently absorbs a real design flaw.
+- **A plan that deviates from its spec must carry the artifact-reconciliation task itself**
+  (issue ## Revisions) — deviation rationale only in the plan leaves the issue lying by
+  aspiration at close.
