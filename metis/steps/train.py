@@ -32,7 +32,18 @@ with:
            key); absent = existing cohorts untouched. NOTE: the shape's
            objective.metric ("train.fold_score") is a ledger NAME, not
            this scorer.
-Outputs: metrics.json{fold_score, complexity} (per-fold) OR model.pkl + metrics.json{cv_score}.
+  decide:  "argmax" (default) | {"offsets": {"holdout": 0.2}} (metis#60) (optional)
+           — the cost-sensitive plug-in decision rule. Offsets are a
+           FITTED PARAMETER learned leaf-locally (aux stratified holdout
+           inside the training rows; the main model still fits on ALL
+           training rows), so the sealed sweep measures fit+tune as ONE
+           procedure; fold_score/cv_score are after-decide scores. Cost:
+           2 fits per leaf (price with --sample out1in2 first). Validated
+           EAGERLY on every path; the ship refit persists offsets.json
+           (+classes) for predict. Setting the key re-keys; absent =
+           byte-identical argmax behavior.
+Outputs: metrics.json{fold_score, complexity} (per-fold) OR model.pkl [+ offsets.json under
+decide=offsets] + metrics.json{cv_score}.
 """
 
 from __future__ import annotations
@@ -41,7 +52,8 @@ import json
 import pickle
 
 from metis import io
-from metis.model import complexity, cv_score, fold_fit, parse_model_config, resolve_scorer, train
+from metis.model import (complexity, cv_score, fold_fit, parse_decide, parse_model_config,
+                         resolve_scorer, train, tune_offsets_on_holdout)
 
 
 def main() -> None:
@@ -58,6 +70,9 @@ def main() -> None:
     # which never scores), and before any fit is wasted.
     metric = w.get("metric", "accuracy")
     resolve_scorer(metric)
+    # metis#60: parse decide EAGERLY too — every path validates before any fit is wasted.
+    decide = w.get("decide", "argmax")
+    rule, dparams = parse_decide(decide)
 
     fold = w.get("_fold")
     if isinstance(fold, dict) and "idx" in fold:
@@ -67,7 +82,7 @@ def main() -> None:
         # complexity (metis#19) — the parsimony axis the select rule consumes. Bare metric
         # names; the ledger namespaces them to train.fold_score / train.complexity.
         score, model, _ = fold_fit(X, y, _load_folds(ctx, w), int(fold["idx"]), kind, ctx.seed,
-                                   params, metric=metric)
+                                   params, metric=metric, decide=decide)
         io.write_metrics(ctx, {"fold_score": score, "complexity": complexity(model, kind)})
         return
 
@@ -77,9 +92,16 @@ def main() -> None:
     model = train(X, y, kind, ctx.seed, params)
     with open(io.out_path(ctx, "model.pkl"), "wb") as f:
         pickle.dump(model, f)
+    if rule == "offsets":
+        # metis#60: the ship's decision offsets — same leaf-local mechanics, on all rows.
+        offsets = tune_offsets_on_holdout(X, y, kind, ctx.seed, params, metric, dparams["holdout"])
+        with open(io.out_path(ctx, "offsets.json"), "w") as f:
+            json.dump({"rule": "offsets", "offsets": [float(o) for o in offsets],
+                       "classes": [int(c) for c in model.classes_]}, f)
     metrics: dict[str, float] = {}
     if "folds" in w:
-        metrics["cv_score"] = cv_score(X, y, _load_folds(ctx, w), kind, ctx.seed, params, metric=metric)
+        metrics["cv_score"] = cv_score(X, y, _load_folds(ctx, w), kind, ctx.seed, params,
+                                       metric=metric, decide=decide)
     io.write_metrics(ctx, metrics)
 
 

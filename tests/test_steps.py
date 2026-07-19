@@ -179,3 +179,102 @@ def test_train_step_unknown_metric_fails_loud_on_foldless_ship_path(tmp_path, mo
     with pytest.raises(ValueError, match="balanced_accuracy"):
         _run_step(monkeypatch, run, "train",
                   {"dataset": "skewed", "model": "logreg", "metric": "auc"}, train.main)
+
+
+def _save_decide_dataset(run_dir):
+    """The 40-row 30/10 decide frame (metis#60) as a captured upstream artifact — one weak
+    informative feature so probabilities vary by row and tuned offsets flip boundary rows."""
+    import numpy as np
+
+    from metis.dataset import Dataset
+    from metis.schema import Schema
+
+    rng = np.random.default_rng(0)
+    x = np.concatenate([rng.normal(0.0, 1.0, 30), rng.normal(1.5, 1.0, 10)])
+    df = pd.DataFrame({"id": range(40), "x": x, "y": [0] * 30 + [1] * 10})
+    schema = Schema(columns={"id": "id", "x": "feature", "y": "target"},
+                    dtypes={"id": "int64", "x": "float64", "y": "int64"})
+    io.save_dataset(Dataset(schema=schema, train=df, test=None), str(run_dir / "decide" / "dataset"))
+    return df
+
+
+def _decide_folds(run_dir, df):
+    from metis.split import cv_folds
+
+    folds = cv_folds(df[["y"]], 2, 42, stratify_col="y")
+    split_dir = run_dir / "split"
+    split_dir.mkdir(parents=True, exist_ok=True)
+    (split_dir / "folds.json").write_text(json.dumps(folds))
+    return folds
+
+
+def test_train_step_decide_offsets_per_fold(tmp_path, monkeypatch):
+    """with.decide reaches the per-fold scorer; the tuned score can't fall far below argmax
+    (the no-op grid point bounds the tuning slice; assessment noise gets the tolerance)."""
+    run = tmp_path / "runs" / "r-decide"
+    df = _save_decide_dataset(run)
+    _decide_folds(run, df)
+    base = {"dataset": "decide", "folds": "split", "model": "logreg",
+            "metric": "balanced_accuracy", "_fold": {"idx": 0}}
+    ts = _run_step(monkeypatch, run, "t-argmax", base, train.main)
+    argmax_score = json.loads((ts / "metrics.json").read_text())["fold_score"]
+    ts = _run_step(monkeypatch, run, "t-offsets",
+                   {**base, "decide": {"offsets": {"holdout": 0.2}}}, train.main)
+    tuned_score = json.loads((ts / "metrics.json").read_text())["fold_score"]
+    assert tuned_score >= argmax_score - 0.1
+
+
+def test_train_step_ship_persists_offsets_json_only_under_offsets(tmp_path, monkeypatch):
+    run = tmp_path / "runs" / "r-ship"
+    _save_decide_dataset(run)
+    ts = _run_step(monkeypatch, run, "t-off",
+                   {"dataset": "decide", "model": "logreg", "metric": "balanced_accuracy",
+                    "decide": {"offsets": {"holdout": 0.2}}}, train.main)
+    assert (ts / "model.pkl").exists()
+    payload = json.loads((ts / "offsets.json").read_text())
+    assert payload["rule"] == "offsets" and len(payload["offsets"]) == len(payload["classes"])
+    ts2 = _run_step(monkeypatch, run, "t-arg",
+                    {"dataset": "decide", "model": "logreg"}, train.main)
+    assert not (ts2 / "offsets.json").exists()      # absence = argmax (compat)
+
+
+def test_train_step_malformed_decide_refuses_eagerly_foldless(tmp_path, monkeypatch):
+    run = tmp_path / "runs" / "r-bad"
+    _save_decide_dataset(run)
+    with pytest.raises(ValueError, match="decide"):
+        _run_step(monkeypatch, run, "t-bad",
+                  {"dataset": "decide", "model": "logreg",
+                   "decide": {"offsets": {"holdout": 0.9}}}, train.main)
+    assert not (run / "t-bad" / "model.pkl").exists()  # refused before any fit
+
+
+def test_predict_probabilities_and_offsets_application(tmp_path, monkeypatch):
+    import numpy as np
+
+    from metis.model import apply_offsets
+
+    run = tmp_path / "runs" / "r-pred"
+    _save_decide_dataset(run)
+    # offsets chain: ship train (persists offsets.json) -> predict applies it
+    _run_step(monkeypatch, run, "train",
+              {"dataset": "decide", "model": "logreg", "metric": "balanced_accuracy",
+               "decide": {"offsets": {"holdout": 0.2}}}, train.main)
+    ps = _run_step(monkeypatch, run, "predict", {"dataset": "decide", "model": "train"}, predict.main)
+    proba = pd.read_csv(ps / "probabilities.csv")
+    assert list(proba.columns) == ["id", "proba_0", "proba_1"] and len(proba) == 40
+    assert np.allclose(proba[["proba_0", "proba_1"]].sum(axis=1), 1.0)
+    payload = json.loads((run / "train" / "offsets.json").read_text())
+    preds = pd.read_csv(ps / "predictions.csv")
+    expect = np.array(payload["classes"])[
+        apply_offsets(proba[["proba_0", "proba_1"]].to_numpy(), np.array(payload["offsets"]))]
+    assert np.array_equal(preds["prediction"].to_numpy(), expect)
+    assert json.loads((ps / "metrics.json").read_text())["has_offsets"] == 1.0
+
+    # compat anchor: argmax chain -> predictions.csv is the plain argmax labels
+    _run_step(monkeypatch, run, "train2", {"dataset": "decide", "model": "logreg"}, train.main)
+    ps2 = _run_step(monkeypatch, run, "predict2", {"dataset": "decide", "model": "train2"}, predict.main)
+    preds2 = pd.read_csv(ps2 / "predictions.csv")
+    proba2 = pd.read_csv(ps2 / "probabilities.csv")
+    assert np.array_equal(preds2["prediction"].to_numpy(),
+                          proba2[["proba_0", "proba_1"]].to_numpy().argmax(axis=1))
+    assert json.loads((ps2 / "metrics.json").read_text())["has_offsets"] == 0.0

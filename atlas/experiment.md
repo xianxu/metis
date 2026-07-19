@@ -127,7 +127,18 @@ wrapped by **thin step-executables** honoring the contract above. Hermetic via *
     `cv_score` averages per-fold validation scores under a **metric knob** (metis#59:
     `accuracy` default | `balanced_accuracy`; `resolve_scorer` is the ONE name→scorer site,
     loud on unknown; `metric=` threads keyword-default through `fold_fit`/`fold_score`/`cv_score`).
-    `make_model(kind, seed, params)` **applies
+    **The decision layer (metis#60)** — the cost-sensitive plug-in rule, LEAF-LOCAL:
+    `decide: {"offsets": {"holdout"}}` tunes per-class log-offsets (grid ±4, no-op-anchored)
+    as a FITTED PARAMETER — aux stratified holdout inside the fold's training rows, main
+    model unchanged on all training rows, assessment scored through the tuned decision, so
+    the EXISTING seal covers fit+tune as one procedure (the impute-median precedent; no
+    engine change). Two honest costs, deliberate: (i) SE INFLATION — the procedure's
+    variance now includes tuning variance, so decide=offsets configs carry wider SEs and
+    the 1-SE band widens (the estimate measures the whole procedure — correct, not noise);
+    (ii) AUX/MAIN MISMATCH — offsets tune against the 80%-fit aux model's probabilities and
+    apply to the 100%-fit main model's (no leakage; standard CV-style pessimism, assumed
+    not measured). Price: 2 fits/leaf — pin down with `--sample out1in2` before a decision
+    run. `make_model(kind, seed, params)` **applies
     the swept hyperparams** (`logreg` C; `rf` n_estimators/max_depth/class_weight; `hist_gbm`
     learning_rate/max_iter/max_leaf_nodes/max_depth/class_weight — metis#21, #59); `params` threads through
     `train`/`cv_score` (default `{}` = sklearn defaults). Adding a model kind is Python-only (`MODELS`
@@ -290,8 +301,11 @@ wrapped by **thin step-executables** honoring the contract above. Hermetic via *
   - `train`: load Dataset + upstream `folds.json` → `cv_score` + fit-on-all → `model.pkl` + `{cv_score}`.
     `with.metric` (metis#59, optional, default `accuracy`) picks the scorer on BOTH paths; validated
     EAGERLY at entry so an unknown metric fails loudly even on the foldless ship refit (which never
-    scores). Setting the key re-keys the leaf address (Kpre hashes the resolved With); absent key =
-    existing cohorts untouched.
+    scores). `with.decide` (metis#60, optional, default `argmax`) selects the decision rule the same
+    eager-loud way; the ship refit persists `offsets.json` (+classes) and `predict` validates + applies
+    it, ALWAYS emitting `probabilities.csv` (class-labeled columns — blend/diagnostics material).
+    Setting either key re-keys the leaf address (Kpre hashes the resolved With); absent keys =
+    existing cohorts untouched, argmax behavior byte-identical.
   - `predict`: load Dataset + upstream `model.pkl` → predict test rows → `predictions.csv` + `{n_predictions}`.
   - `outer-split` (metis#23, L1 structural seal): read the FULL dataset (**unconfined** — it must
     see all rows to split them) → `cv_folds` → k `analysis_i/` **subset dataset dirs** (train where
