@@ -155,6 +155,17 @@ wrapped by **thin step-executables** honoring the contract above. Hermetic via *
     `make_model` reads `eff_seed = params.get("seed", ctx_seed)` at every estimator — absent =
     byte-identical (no re-key); present = a swept seed dimension that re-keys the leaf, and,
     composed with `ensemble` (one config × distinct member seeds), IS seed-bagging.
+    **`catboost` kind (metis#65 M2):** the M5 mechanism bet (per-node ordered target
+    statistics). Lazy-imported inside make_model (heavy dep — keep the forkserver preload
+    light for other kinds). Params: `iterations` (aka `max_iter`, default 200), `depth`
+    (default 6), optional `learning_rate` (else CatBoost auto); `class_weight: balanced` →
+    `auto_class_weights="Balanced"` (loud on any other value). **ARCH-PURE pins:**
+    `allow_writing_files=False` (no `catboost_info/` FS write), `logging_level="Silent"`,
+    `thread_count=1` (metis#48 — the orchestrator owns parallelism; also the determinism
+    guarantee). `complexity` = `tree_count_ × 2^depth` (oblivious/symmetric trees are full
+    binary → the summed-leaves capacity proxy). CatBoost's `.predict()` returns `(n,1)`, so
+    **`model.predict` ravels to 1-D at the one call site** (`reshape(-1)`, a no-op for sklearn
+    kinds) — fixing catboost everywhere predict flows (fold scoring + the ship predict step).
   - **Model-config contract (`parse_model_config`, metis#12):** the `with["model"]` value is EITHER
     a kind string (`"logreg"`) OR the **`$any` map** (tagged, ex-`$oneof`) single-key bundle carrying the
     swept hyperparams (`{"rf": {"n_estimators": 200, "max_depth": 4}}`); `parse_model_config(raw) →

@@ -5,8 +5,8 @@ import pytest
 from sklearn.datasets import make_classification
 
 from metis.model import (apply_offsets, complexity, cv_score, fold_fit, fold_score, make_model,
-                         parse_decide, parse_model_config, predict, resolve_scorer,
-                         train, tune_class_offsets)
+                         parse_decide, parse_model_config, predict, predict_proba,
+                         resolve_scorer, train, tune_class_offsets)
 from metis.split import cv_folds
 
 
@@ -462,3 +462,79 @@ def test_ensemble_composes_with_decide_offsets():
     assert offsets is not None and len(offsets) == 2   # per-class offsets on the blend
     assert isinstance(model, type(train(X, y, "ensemble", 0, params)))  # a VotingClassifier
     assert 0.0 <= score <= 1.0
+
+
+# --- metis#65 M2: catboost kind (the M5 mechanism bet) ---
+
+
+def _skewed_3class(n_major=180, n_mid=40, n_minor=20, seed=0):
+    """A 3-class skewed frame (≈s6e7's shape) with a weakly-informative feature — enough for
+    balanced weighting to visibly change the fit."""
+    rng = np.random.default_rng(seed)
+    X = np.concatenate([rng.normal(0.0, 1.0, n_major), rng.normal(1.2, 1.0, n_mid),
+                        rng.normal(2.4, 1.0, n_minor)]).reshape(-1, 1)
+    y = np.array([0] * n_major + [1] * n_mid + [2] * n_minor)
+    return X, y
+
+
+def test_catboost_train_predict_shapes_1d():
+    X, y = _separable()
+    m = train(X, y, "catboost", seed=42, params={"iterations": 20, "depth": 3})
+    preds = predict(m, X)
+    assert preds.shape == (len(y),)                       # raveled (catboost predict is (n,1))
+    assert set(np.unique(preds)).issubset(set(np.unique(y)))
+    assert predict_proba(m, X).shape == (len(y), 2)
+
+
+def test_catboost_deterministic_and_seed_override():
+    X, y = _skewed_3class()
+    p1 = predict_proba(train(X, y, "catboost", seed=7, params={"iterations": 20, "depth": 3}), X)
+    p2 = predict_proba(train(X, y, "catboost", seed=7, params={"iterations": 20, "depth": 3}), X)
+    assert np.array_equal(p1, p2)                         # deterministic (thread_count=1 + seed)
+    # params.seed overrides ctx seed (eff_seed → random_seed) and changes the fit
+    pa = predict_proba(train(X, y, "catboost", seed=0, params={"iterations": 20, "depth": 3, "seed": 1}), X)
+    pb = predict_proba(train(X, y, "catboost", seed=0, params={"iterations": 20, "depth": 3, "seed": 2}), X)
+    assert not np.allclose(pa, pb)
+
+
+def test_catboost_class_weight_balanced_changes_fit():
+    """class_weight: balanced → auto_class_weights='Balanced' → a different fit on skewed data;
+    an unknown class_weight is loud."""
+    X, y = _skewed_3class()
+    none = predict_proba(train(X, y, "catboost", seed=0, params={"iterations": 30, "depth": 3}), X)
+    bal = predict_proba(train(X, y, "catboost", seed=0,
+                              params={"iterations": 30, "depth": 3, "class_weight": "balanced"}), X)
+    assert not np.allclose(none, bal)                     # reweighting reached the fit
+    with pytest.raises(ValueError, match="class_weight"):
+        make_model("catboost", seed=0, params={"class_weight": "subsample"})
+
+
+def test_catboost_complexity_is_treecount_times_leaves():
+    X, y = _separable()
+    m = train(X, y, "catboost", seed=42, params={"iterations": 20, "depth": 3})
+    assert complexity(m, "catboost") == float(m.tree_count_ * (2 ** 3))
+    assert complexity(m, "catboost") > 0.0
+    # more iterations → more trees → strictly greater capacity
+    m40 = train(X, y, "catboost", seed=42, params={"iterations": 40, "depth": 3})
+    assert complexity(m40, "catboost") > complexity(m, "catboost")
+
+
+def test_catboost_no_side_effect_dir(tmp_path, monkeypatch):
+    """allow_writing_files=False → no catboost_info/ written (ARCH-PURE: no IO in the core)."""
+    monkeypatch.chdir(tmp_path)
+    X, y = _separable()
+    train(X, y, "catboost", seed=0, params={"iterations": 10, "depth": 3})
+    assert not (tmp_path / "catboost_info").exists()
+
+
+def test_catboost_as_ensemble_member():
+    """The compose seam (plan-review M2 note): catboost inside an ensemble — named catboost-<i>,
+    complexity recovered via the same rsplit dispatch (catboost is hyphen-free)."""
+    X, y = _separable()
+    params = {"members": [{"catboost": {"iterations": 15, "depth": 3}},
+                          {"rf": {"n_estimators": 15, "max_depth": 3}}]}
+    m = train(X, y, "ensemble", seed=42, params=params)
+    assert list(m.named_estimators_) == ["catboost-0", "rf-1"]
+    cb_fit, rf_fit = m.estimators_
+    assert complexity(m, "ensemble") == complexity(cb_fit, "catboost") + complexity(rf_fit, "rf")
+    assert predict(m, X).shape == (len(y),)

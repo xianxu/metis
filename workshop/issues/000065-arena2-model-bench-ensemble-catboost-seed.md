@@ -97,7 +97,7 @@ so the generic `predict()` stays 1-D.
   `params.seed` re-keys + changes fit, **seed-bagging (distinct member seeds → distinct
   fitted members)**. Metis step-path test (train step over a fixture with an ensemble config).
   `sdlc milestone-close --milestone M1`.
-- [ ] **M2** — `catboost` dep (uv add) + kind (make_model with `allow_writing_files=False` +
+- [x] **M2** — `catboost` dep (uv add) + kind (make_model with `allow_writing_files=False` +
   `logging_level="Silent"` + fixed `thread_count`, class_weight→`auto_class_weights`, predict
   ravel; complexity = tree_count×2^depth) + unit tests (determinism, balanced maps through,
   complexity finite, catboost usable as an ensemble member). `sdlc milestone-close --milestone M2`.
@@ -157,3 +157,13 @@ moving — flagged at start-plan.)
   split→train→predict all ✓. Test-data note: seed-effect tests need NON-separable data
   (rf bootstraps converge to identical hard preds on trivially-separable data) + predict_proba
   comparison — a lesson.
+- **M2 done** — `catboost` kind (5 files touched incl. pyproject/uv.lock for the dep).
+  make_model catboost branch (lazy import; iterations/depth/learning_rate; class_weight
+  balanced→auto_class_weights; ARCH-PURE pins allow_writing_files=False + logging_level Silent
+  + thread_count=1); `model.predict` ravels (n,1)→1-D at the one call site; complexity =
+  tree_count×2^depth. 123 pytest green (6 catboost: 1-D predict, determinism+seed-override,
+  balanced-changes-fit + loud-unknown, complexity formula, no-side-effect-dir, catboost-as-
+  ensemble-member). go build clean. Real-binary+forkserver smoke: solo catboost AND
+  catboost-in-ensemble both split→train→predict ✓, predictions well-formed 1-D, NO
+  catboost_info/ leak (the purity pin holds). CatBoost 1.2.10 (cp312 macOS universal2 wheel;
+  pulled matplotlib/plotly/graphviz as transitive deps).

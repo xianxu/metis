@@ -16,7 +16,7 @@ from sklearn.metrics import accuracy_score, balanced_accuracy_score
 
 from metis.split import cv_folds
 
-MODELS = frozenset({"logreg", "rf", "hist_gbm", "ensemble"})
+MODELS = frozenset({"logreg", "rf", "hist_gbm", "ensemble", "catboost"})
 
 # The closed scorer set (metis#59). The ONE place a metric name resolves to a scorer —
 # fold_fit consumes it; the train step ALSO resolves eagerly at entry so an unknown
@@ -183,6 +183,33 @@ def make_model(kind: str, seed: int, params: dict | None = None):
             max_leaf_nodes=p.get("max_leaf_nodes", 31), max_depth=p.get("max_depth"),
             class_weight=p.get("class_weight"),
             random_state=eff_seed)
+    if kind == "catboost":
+        # The M5 mechanism bet (metis#65): per-node ordered target statistics — a sharper
+        # test of "cell signal matters conditionally" than the flat global encoding (M3), and
+        # the most-different boosting bias → best blend partner. Lazy import: catboost is a
+        # heavy dep; only pay its import when a catboost leaf actually runs (keeps the
+        # forkserver's third-party preload light for the other kinds).
+        from catboost import CatBoostClassifier
+        cw = p.get("class_weight")
+        kw = dict(
+            iterations=p.get("iterations", p.get("max_iter", 200)),
+            depth=p.get("depth", 6),
+            random_seed=eff_seed,
+            # ARCH-PURE + determinism pins: no catboost_info/ FS write, no stdout, and the
+            # orchestrator owns parallelism (metis#48 — one thread per leaf, N leaves in
+            # flight via the #31 semaphore), so a single-thread fit is both correct and
+            # reproducible.
+            thread_count=1,
+            allow_writing_files=False,
+            logging_level="Silent",
+        )
+        if "learning_rate" in p:
+            kw["learning_rate"] = p["learning_rate"]  # else CatBoost auto-selects
+        if cw == "balanced":
+            kw["auto_class_weights"] = "Balanced"  # CatBoost's inverse-frequency reweighting
+        elif cw is not None:
+            raise ValueError(f"catboost class_weight: only 'balanced' or None, got {cw!r}")
+        return CatBoostClassifier(**kw)
     if kind == "ensemble":
         # Soft-vote blend (metis#65): the blend made scorable INSIDE nested CV (vs `metis
         # blend`'s post-hoc leaderboard-only combine). members = a list of $any-map bundles
@@ -210,8 +237,12 @@ def train(X, y, kind: str, seed: int, params: dict | None = None):
 
 
 def predict(estimator, X):
-    """Predict labels for X with a fitted estimator."""
-    return estimator.predict(X)
+    """Predict labels for X with a fitted estimator, as a 1-D array.
+
+    Raveled because CatBoost's `.predict()` returns shape (n, 1); sklearn estimators already
+    return (n,), so `reshape(-1)` is a no-op for them — one site fixes catboost everywhere
+    predict flows (fold_score/cv_score + the predict step's argmax path)."""
+    return np.asarray(estimator.predict(X)).reshape(-1)
 
 
 def complexity(fitted, kind: str) -> float:
@@ -242,6 +273,12 @@ def complexity(fitted, kind: str) -> float:
         # (Private attr: sklearn 1.9.0 exposes no public per-tree accessor; if an upgrade
         # breaks this, that's the regression site.)
         return float(sum(t.get_n_leaf_nodes() for stage in fitted._predictors for t in stage))
+    if kind == "catboost":
+        # CatBoost grows OBLIVIOUS (symmetric) trees — full binary at fixed depth → 2^depth
+        # leaves each; total leaves = tree_count × 2^depth (the summed-leaves capacity proxy,
+        # the additive-boosting analogue of hist_gbm's total leaves).
+        depth = int(fitted.get_all_params().get("depth", 6))
+        return float(fitted.tree_count_ * (2 ** depth))
     if kind == "ensemble":
         # SUM of member realized complexities (aggregate capacity — the parsimony axis for a
         # blend). Recover each member's kind from its NAME (set in make_model from the
