@@ -11,7 +11,13 @@
 ## Milestones
 
 - **M1 (this plan's tasks): probabilities + `decide: offsets`** — pure core, train/predict wiring, tests, docs. Boundary: `sdlc milestone-close`.
-- **M2: `metis blend`** — average N promoted runs' `probabilities.csv` (+optional offsets re-tune is OUT — weights only), then run the shape's ship `submission` step on the blended predictions. Sketched here; detailed after M1 (its one design question — how a verb execs a single competition-owned step — deserves its own review round).
+- **M2: `metis blend`** — DETAILED (post-M1, 2026-07-19):
+  - **CLI:** `metis blend <shape.md> --runs <id1,id2,...> [--weights w1,w2,...]` (equal weights default; weights normalized, loud on count mismatch or non-positive).
+  - **Combination rule (the settled design question #1):** average in **tilted log-space** — member i contributes `w_i · (log(clip(p_i)) + o_i)` where `o_i` is ITS persisted offsets (zeros when the run has no `offsets.json`) — then argmax. Each member's tuned decision layer is respected without re-tuning ("weights only" holds); rf's load-bearing tilt and gbm's ≈0 tilt both carry through. Validation: identical id sets/order and identical `proba_*` column sets across runs (loud otherwise); classes from the columns.
+  - **Materialization (the settled design question #2):** write `runs/blend-<short-hash-of-inputs>/` containing: `predict/predictions.csv` (id + decided prediction — the SAME artifact shape the ship predict step emits), `record.json` (a blend-flavored record: member run ids + weights + the shape's get-data step `with` carried over so `kaggle submit --run` resolves the slug via runref), then **exec the shape's ship `submission` step** via the existing single-step exec path (env contract + step-path discovery exactly as `metis run` does — reuse, don't reimplement) with `with: {predictions: predict}` → `submission/submission.csv`. `kaggle submit --run blend-...` then works unchanged.
+  - **Honesty (accepted, recorded in Revisions):** no in-sweep OOF for blends — leaderboard-measured only; the verb prints this caveat.
+  - Tests: pure combine fn (tilted-log averaging: hand-built 2-member case where the blend flips a boundary row the argmax-average would not; zero-offset members ≡ plain log-average; weight normalization; mismatched ids/columns loud). Step-level: materialized dir has the right artifacts; submission step runs on the fixture workspace (reuse the in-process harness where possible; the exec path may need the e2e-style built binary — implementer judges, mirroring how promote is tested today).
+  - **SDLC note:** M1 merged early (cross-repo dep, logged); M2 works on a FRESH branch name (#148 no-reuse) — `git checkout -b 000060-m2-blend` declared loudly as the change-code-already-ran continuation (the gates passed once for this issue; do not re-run change-code).
 
 ## Core concepts
 
