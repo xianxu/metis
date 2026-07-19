@@ -1,12 +1,13 @@
 ---
 id: 000065
-status: working
+status: codecomplete
 deps: []
 github_issue:
 created: 2026-07-19
 updated: 2026-07-19
 estimate_hours: 1.36
 started: 2026-07-19T01:03:44-07:00
+actual_hours: N/A
 ---
 
 # arena2 model bench: ensemble kind + catboost + seed passthrough
@@ -161,6 +162,7 @@ moving — flagged at start-plan.)
 ## Log
 
 ### 2026-07-19
+- 2026-07-19: closed — Both milestones shipped (M1 ensemble+seed SHIP, M2 catboost FIX-THEN-SHIP with findings fixed): 124 pytest green; go build -o bin/metis clean (zero Go edits, FamilyOf structural); real-binary+forkserver smokes for ensemble, solo catboost, and catboost-in-ensemble all split→train→predict ok. Enables arena2 M4-blend (ensemble outer-CV) + M5 (catboost/seed-bag). --no-actual: interleaved metis+kbench session (active-time contamination).; review verdict: SHIP
 - 2026-07-19: closed M2 — catboost kind: 123 pytest green (6 catboost — 1-D predict ravel, determinism+seed-override, balanced-changes-fit+loud-unknown, complexity=tree_count×2^depth, no-side-effect-dir/ARCH-PURE, catboost-as-ensemble-member); go build -o bin/metis clean; real-binary+forkserver smoke solo AND catboost-in-ensemble split→train→predict ok, predictions well-formed 1-D, NO catboost_info/ leak (purity pin holds); atlas updated (catboost surface). --no-actual: interleaved metis+kbench session.; review verdict: FIX-THEN-SHIP
 - 2026-07-19: closed M1 — ensemble kind + seed passthrough: 116 pytest green (soft-vote=member-mean, weights tilt, single-member≈bare, complexity=Σmembers, decide=offsets composition, seed override re-keys+changes-fit, seed-bagging distinct members, ensemble-through-step-path); go build -o bin/metis clean (zero Go edits — FamilyOf structural); real-binary+forkserver smoke on toy ensemble shape split→train→predict ok; atlas updated (ensemble+seed surface). --no-actual: session interleaves metis+kbench issues.; review verdict: SHIP
 - Opened + claimed. Enables arena2 M4-blend (ensemble outer-CV measurement) + M5 (catboost
