@@ -1,11 +1,12 @@
 ---
 id: 000026
-status: open
+status: working
 deps: [000027]
 github_issue:
 created: 2026-07-11
-updated: 2026-07-11
+updated: 2026-07-19
 estimate_hours:
+started: 2026-07-19T16:02:06-07:00
 ---
 
 # sweep key = shape blob-hash, not repo HEAD sweep_sha
