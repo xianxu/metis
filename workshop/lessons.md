@@ -302,3 +302,13 @@ the thrash: starts ≫ completions with the process alive (throughput ≈ 0) —
 - **A new verb entering a system with loud-honesty guards must inherit the guard posture.**
   Data-shape validation (ids/columns) comes naturally; provenance guards (fingerprint/shape
   identity) get missed — grep the sibling verbs' guards and ask which apply.
+
+## Implementation lessons (metis#60 M2, 2026-07-19)
+
+- **A plan that names the exact reuse symbol turns implementation into transcription** —
+  execStep.Execute + stepPath() named at review time meant zero exploration; the pre-review
+  "existing single-step exec path" (which didn't exist) is the whole argument for
+  symbol-level plan review.
+- **A 2-line #!/bin/sh step script makes single-step exec hermetically testable** — a toy
+  submission step (copy predictions → $METIS_STEP_DIR) exercises the full env contract +
+  literal-path landing with no real binary or venv; reuse for future step-seam verb tests.
