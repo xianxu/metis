@@ -90,13 +90,17 @@ fold structure). They share the soft-vote math, which sklearn owns here — no c
 ```estimate
 model: estimate-logic-v3.1
 familiarity: 1.0
-item: typed-data-prototype  design=0.15 impl=0.25   # ensemble kind (M1) — patterned dispatch
-item: typed-data-prototype  design=0.1  impl=0.2    # catboost kind (M2)
-item: real-api-discovery    design=0.05 impl=0.15   # catboost dep/API + seed passthrough
-item: milestone-review      design=0.0  impl=0.4    # 2 milestone-close reviews
+item: typed-data-prototype  design=0.15 impl=0.25
+item: typed-data-prototype  design=0.1 impl=0.2
+item: real-api-discovery    design=0.05 impl=0.15
+item: milestone-review      design=0.0 impl=0.2
+item: milestone-review      design=0.0 impl=0.2
 design-buffer: 0.2
 total: 1.7
 ```
+
+(Item legend: M1 ensemble kind · M2 catboost kind · catboost dep/API + seed passthrough ·
+two milestone-close reviews.)
 
 (Two patterned model-kind additions + a one-site seed override, over an established
 dispatch (`make_model`/`complexity`/`MODELS`); the only genuine discovery is the CatBoost
