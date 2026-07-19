@@ -1,11 +1,12 @@
 ---
 id: 000064
-status: open
+status: working
 deps: []
 github_issue:
 created: 2026-07-19
 updated: 2026-07-19
 estimate_hours:
+started: 2026-07-19T00:11:37-07:00
 ---
 
 # select display: family label falls back to (one family); map-valued free-params render as Go maps
