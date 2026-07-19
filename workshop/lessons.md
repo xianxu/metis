@@ -292,3 +292,13 @@ the thrash: starts ≫ completions with the process alive (throughput ≈ 0) —
   strict improvement, else uninformative inputs return an arbitrary grid corner.
 - **Pin indices-vs-labels in any decision function's docstring** — index returns silently
   coincide with labels for 0..K-1 int codes and explode otherwise; callers map via classes_.
+
+## Plan-review lessons (metis#60 M2, 2026-07-19)
+
+- **A "reuse, don't reimplement" instruction is only real once the plan names the symbol.**
+  "The existing single-step exec path" sounded settled but didn't exist — and the plausible
+  substitute (runResolvedExperiment) would clobber the design's own record.json. Verify the
+  named reuse point against the code before approving.
+- **A new verb entering a system with loud-honesty guards must inherit the guard posture.**
+  Data-shape validation (ids/columns) comes naturally; provenance guards (fingerprint/shape
+  identity) get missed — grep the sibling verbs' guards and ask which apply.
