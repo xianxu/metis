@@ -115,3 +115,9 @@ friction (kbench layering). Everything else is out unless the competition says o
 - **Next (operator-framed M4): the measurement/decision layer** — metis#60 (predict-proba +
   decide step: per-class thresholds FIRST, then blending; the two compose on the same
   boundary rows).
+- M5 bench pre-brainstormed (operator + session, 2026-07-19): ranked classifier candidates
+  parked in brain/workshop/pensive/2026-07-19-01-pensive-s6e7-classifier-candidates-m5.md —
+  CatBoost (the one mechanism bet: per-node ordered target statistics) > seed-bagging >
+  ExtraTrees > LightGBM/XGBoost > deep tabular (TabPFN public 0.94756 < our GBM — evidence
+  against). Demand gate for M5: the residual gap after M4 (decision grid) + metis#60 M2
+  (blend).
