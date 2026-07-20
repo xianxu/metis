@@ -5,6 +5,11 @@ model from the upstream train step and predicts on the dataset's test rows (fall
 back to train rows if there is no test split), writing predictions.csv (id +
 prediction) — the submission-shaped output.
 
+Two model families (metis#36 M1): a CLASSIFIER carries a decision layer — probabilities
++ optional tuned offsets (below). A REGRESSOR has no predict_proba/classes_, so it takes
+an early branch: continuous predictions.csv, no probabilities.csv/offsets (calling
+predict_proba on a regressor would crash — the rogii-wellbore ship path exercises this).
+
 with:
   dataset: a serialized Dataset dir — an upstream step-id whose      (required)
            captured `dataset/` artifact this step reads (the ship
@@ -42,6 +47,21 @@ def main() -> None:
         model = pickle.load(f)
 
     frame = ds.test if ds.test is not None else ds.train
+
+    # metis#36 M1: a regressor has no predict_proba/classes_ — no decision layer. Emit
+    # continuous predictions and skip the probabilities/offsets machinery entirely (calling
+    # predict_proba would AttributeError and crash the whole regression ship path — e.g.
+    # rogii-wellbore). Classifiers fall through to the full proba+offsets path below.
+    if not hasattr(model, "predict_proba"):
+        out = pd.DataFrame()
+        id_col = ds.schema.id_col()
+        if id_col is not None:
+            out[id_col] = frame[id_col].to_numpy()
+        out["prediction"] = predict(model, ds.X(frame))
+        out.to_csv(io.out_path(ctx, "predictions.csv"), index=False)
+        io.write_metrics(ctx, {"n_predictions": float(len(out)), "has_offsets": 0.0})
+        return
+
     proba = predict_proba(model, ds.X(frame))
 
     # metis#60: offsets.json beside the upstream model = a tuned decision rule; validate the

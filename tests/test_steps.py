@@ -20,14 +20,14 @@ from metis.steps import cv_split, predict, train
 TOY_PARENT = Path(__file__).parents[1] / "testdata" / "dataset"
 
 
-def _run_step(monkeypatch, run_dir, step_id, with_cfg, main_fn, seed=42):
+def _run_step(monkeypatch, run_dir, step_id, with_cfg, main_fn, seed=42, exp_dir=TOY_PARENT):
     step_dir = run_dir / step_id
     step_dir.mkdir(parents=True, exist_ok=True)
     (step_dir / "with.json").write_text(json.dumps(with_cfg))
     monkeypatch.setenv("METIS_STEP_DIR", str(step_dir))
     monkeypatch.setenv("METIS_RUN_DIR", str(run_dir))
     monkeypatch.setenv("METIS_STEP_ID", step_id)
-    monkeypatch.setenv("METIS_EXP_DIR", str(TOY_PARENT))
+    monkeypatch.setenv("METIS_EXP_DIR", str(exp_dir))
     monkeypatch.setenv("METIS_SEED", str(seed))
     main_fn()
     return step_dir
@@ -315,3 +315,43 @@ def test_predict_offsets_class_mismatch_fails_loud(tmp_path, monkeypatch):
     (run / "train" / "offsets.json").write_text(json.dumps(payload))
     with pytest.raises(ValueError, match="classes"):
         _run_step(monkeypatch, run, "predict", {"dataset": "decide", "model": "train"}, predict.main)
+
+
+def _save_reg_dataset(exp_dir):
+    """A tiny y = 3x + 0.1 regression dataset (id, feature x, continuous target y) under
+    exp_dir/reg/ — the fixture for the regression ship path (metis#36 M1)."""
+    d = exp_dir / "reg"
+    d.mkdir(parents=True, exist_ok=True)
+    n = 40
+    xs = [i / n for i in range(n)]
+    df = pd.DataFrame({"id": list(range(n)), "x": xs, "y": [3.0 * v + 0.1 for v in xs]})
+    (d / "schema.json").write_text(json.dumps({
+        "columns": {"id": "id", "x": "feature", "y": "target"},
+        "dtypes": {"id": "int64", "x": "float64", "y": "float64"}}))
+    df.iloc[:30].to_csv(d / "train.csv", index=False)
+    df.iloc[30:].to_csv(d / "test.csv", index=False)
+
+
+def test_predict_regressor_emits_continuous_no_proba(tmp_path, monkeypatch):
+    """metis#36 M1 (the rogii ship path): a regressor has no predict_proba/classes_, so the
+    predict step must branch on that — emit continuous predictions.csv and NO probabilities.csv.
+    Before the branch, predict.main called predict_proba unconditionally and crashed the whole
+    rogii submission flow (AttributeError). The regression fold path (train's cv_score) is already
+    covered in test_model; this pins the STEP entrypoint."""
+    exp = tmp_path / "exp"
+    _save_reg_dataset(exp)
+    run = tmp_path / "runs" / "r-reg"
+    ts = _run_step(monkeypatch, run, "train",
+                   {"dataset": "reg", "model": {"rf_reg": {"n_estimators": 8, "max_depth": 3}},
+                    "metric": "rmse"}, train.main, exp_dir=exp)
+    assert (ts / "model.pkl").exists()
+
+    ps = _run_step(monkeypatch, run, "predict",
+                   {"dataset": "reg", "model": "train"}, predict.main, exp_dir=exp)
+    preds = pd.read_csv(ps / "predictions.csv")
+    assert list(preds.columns) == ["id", "prediction"]
+    assert len(preds) == 10  # the 10 test rows
+    assert preds["prediction"].dtype.kind == "f"  # continuous, not int class codes
+    # a regressor has no decision layer → no probabilities.csv, no offsets
+    assert not (ps / "probabilities.csv").exists()
+    assert json.loads((ps / "metrics.json").read_text())["has_offsets"] == 0.0
