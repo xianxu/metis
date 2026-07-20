@@ -4,7 +4,7 @@ date: 2026-07-14
 topic: a feature-engineering algebra under cross-validation
 mode: ideas
 description: metis#35 escalated into a design theory — label as a domain-restricted keyed channel, feature constructors as fit/apply with declared scope signatures, aggregate algebraic class deciding fold-recompute cost; roughly relational algebra extended with leak-tracking and fold-indexed evaluation.
-references: [../issues/000036-channel-split-y-as-runner-scoped-keyed-artifact-nested-cv-as-domain-restriction-metis-v3.md, ../issues/000037-feature-constructor-algebra-declared-scope-signatures-aggregate-classes-derived-placement.md, brain/workshop/continuation/20260714T073940-metis-v2-honest-beat-blocked-on-35.md, brain/data/project/metis-v2-experiment-algebra.md]
+references: [../issues/000036-channel-split-y-as-runner-scoped-keyed-artifact-nested-cv-as-domain-restriction-metis-v3.md, ../issues/000037-feature-constructor-algebra-declared-scope-signatures-aggregate-classes-derived-placement.md, brain/workshop/continuation/20260714T073940-metis-v2-honest-beat-blocked-on-35.md, ../history/projects/metis-v2-experiment-algebra.md]
 ---
 
 # Pensive: a feature-engineering algebra under cross-validation
@@ -122,7 +122,7 @@ the taint unit and explicitly scope out label leakage.
 
 - metis#35 (`workshop/issues/000035-*.md`) — the motivating bug; metis#36 (stage B) + metis#37
   (stage C) — the tickets this design feeds.
-- `brain/data/project/metis-v2-experiment-algebra.md` — the project this feeds.
+- `workshop/history/projects/metis-v2-experiment-algebra.md` — the project this feeds (done; archived into metis 2026-07-19).
 - Kaufman, Rosset & Perlich, KDD'11 — legitimacy relation; Fig 1(c). Moscovich & Rosset, JRSS-B
   2022 — label-free preprocessing biases CV. Cawley & Talbot, JMLR 2010 — nested-CV selection
   bias. Yang et al., ASE'22 — static leakage detection, map/reduce edges. Kapoor & Narayanan,

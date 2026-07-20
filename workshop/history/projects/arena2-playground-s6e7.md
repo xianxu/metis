@@ -10,7 +10,7 @@ operator: xianxu
 explicitly_out: [new workbench features built speculatively]
 created: 2026-07-18
 updated: 2026-07-19
-sources: [brain/data/project/metis-v2-experiment-algebra.md]
+sources: [workshop/history/projects/metis-v2-experiment-algebra.md]
 ---
 
 # arena2 — Playground Series S6E7 through the workbench

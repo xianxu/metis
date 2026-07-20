@@ -7,7 +7,7 @@ updated: 2026-07-07
 
 # The experiment-design algebra — driver · sweeper · pipeline
 
-Design source-of-truth for the metis-v2 project (`brain/data/project/metis-v2-experiment-algebra.md`).
+Design source-of-truth for the metis-v2 project (`workshop/history/projects/metis-v2-experiment-algebra.md`).
 Product of a long design conversation with the operator (2026-07-07) plus a three-front prior-art
 survey (ML frameworks · config/sweep/adaptive · reproducible-pipeline caching). The trigger: the
 metis-v1 Titanic winner scored **~0.81 cv → 0.77990 public** — a textbook selection-overfit gap.
