@@ -61,9 +61,9 @@ is *expected* to diverge (metis#42 quantified it); the shipped **public** score 
 
 ## Tasks
 
-- [ ] **kbench#18** — rogii workspace (get-data + grouped-sequence adapt + baseline). *drives M1.*
-- [ ] **metis#36 M0** — regression support (model kind + RMSE scorer + regression predict/complexity).
-- [ ] **metis#36 M1** — rogii hits the wall: naive row-CV demonstrably leaks (truth = leaderboard / out-of-engine well holdout).
+- [x] **kbench#18** — rogii workspace (grouped-sequence adapt + baseline + typewell join + leak). CLOSED 2026-07-19: submission.csv (held-out 74.4→42.1 w/ typewell); leak row 8.0 vs well 74.7.
+- [x] **metis#36 M0** — regression support (model kind + RMSE scorer + regression predict/complexity). DONE (+M1 predict-step regression branch, commit 58a51e9).
+- [x] **metis#36 M1** — rogii hits the wall: naive row-CV demonstrably leaks. DONE via kbench#18's out-of-engine well-holdout (`leak_demo.py`): row-CV 8.0 vs well-CV 74.7 = 9.35×.
 - [ ] **metis#36 M2** — channel split core + prospective anchor (reproduce titanic/s6e7 seal number).
 - [ ] **metis#36 M3** — cluster-unit CV (`cluster: WELLNAME`); rogii's row-CV-leak closes under well-CV.
 - [ ] **metis#36 M4** — delete the seal (analysis_i cloning, sealed branch); O(k·N)→O(1) confirmed.
@@ -95,3 +95,16 @@ is *expected* to diverge (metis#42 quantified it); the shipped **public** score 
 - **BLOCKER:** `is_kernels_submissions_only=True` — a live leaderboard number needs a Kaggle *notebook*
   submission (CSV API → 403). done_when's "live submission" is pending an operator decision on the notebook path;
   the offline held-out estimate is the honest stand-in. kbench#18 M1b (typewell + leak) is next regardless.
+
+### 2026-07-19 — kbench#18 M1b DONE (typewell join + the leak quantified) → kbench#18 CLOSED
+- **Typewell join (Done-when #2):** per-well `tw_{tvt_min,tvt_max,gr_mean,gr_std}` features (the type
+  curve's TVT bracket = the per-well anchor). **Held-out RMSE 74.4 → 42.1** (−43%, zero model change).
+- **The leak (Done-when #3):** `leak_demo.py` (out-of-engine) — row-CV **8.0** vs well-CV **74.7** =
+  **9.35×** optimism. This is the concrete, quantified demand for **metis#36 M3** (cluster-unit CV =
+  `ResampleUnit.cluster`; row-CV = the degenerate unit=id case). arena3's "rogii hits the wall" (M1) is
+  now measured, not asserted.
+- **Generalization proof:** the honest ladder geometry 74.4 → +typewell 42.1 → persistence ~10 →
+  leaders ~4.86 — the workbench generalized onto grouped-sequence regression AND the domain join helped.
+- **Next (metis#36):** M2 channel core + prospective anchor → M3 cluster-unit CV (rogii's leak closes
+  under well-CV) → M4 delete the seal → M5 acceptance. The live leaderboard number remains kernels-only
+  (operator decision on the notebook path).
