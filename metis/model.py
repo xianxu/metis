@@ -9,19 +9,33 @@ entrypoints (metis.steps.*) are the only place these meet the filesystem.
 from __future__ import annotations
 
 import numpy as np
-from sklearn.ensemble import (HistGradientBoostingClassifier, RandomForestClassifier,
-                              VotingClassifier)
-from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score, balanced_accuracy_score
+from sklearn.ensemble import (HistGradientBoostingClassifier, HistGradientBoostingRegressor,
+                              RandomForestClassifier, RandomForestRegressor, VotingClassifier)
+from sklearn.linear_model import LogisticRegression, Ridge
+from sklearn.metrics import accuracy_score, balanced_accuracy_score, root_mean_squared_error
 
 from metis.split import cv_folds
 
-MODELS = frozenset({"logreg", "rf", "hist_gbm", "ensemble", "catboost"})
+# The regressor kinds (metis#36 M0): rogii-wellbore is RMSE regression. They share the pure
+# train/predict/fold path with the classifiers; predict + complexity + the decide guard branch on
+# is_regression (a regressor has no classes_/predict_proba, so it carries no decision layer).
+_REGRESSORS = frozenset({"rf_reg", "hist_gbm_reg", "ridge"})
+MODELS = frozenset({"logreg", "rf", "hist_gbm", "ensemble", "catboost"}) | _REGRESSORS
 
-# The closed scorer set (metis#59). The ONE place a metric name resolves to a scorer —
-# fold_fit consumes it; the train step ALSO resolves eagerly at entry so an unknown
-# metric fails loudly on every path (incl. the foldless ship refit, which never scores).
-_SCORERS = {"accuracy": accuracy_score, "balanced_accuracy": balanced_accuracy_score}
+
+def is_regression(kind: str) -> bool:
+    """True iff `kind` is a regressor (metis#36 M0) — the branch predict/complexity/fold_fit use
+    to route (regressors have no classes_/predict_proba → no decision layer)."""
+    return kind in _REGRESSORS
+
+
+# The closed scorer set (metis#59; +rmse metis#36 M0). The ONE place a metric name resolves to a
+# scorer — fold_fit consumes it; the train step ALSO resolves eagerly at entry so an unknown metric
+# fails loudly on every path (incl. the foldless ship refit, which never scores). rmse is an ERROR
+# metric (lower is better) — the shape declares objective.direction: minimize; the offset-tuner
+# (which maximizes) never sees it (regression has no decision layer).
+_SCORERS = {"accuracy": accuracy_score, "balanced_accuracy": balanced_accuracy_score,
+            "rmse": root_mean_squared_error}
 
 
 def resolve_scorer(metric: str):
@@ -210,6 +224,17 @@ def make_model(kind: str, seed: int, params: dict | None = None):
         elif cw is not None:
             raise ValueError(f"catboost class_weight: only 'balanced' or None, got {cw!r}")
         return CatBoostClassifier(**kw)
+    if kind == "rf_reg":
+        return RandomForestRegressor(
+            n_estimators=p.get("n_estimators", 100), max_depth=p.get("max_depth"),
+            random_state=eff_seed)
+    if kind == "hist_gbm_reg":
+        return HistGradientBoostingRegressor(
+            learning_rate=p.get("learning_rate", 0.1), max_iter=p.get("max_iter", 100),
+            max_leaf_nodes=p.get("max_leaf_nodes", 31), max_depth=p.get("max_depth"),
+            random_state=eff_seed)
+    if kind == "ridge":
+        return Ridge(alpha=p.get("alpha", 1.0), random_state=eff_seed)
     if kind == "ensemble":
         # Soft-vote blend (metis#65): the blend made scorable INSIDE nested CV (vs `metis
         # blend`'s post-hoc leaderboard-only combine). members = a list of $any-map bundles
@@ -245,7 +270,10 @@ def predict(estimator, X):
     dtype the estimator learned (so `predictions.csv` writes `0`, never `0.0`; the s6e7
     submission step maps INT codes → string labels). Fixes catboost everywhere predict flows
     (fold_score/cv_score + the ship predict step's argmax path)."""
-    return np.asarray(estimator.predict(X)).reshape(-1).astype(estimator.classes_.dtype)
+    out = np.asarray(estimator.predict(X)).reshape(-1)
+    if not hasattr(estimator, "classes_"):
+        return out  # metis#36 M0: a regressor has no classes_ — keep the continuous output
+    return out.astype(estimator.classes_.dtype)
 
 
 def complexity(fitted, kind: str) -> float:
@@ -265,12 +293,12 @@ def complexity(fitted, kind: str) -> float:
       shrinkage (small ν needs more trees yet regularizes better) decouples leaf-count from
       effective DoF across ν, so a ν-sweeping shape would need a ν-weighted measure (deferred).
     """
-    if kind == "rf":
+    if kind in ("rf", "rf_reg"):  # metis#36 M0: the regressor variant shares the measure
         leaves = [t.tree_.n_leaves for t in fitted.estimators_]
         return float(sum(leaves) / len(leaves))
-    if kind == "logreg":
+    if kind in ("logreg", "ridge"):  # coef count (both single-source the linear feature count)
         return float(fitted.coef_.size)
-    if kind == "hist_gbm":
+    if kind in ("hist_gbm", "hist_gbm_reg"):
         # _predictors is a list-of-lists: one inner list per boosting iteration, holding K
         # TreePredictors for K classes (binary → 1) — flatten and sum realized leaf counts.
         # (Private attr: sklearn 1.9.0 exposes no public per-tree accessor; if an upgrade
@@ -306,6 +334,10 @@ def fold_fit(X, y, folds, fold_idx: int, kind: str, seed: int, params: dict | No
     complexity (metis#19) WITHOUT a second fit.
     """
     rule, dparams = parse_decide(decide)
+    if rule == "offsets" and is_regression(kind):
+        raise ValueError(
+            f"decide=offsets is classification-only (it tunes class probabilities); {kind!r} is a "
+            f"regressor — use decide='argmax' (the default)")
     Xa = np.asarray(X)
     ya = np.asarray(y)
     fa = np.asarray(folds)
