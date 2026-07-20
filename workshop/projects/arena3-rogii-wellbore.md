@@ -73,10 +73,13 @@ The arena is now phased (operator decision 2026-07-20 — "we don't have a good 
 1. **M-plumbing (DONE)** — kbench#18 + metis#36 M0/M1: the workbench generalizes onto grouped-sequence
    regression; the leak is quantified; the notebook-submission infra is proven (persistence 15.883 live).
    *We learned the row model is the wrong shape and the real signal is GR↔typewell correlation.*
-2. **M-real-baseline (CURRENT)** — "real modeling with geospatial awareness + geological knowledge":
-   **kbench#19** (geo-aware spatial-block CV) + **kbench#20** (GR-typewell log-correlation features,
-   DTW+markers) + **kbench#21** (neural sequence model, geo-CV validated, live submission). Goal: a
-   genuinely competitive baseline on the board (beat persistence 15.88), all kbench-local. **Go neural.**
+2. **M-real-baseline (DONE 2026-07-20 — HONEST NEGATIVE)** — #19 geo-CV (honest ladder: row 18.4 ≪ well
+   36.7 ≪ spatial-block 72.1) + #20 correlation features (persistence 13.7 ≫ geometry 92.9; GR-Viterbi a
+   wash) + #21 neural 1D-CNN (14.35 ≈ persistence — no beat). **Finding: the persistence continuity anchor
+   is the recoverable baseline; THREE methods (tree/Viterbi/CNN) all wash out on the GR-correlation drift
+   — beating persistence toward the leaders (4.86) is genuinely hard and unsolved by what we tried.** The
+   honest CV tracks the leaderboard (geo-CV ~14 vs live 15.88). We did NOT get a competitive beat; we DID
+   get a rigorous, honest, reusable baseline + validation + submission infra. (Aspiration unmet, deliverables met.)
 3. **M-workbench-drive (DEFERRED, next)** — generalize what the baseline proved back into metis: a
    `ResampleUnit = spatial-block(buffer)` split unit, a `torch`/GPU model-kind, and the queued metis#36
    M2→M5 channel-split (cluster-unit CV). Demand-gated: build in the workspace first, promote once it works.
@@ -86,7 +89,7 @@ The arena is now phased (operator decision 2026-07-20 — "we don't have a good 
 - [x] **kbench#18** — rogii workspace (grouped-sequence adapt + baseline + typewell join + leak). CLOSED 2026-07-19: submission.csv (held-out 74.4→42.1 w/ typewell); leak row 8.0 vs well 74.7. Live persistence 15.883 (M-plumbing).
 - [x] **kbench#19** — geo-aware spatial-block CV. DONE+MERGED 2026-07-20: ladder (770 wells, 5.07M rows) row-CV 18.36 ≪ well-CV 36.69 ≪ **spatial-block-CV 72.14** — whole-region holdout is the honest estimate; buffer variogram-auto-sized (detrended, local window → ~132 ft, small: the pessimism is region-holdout, not buffer). Artifact `data/geo_folds.json`. Leaderboard-fidelity note deferred to #21.
 - [x] **kbench#20** — GR-typewell correlation features. DONE+MERGED 2026-07-20: `correlation.py` (continuity anchors + continuity-anchored Viterbi implied-TVT + confidence, predict-time-safe). Toe-RMSE ladder under geo-CV (150 wells): geometry 92.9 ≫ **persistence 13.7** (~7× lift — the continuity anchor IS the recoverable win) ≈ viterbi 13.75 (GR alignment a **net wash** vs persistence). Key finding: beating persistence needs the sequence alignment, not raw features (trees can't extrapolate the ~11k offset) → the GR correction is #21's neural job; features handed off to gate. Markers deferred.
-- [ ] **kbench#21** — neural sequence model + live submission (deps #19,#20; go-neural). *M-real-baseline; beat persistence 15.88.*
+- [x] **kbench#21** — neural sequence model. DONE+MERGED 2026-07-20 (HONEST NEGATIVE): `seq_model.py` dilated 1D-CNN predicting the persistence residual (zero-init head → untrained net == persistence). geo-CV paired: neural **14.35 ≈ persistence 14.24** (250 wells) — **does NOT beat persistence** (3rd method after tree/Viterbi to wash on the GR-correlation drift). No live submission (gate = offline beat, unmet; persistence already live 15.88). **Honest-tracks-leaderboard: geo-CV ~14 vs live 15.88 — the honest CV tracks the leaderboard, mildly optimistic.**
 - [x] **metis#36 M0** — regression support (model kind + RMSE scorer + regression predict/complexity). DONE (+M1 predict-step regression branch, commit 58a51e9).
 - [x] **metis#36 M1** — rogii hits the wall: naive row-CV demonstrably leaks. DONE via kbench#18's out-of-engine well-holdout (`leak_demo.py`): row-CV 8.0 vs well-CV 74.7 = 9.35×.
 - [ ] **metis#36 M2** — channel split core + prospective anchor (reproduce titanic/s6e7 seal number).
@@ -95,6 +98,27 @@ The arena is now phased (operator decision 2026-07-20 — "we don't have a good 
 - [ ] **metis#36 M5** — acceptance: rogii honest estimate vs leaderboard; transductive-vs-prospective finding.
 
 ## Log
+
+### 2026-07-20 — M-real-baseline SHIPPED (honest negative); all 3 issues DONE+MERGED
+- **kbench#19/#20/#21 all built, validated under honest geo-CV, and merged to kbench main** (PRs #16/#17/#18).
+  Also landed the unmerged plumbing: **metis#36** (M0/M1, PR #50, stays `working` for M2–M5) + **kbench#18**
+  (PR #15) to main.
+- **The finding (rigorous, honest):** the **persistence continuity anchor** (carry the last heel `TVT_input`)
+  is the recoverable baseline (~13.7 toe-RMSE geo-CV, 15.88 live). The geometry model is blind on the toe
+  (`TVT_input` NaN there); the honest CV ladder is order-faithful (geometry 36–92 ≫ ~14–16 persistence band).
+  **THREE independent methods — hist_gbm (#20), a continuity-anchored GR↔typewell Viterbi (#20), and a
+  dilated 1D-CNN (#21) — ALL wash out vs persistence.** The GR-correlation *drift* on the toe (what would
+  beat persistence toward the leaders' 4.86) is genuinely hard and unsolved by what we tried; per-well
+  constants can't help (they recalibrate an offset persistence already nails).
+- **Honest-tracks-leaderboard (the arena3 done-when):** persistence geo-CV ~14 vs live 15.88 — the honest
+  spatial-block CV **tracks the leaderboard**, mildly optimistic (~12%, the expected direction). Delivered
+  via persistence (the best model); no new submission (the neural wash didn't warrant burning a daily submit).
+- **Reusable assets shipped:** `geo_cv.py` (buffered spatial-block CV + variogram + `geo_folds.json`),
+  `correlation.py` (continuity anchors + Viterbi implied-TVT + confidence, predict-time-safe),
+  `seq_model.py` (torch residual-gating 1D-CNN + geo-CV harness), the proven kernels-only submission path
+  (RUNBOOK). **Aspiration (competitive beat) unmet; deliverables (honest baseline + validation + infra) met.**
+- **Next: M-workbench-drive** (deferred) — generalize the proven pieces into metis (`ResampleUnit =
+  spatial-block(buffer)`, a `torch` model-kind, metis#36 M2–M5 channel-split). Demand-gated as designed.
 
 ### 2026-07-19
 - Project opened. Operator picked rogii as arena3 + chose rogii-first (accept the full lift) over decoupling
