@@ -80,7 +80,17 @@ The arena is now phased (operator decision 2026-07-20 — "we don't have a good 
    — beating persistence toward the leaders (4.86) is genuinely hard and unsolved by what we tried.** The
    honest CV tracks the leaderboard (geo-CV ~14 vs live 15.88). We did NOT get a competitive beat; we DID
    get a rigorous, honest, reusable baseline + validation + submission infra. (Aspiration unmet, deliverables met.)
-3. **M-workbench-drive (DEFERRED, next)** — generalize what the baseline proved back into metis: a
+3. **M-seq-translation (IN PROGRESS)** — the **second modeling attempt** after M-real-baseline's honest
+   negative: a cross-attention "log-translation" imputer (horizontal GR ⇄ typewell GR, the geosteering
+   alignment learned as a soft-Viterbi; `dTVT` residual head, zero-init → persistence; integrated-from-heel
+   + curvature loss). Three cuts: **v1 (#22)** the simple cut (reference typewell, supervised-only) —
+   **DONE+MERGED 2026-07-20, HONEST NEGATIVE** (translator 15.38 vs persistence 13.74 geo-CV, the **4th**
+   method to wash); **v2 (#23, next — the real shots at a beat)** autoregressive decode (the 0.91 dTVT
+   momentum) + **self-supervised masked-GR pretrain** on the unlabeled corpus (the sleeper) + soft-DTW
+   alignment aux loss; **v3 (#24)** multi-reference spatial + relative-position attention bias. Honest
+   trajectory: 4 methods have washed — a beat is genuinely uncertain; v2's pretraining is the best remaining
+   shot; report as-measured, gate any live submission on an offline beat. torch stays kbench-local.
+4. **M-workbench-drive (DEFERRED)** — generalize what the baseline proved back into metis: a
    `ResampleUnit = spatial-block(buffer)` split unit, a `torch`/GPU model-kind, and the queued metis#36
    M2→M5 channel-split (cluster-unit CV). Demand-gated: build in the workspace first, promote once it works.
 
@@ -90,6 +100,9 @@ The arena is now phased (operator decision 2026-07-20 — "we don't have a good 
 - [x] **kbench#19** — geo-aware spatial-block CV. DONE+MERGED 2026-07-20: ladder (770 wells, 5.07M rows) row-CV 18.36 ≪ well-CV 36.69 ≪ **spatial-block-CV 72.14** — whole-region holdout is the honest estimate; buffer variogram-auto-sized (detrended, local window → ~132 ft, small: the pessimism is region-holdout, not buffer). Artifact `data/geo_folds.json`. Leaderboard-fidelity note deferred to #21.
 - [x] **kbench#20** — GR-typewell correlation features. DONE+MERGED 2026-07-20: `correlation.py` (continuity anchors + continuity-anchored Viterbi implied-TVT + confidence, predict-time-safe). Toe-RMSE ladder under geo-CV (150 wells): geometry 92.9 ≫ **persistence 13.7** (~7× lift — the continuity anchor IS the recoverable win) ≈ viterbi 13.75 (GR alignment a **net wash** vs persistence). Key finding: beating persistence needs the sequence alignment, not raw features (trees can't extrapolate the ~11k offset) → the GR correction is #21's neural job; features handed off to gate. Markers deferred.
 - [x] **kbench#21** — neural sequence model. DONE+MERGED 2026-07-20 (HONEST NEGATIVE): `seq_model.py` dilated 1D-CNN predicting the persistence residual (zero-init head → untrained net == persistence). geo-CV paired: neural **14.35 ≈ persistence 14.24** (250 wells) — **does NOT beat persistence** (3rd method after tree/Viterbi to wash on the GR-correlation drift). No live submission (gate = offline beat, unmet; persistence already live 15.88). **Honest-tracks-leaderboard: geo-CV ~14 vs live 15.88 — the honest CV tracks the leaderboard, mildly optimistic.**
+- [x] **kbench#22** — seq-translation **v1** (cross-attention log-translation, reference typewell). DONE+MERGED 2026-07-20 (HONEST NEGATIVE, M-seq-translation): `seq_translate.py` — tied-weight Siamese Conv+self-attn encoder over horizontal GR AND typewell, **cross-attention = the learned alignment** (pooled→interpolated for CPU), `dTVT` zero-init head → persistence, integrated-from-heel + curvature loss, PS-augmentation. 8 unit tests (predict-time-safety + loss arithmetic + zero-init==persistence + curvature). geo-CV paired (150 wells, k=5, 12 epochs): **translator 15.38 vs persistence 13.74 — NO beat** (~12% worse, per-fold noisy) — the **4th** method to wash. Close verdict FIX-THEN-SHIP (docs/ARCH-PURE/robustness fixes bundled). v1 is the simple cut; real levers → v2. Actual 1.41h.
+- [ ] **kbench#23** — seq-translation **v2** (the real shots at a beat): autoregressive decode (the 0.91 dTVT momentum v1's non-AR head ignores) + **self-supervised masked-GR pretrain** on the unlabeled corpus (all wells + typewell library — the sleeper) + soft-DTW alignment aux loss. Begins by extracting the shared rogii sequence-harness + `load_typewells` seam (rule-of-three: seq_model/seq_translate copies 1&2, v2 is the 3rd consumer — deferred from #22's close). To file.
+- [ ] **kbench#24** — seq-translation **v3** (multi-reference spatial): K=3 nearest typewells (2 near-toe locality + 1 near-heel calibration) + relative-position attention bias `MLP(XY-dist, bearing, TVT_ref−TVT_heel, closest-approach)`; retrieval set = #19's geo-CV neighbors. To file.
 - [x] **metis#36 M0** — regression support (model kind + RMSE scorer + regression predict/complexity). DONE (+M1 predict-step regression branch, commit 58a51e9).
 - [x] **metis#36 M1** — rogii hits the wall: naive row-CV demonstrably leaks. DONE via kbench#18's out-of-engine well-holdout (`leak_demo.py`): row-CV 8.0 vs well-CV 74.7 = 9.35×.
 - [ ] **metis#36 M2** — channel split core + prospective anchor (reproduce titanic/s6e7 seal number).
@@ -98,6 +111,27 @@ The arena is now phased (operator decision 2026-07-20 — "we don't have a good 
 - [ ] **metis#36 M5** — acceptance: rogii honest estimate vs leaderboard; transductive-vs-prospective finding.
 
 ## Log
+
+### 2026-07-20 — M-seq-translation v1 (kbench#22) DONE+MERGED (honest negative — the 4th wash)
+- **kbench#22 v1 built, geo-CV-measured, and merged to kbench main** (PR #19). A genuine cross-attention
+  "log-translation" imputer: tied-weight Siamese Conv+self-attn encoder over horizontal GR AND typewell,
+  **cross-attention as the learned alignment** (the ML analog of the geosteering correlation — a soft
+  Viterbi), `dTVT` residual head zero-init → persistence default, integrated-from-heel + curvature loss,
+  PS-augmentation (770 wells → thousands of heel/toe framings). 8 unit tests (predict-time-safety, loss
+  arithmetic, zero-init==persistence, curvature).
+- **The number: geo-CV paired (150 wells, k=5, 12 epochs) — translator 15.38 vs persistence 13.74, NO beat**
+  (~12% worse, per-fold noisy). The **fourth** method to wash (after hist_gbm / GR-Viterbi / 1D-CNN). v1 is
+  the deliberate SIMPLE cut (reference typewell, supervised-only, non-autoregressive); a working, stronger
+  *mechanism* on the board, honestly measured — not a beat. Aspiration unmet, deliverable met (as designed).
+- **Close hygiene:** boundary review FIX-THEN-SHIP (high confidence, no Critical) — bundled the RUNBOOK docs
+  gate, an ARCH-PURE reclassification (`build_translate_dataset` reads CSVs → INTEGRATION, not pure), a
+  fold-mean NaN-guard, and a curvature-term test. The shared-harness + `load_typewells` seam extraction is
+  **deferred to #23** (rule-of-three: v2's masked-GR pretrain is the third consumer) as a checked plan task.
+- **Next — v2 (#23), the real shots at a beat:** autoregressive decode (captures the +0.91 dTVT momentum v1
+  throws away) + **self-supervised masked-GR pretrain** over the unlabeled corpus (all wells + the whole
+  typewell library — mines the logs the supervised loss never sees; the best remaining lever) + a soft-DTW
+  alignment aux loss. Then v3 (#24) multi-reference spatial. Honest trajectory: 4 washes in, a beat is
+  genuinely uncertain — report as-measured, gate any live submission on an offline beat.
 
 ### 2026-07-20 — M-real-baseline SHIPPED (honest negative); all 3 issues DONE+MERGED
 - **kbench#19/#20/#21 all built, validated under honest geo-CV, and merged to kbench main** (PRs #16/#17/#18).
