@@ -107,11 +107,19 @@ is *expected* to diverge (metis#42 quantified it); the shipped **public** score 
   leaders ~4.86 — the workbench generalized onto grouped-sequence regression AND the domain join helped.
 - **Next (metis#36):** M2 channel core + prospective anchor → M3 cluster-unit CV (rogii's leak closes
   under well-CV) → M4 delete the seal → M5 acceptance.
-- **Live submission TEED UP, blocked on operator identity-verification.** Built the notebook-passthrough
-  path (kernels-only): dataset `xianxu/rogii-baseline-submission` + kernel `xianxu/rogii-baseline-passthrough`
-  (ran COMPLETE → correct submission.csv). The submit itself 403s with **`IdentityVerificationRequired`**
-  (kaggle.com/settings — a phone-verify, account-level, only the operator can clear) — this was the REAL
-  cause of ALL the earlier submit 403s, not the kernels-only mechanism I first inferred (read-the-body
-  lesson). Once verified: `kaggle competitions submit -c rogii-wellbore-geology-prediction -k
-  xianxu/rogii-baseline-passthrough -v 1 -f submission.csv -m "..."` (or one click in the kernel UI).
-  Then the honest-tracks-leaderboard check (offline held-out ~42 RMSE) closes on its own.
+- **LIVE SUBMISSION LANDED — the leaderboard is real now (2026-07-20).** Operator identity-verified;
+  the notebook-submission infra is proven end-to-end. Three empirical findings, each correcting an earlier
+  inference (submission mechanics must be *proven*, not reasoned):
+  1. **Hidden-rerun code competition** (NOT scored-on-download, as I'd argued ~85%). The fixed-CSV
+     *passthrough* kernel scored COMPLETE but the scorer REJECTED it — "incorrect format / wrong number of
+     rows": the scored test ≠ the 3 downloadable wells. A **self-contained notebook that READS the mounted
+     test wells and predicts** (kernel `xianxu/rogii-persistence-baseline`, no dataset/model/internet) was
+     ACCEPTED → the rerun mounts the hidden test at scoring; the notebook must generate for whatever it's given.
+  2. **Metric is RMSE** (deck-authoritative; the Kaggle "Mean Squared Error" tag is loose): persistence
+     public **15.883** lines up with offline persistence ~10 (easier download wells) + leaders ~4.86; under
+     MSE those wouldn't line up.
+  3. **Persistence (public 15.883) BEATS the geometry+typewell ML baseline (offline held-out ~42).** Carrying
+     the last heel TVT across the toe > cross-well row-regression — the task is sequence-continuity + GR-typewell
+     correlation, not row-wise geometry. The real signal (leaders ~4.86) is the GR-log correlation (demand-gated).
+  - **Infra reusable:** self-contained read-test → predict → `/kaggle/working/submission.csv`, kernels-only,
+    internet-off. Swap the predictor to submit any model (the ML port would score ~worse than persistence here).
