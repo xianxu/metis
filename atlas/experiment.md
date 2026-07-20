@@ -123,10 +123,17 @@ wrapped by **thin step-executables** honoring the contract above. Hermetic via *
     selectors. The modality-agnostic envelope adapters produce (tabular now).
   - `split.py` `cv_folds(df, k, seed, stratify_col?)` — deterministic (Stratified)KFold
     fold assignment.
-  - `model.py` `train`/`predict`/`cv_score` — sklearn `logreg`/`rf`/`hist_gbm`, deterministic by seed;
+  - `model.py` `train`/`predict`/`cv_score` — sklearn CLASSIFIERS `logreg`/`rf`/`hist_gbm`/`catboost`/`ensemble`
+    AND (metis#36 M0) REGRESSORS `rf_reg`/`hist_gbm_reg`/`ridge`, deterministic by seed;
     `cv_score` averages per-fold validation scores under a **metric knob** (metis#59:
-    `accuracy` default | `balanced_accuracy`; `resolve_scorer` is the ONE name→scorer site,
+    `accuracy` default | `balanced_accuracy` | `rmse` (metis#36 M0, an ERROR metric → shape sets
+    `objective.direction: minimize`); `resolve_scorer` is the ONE name→scorer site,
     loud on unknown; `metric=` threads keyword-default through `fold_fit`/`fold_score`/`cv_score`).
+    **Regressors (metis#36 M0)** share the pure train/predict/fold path; `is_regression(kind)` routes
+    the three branches that differ: `predict` returns continuous output (no `classes_` cast), `complexity`
+    reuses the classifier measures (mean-leaves / total-leaves / coef-count), and the classification-only
+    decision layer (below) is REFUSED for regressors. No decision layer, no `predict_proba` — a regressor
+    has no `classes_`. (rogii-wellbore is RMSE regression — the M0 prerequisite for arena3.)
     **The decision layer (metis#60)** — the cost-sensitive plug-in rule, LEAF-LOCAL:
     `decide: {"offsets": {"holdout"}}` tunes per-class log-offsets (grid ±4, no-op-anchored)
     as a FITTED PARAMETER — aux stratified holdout inside the fold's training rows, main
