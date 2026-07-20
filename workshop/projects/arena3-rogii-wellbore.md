@@ -84,7 +84,7 @@ The arena is now phased (operator decision 2026-07-20 — "we don't have a good 
 ## Tasks
 
 - [x] **kbench#18** — rogii workspace (grouped-sequence adapt + baseline + typewell join + leak). CLOSED 2026-07-19: submission.csv (held-out 74.4→42.1 w/ typewell); leak row 8.0 vs well 74.7. Live persistence 15.883 (M-plumbing).
-- [ ] **kbench#19** — geo-aware spatial-block CV (buffered; wells ~470 ft apart leak). *M-real-baseline; the honest-validation foundation.*
+- [x] **kbench#19** — geo-aware spatial-block CV. DONE+MERGED 2026-07-20: ladder (770 wells, 5.07M rows) row-CV 18.36 ≪ well-CV 36.69 ≪ **spatial-block-CV 72.14** — whole-region holdout is the honest estimate; buffer variogram-auto-sized (detrended, local window → ~132 ft, small: the pessimism is region-holdout, not buffer). Artifact `data/geo_folds.json`. Leaderboard-fidelity note deferred to #21.
 - [ ] **kbench#20** — GR-typewell log-correlation features (DTW/cross-correlation implied-TVT + markers). *M-real-baseline; the competition signal.*
 - [ ] **kbench#21** — neural sequence model + live submission (deps #19,#20; go-neural). *M-real-baseline; beat persistence 15.88.*
 - [x] **metis#36 M0** — regression support (model kind + RMSE scorer + regression predict/complexity). DONE (+M1 predict-step regression branch, commit 58a51e9).
