@@ -5,7 +5,7 @@ deps: [metis#35]
 github_issue:
 created: 2026-07-14
 updated: 2026-07-19
-estimate_hours:
+estimate_hours: 17
 started: 2026-07-19T16:22:10-07:00
 ---
 
@@ -72,10 +72,50 @@ Replace the row-cloning seal with a runner-owned label channel:
 
 ## Plan
 
-- [ ] Brainstorm-first with operator (design via superpowers-writing-plans; durable plan in
-  workshop/plans/). Key open questions from the pensive: y-artifact on-disk shape; how the
-  runner injects restricted y (per-step artifact vs env-pointed file); score-step metric contract;
-  where prospective mode's row-drop lives.
+Durable plan: `workshop/plans/000036-channel-split-y-channel-plan.md` (v2 — fresh-eyes-reviewed,
+3 critical + 4 important folded in; operator decisions 2026-07-19). Milestone spine (each an
+`sdlc milestone-close` boundary):
+
+- [x] Design — brainstorm (pensive) → plan v2 → fresh-eyes review → operator decisions. DONE.
+- [ ] **M0** — regression support (metis is classification-only; rogii is RMSE).
+- [ ] **M1** — rogii hits the wall (row-CV demonstrably leaks; kbench#18 drives).
+- [ ] **M2** — channel split core + prospective anchor (reproduce titanic/s6e7 seal number).
+- [ ] **M3** — cluster-unit CV (`cluster: WELLNAME`).
+- [ ] **M4** — delete the seal (analysis_i cloning, sealed branch); O(k·N)→O(1).
+- [ ] **M5** — acceptance (transductive-vs-prospective; rogii honest estimate vs LB).
+
+Part of the **arena3-rogii-wellbore** project (`workshop/projects/`). The four mechanism open-Qs
+(y-artifact shape, injection, score contract, prospective row-drop) are resolved in the plan.
+
+## Estimate
+
+```estimate
+model: estimate-logic-v3.1
+familiarity: 1.0
+design-buffer: 0.30
+item: greenfield-go-module       design=0.5 impl=1.0
+item: smaller-go-module          design=0.3 impl=0.8
+item: cross-repo-refactor-small  design=1.5 impl=5.2
+item: smaller-go-module          design=0.4 impl=1.5
+item: cross-cutting-refactor     design=0.3 impl=1.8
+item: smaller-go-module          design=0.2 impl=0.4
+item: pensive                    design=0.5 impl=0.5
+item: milestone-review           design=0.0 impl=0.2
+item: milestone-review           design=0.0 impl=0.2
+item: milestone-review           design=0.0 impl=0.2
+item: milestone-review           design=0.0 impl=0.2
+item: milestone-review           design=0.0 impl=0.2
+total: 17.01
+```
+
+Derivation: `greenfield-go-module` = `pkg/channel` (DomainRestriction+ResampleUnit+Estimand,
+pure). `smaller-go-module` ×3 = M0 regression (extend model.py) · M3 cluster-CV (seeded grouped
+split + cluster header) · Header+CUE `_meta` fields (semantics/cluster, drift-guarded).
+`cross-repo-refactor-small` = M2 channel core (y-demux primitive + ctx.y() loader + chokepoint +
+fit/predict/score split; spans metis pkg/steps + kbench adapt contract) — the big one.
+`cross-cutting-refactor` = M4 delete-the-seal (analysis_i, sealed branch, dropNeeds/baseRef,
+repoint confinement). `pensive` = M5 acceptance experiment + writeup. `milestone-review` ×5 =
+M0/M2/M3/M4/M5 boundaries (M1 is kbench#18).
 
 ## Log
 
