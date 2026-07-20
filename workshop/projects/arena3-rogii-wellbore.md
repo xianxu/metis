@@ -3,13 +3,16 @@ type: project
 name: arena3-rogii-wellbore
 goal: "Third arena: run the live Featured competition rogii-wellbore-geology-prediction through the metis workbench end-to-end — DRIVING metis#36's channel-split + cluster-unit CV out of the competition's demand (grouped-sequence, whole-well-holdout regression). Prove the workbench generalizes beyond flat-tabular classification (titanic/s6e7) to grouped-sequence REGRESSION data (the arena2 generalization thesis's next turn)."
 done_when: "A live rogii submission produced by the honest flow (metis run → select --best --promote → kaggle submit) under WELL-CV (cluster unit = WELLNAME), with the nested-CV honest estimate recorded AND a Log entry on whether the honest estimate tracks the leaderboard. Plus: metis#36's channel-split infra landed (y as a runner-scoped keyed channel; seal deleted; O(k·N)→O(1)) and the transductive-vs-prospective acceptance finding recorded. Leaderboard position is evidence, not the goal — the deliverable is (a) the generalization proof onto grouped-sequence regression, (b) the demanded-feature list (what rogii actually pulled out of #36), and (c) the honest-tracks-public finding."
-status: active
+status: executing
 deadline: 2026-08-05
 operator: xianxu
-explicitly_out: [new metis infra built speculatively beyond what rogii demands, the #37 R-scope constructor algebra]
+explicitly_out:
+  - new metis infra built speculatively beyond what rogii demands
+  - "the #37 R-scope constructor algebra"
 created: 2026-07-19
 updated: 2026-07-20
 sources: [../pensive/2026-07-14-01-pensive-feature-engineering-algebra-under-cv.md, ../issues/000036-channel-split-y-as-runner-scoped-keyed-artifact-nested-cv-as-domain-restriction-metis-v3.md, ../plans/000036-channel-split-y-channel-plan.md]
+planned_finish: 2026-08-01
 ---
 
 # arena3 — rogii-wellbore-geology-prediction
@@ -160,3 +163,11 @@ The arena is now phased (operator decision 2026-07-20 — "we don't have a good 
   honest-validation foundation). NOTE: kbench#18 is codecomplete but UNMERGED (8 commits ahead of main on
   branch `000018-…`); #19/#20/#21 issue files ride that branch. First step in the fresh session: publish
   #18 → main (needs a push), then branch #19 off clean main.
+
+### 2026-07-20 — transition evidence
+
+- issues-cover-prd: done_when's 3 deliverables are covered by the issue fleet: (a) generalization proof onto grouped-sequence regression → metis#36 M0 (regression core ✓) + kbench#18 (grouped-sequence workspace+baseline ✓); (b) demanded-feature list → metis#36 M2-M5 (channel-split/cluster-CV/seal-delete) + kbench#19 (geo-CV)/#20 (GR-typewell correlation features); (c) honest-tracks-public finding → kbench#21 (neural model + live submission, geo-CV estimate vs public score) + metis#36 M5 acceptance.
+
+### 2026-07-20 — planned_finish
+
+- planned_finish set manually: 2026-08-01
