@@ -8,7 +8,7 @@ deadline: 2026-08-05
 operator: xianxu
 explicitly_out: [new metis infra built speculatively beyond what rogii demands, the #37 R-scope constructor algebra]
 created: 2026-07-19
-updated: 2026-07-19
+updated: 2026-07-20
 sources: [../pensive/2026-07-14-01-pensive-feature-engineering-algebra-under-cv.md, ../issues/000036-channel-split-y-as-runner-scoped-keyed-artifact-nested-cv-as-domain-restriction-metis-v3.md, ../plans/000036-channel-split-y-channel-plan.md]
 ---
 
@@ -51,6 +51,10 @@ load-bearing facts:
   anchor · **M3** cluster-unit CV · **M4** delete the seal · **M5** acceptance.
 - **kbench#18** — the rogii workspace (get-data over 773 well pairs + grouped-sequence `adapt` + baseline
   + submission). ONE issue (operator decision 2026-07-19), not per-step-type. Deps metis#36 (M0 regression).
+  **CLOSED** (plumbing baseline + leak + live persistence submission 15.883).
+- **kbench#19 / #20 / #21** — the **"real baseline" milestone** (see Milestones): geo-aware spatial-block
+  CV (#19) + GR-typewell log-correlation features (#20) + neural sequence model & live submission (#21,
+  deps #19+#20). All kbench-local; the metis generalization is deferred to the workbench-drive milestone.
 
 ## Regression anchor (risk mitigation)
 
@@ -59,9 +63,27 @@ metis#35-era honest-beat on titanic/s6e7 (rf md=4 + ticket_survival → public 0
 C2 correction, the anchor is **prospective** mode (reproduces the seal's internal CV estimate); transductive
 is *expected* to diverge (metis#42 quantified it); the shipped **public** score is refactor-invariant.
 
+## Milestones
+
+The arena is now phased (operator decision 2026-07-20 — "we don't have a good baseline yet"):
+
+1. **M-plumbing (DONE)** — kbench#18 + metis#36 M0/M1: the workbench generalizes onto grouped-sequence
+   regression; the leak is quantified; the notebook-submission infra is proven (persistence 15.883 live).
+   *We learned the row model is the wrong shape and the real signal is GR↔typewell correlation.*
+2. **M-real-baseline (CURRENT)** — "real modeling with geospatial awareness + geological knowledge":
+   **kbench#19** (geo-aware spatial-block CV) + **kbench#20** (GR-typewell log-correlation features,
+   DTW+markers) + **kbench#21** (neural sequence model, geo-CV validated, live submission). Goal: a
+   genuinely competitive baseline on the board (beat persistence 15.88), all kbench-local. **Go neural.**
+3. **M-workbench-drive (DEFERRED, next)** — generalize what the baseline proved back into metis: a
+   `ResampleUnit = spatial-block(buffer)` split unit, a `torch`/GPU model-kind, and the queued metis#36
+   M2→M5 channel-split (cluster-unit CV). Demand-gated: build in the workspace first, promote once it works.
+
 ## Tasks
 
-- [x] **kbench#18** — rogii workspace (grouped-sequence adapt + baseline + typewell join + leak). CLOSED 2026-07-19: submission.csv (held-out 74.4→42.1 w/ typewell); leak row 8.0 vs well 74.7.
+- [x] **kbench#18** — rogii workspace (grouped-sequence adapt + baseline + typewell join + leak). CLOSED 2026-07-19: submission.csv (held-out 74.4→42.1 w/ typewell); leak row 8.0 vs well 74.7. Live persistence 15.883 (M-plumbing).
+- [ ] **kbench#19** — geo-aware spatial-block CV (buffered; wells ~470 ft apart leak). *M-real-baseline; the honest-validation foundation.*
+- [ ] **kbench#20** — GR-typewell log-correlation features (DTW/cross-correlation implied-TVT + markers). *M-real-baseline; the competition signal.*
+- [ ] **kbench#21** — neural sequence model + live submission (deps #19,#20; go-neural). *M-real-baseline; beat persistence 15.88.*
 - [x] **metis#36 M0** — regression support (model kind + RMSE scorer + regression predict/complexity). DONE (+M1 predict-step regression branch, commit 58a51e9).
 - [x] **metis#36 M1** — rogii hits the wall: naive row-CV demonstrably leaks. DONE via kbench#18's out-of-engine well-holdout (`leak_demo.py`): row-CV 8.0 vs well-CV 74.7 = 9.35×.
 - [ ] **metis#36 M2** — channel split core + prospective anchor (reproduce titanic/s6e7 seal number).
@@ -123,3 +145,18 @@ is *expected* to diverge (metis#42 quantified it); the shipped **public** score 
      correlation, not row-wise geometry. The real signal (leaders ~4.86) is the GR-log correlation (demand-gated).
   - **Infra reusable:** self-contained read-test → predict → `/kaggle/working/submission.csv`, kernels-only,
     internet-off. Swap the predictor to submit any model (the ML port would score ~worse than persistence here).
+
+### 2026-07-20 — M-plumbing wrapped; M-real-baseline framed + filed (fresh-context handoff)
+- Domain nailed down (geosteering: GR log correlation to the typewell recovers TVT; target is a human
+  interpretation → mimic the convention). Code Requirements confirmed: notebooks-only, ≤9h, internet OFF,
+  **pre-trained models allowed** (→ train offline, upload weights as a dataset, infer in-notebook — the
+  sweeper stays offline; no metis-into-notebook port). Field geometry: 773 wells, ~34×24 mi, median
+  nearest-neighbor **~470 ft** (neighbors leak → need buffered spatial-block CV).
+- **Arena phased into 3 milestones** (see Milestones). **M-real-baseline** filed as kbench#19 (geo-CV) +
+  #20 (DTW/correlation features) + #21 (neural seq model + live submission). Operator: **go neural this
+  time**; keep torch kbench-local; **workbench-drive (metis generalization) DEFERRED to the next milestone**
+  — "we don't have a good baseline yet."
+- **Handoff:** continuation written for a fresh session to start M-real-baseline (kbench#19 first — the
+  honest-validation foundation). NOTE: kbench#18 is codecomplete but UNMERGED (8 commits ahead of main on
+  branch `000018-…`); #19/#20/#21 issue files ride that branch. First step in the fresh session: publish
+  #18 → main (needs a push), then branch #19 off clean main.
