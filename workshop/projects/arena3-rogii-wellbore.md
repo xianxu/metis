@@ -76,3 +76,22 @@ is *expected* to diverge (metis#42 quantified it); the shipped **public** score 
   (metis#26 closed subsumed-by-#27 earlier this session; metis-v2 project archived brain→metis). Rules
   accepted (download unblocked). metis#36 plan v2 written + fresh-eyes-reviewed (3 critical + 4 important
   folded in). Next: file the kbench rogii-workspace issue, then metis#36 M0 (regression support).
+
+### 2026-07-19 — kbench#18 M1a baseline BUILT (honest flow → submission.csv); leaderboard post blocked (kernels-only)
+- **metis#36 M0** (regression support) confirmed DONE earlier; **metis#36 M1** advanced: `predict.py` regression
+  branch fixed on the #36 branch (`58a51e9`) — predict step no longer crashes on a regressor's missing
+  `predict_proba`. (The row-CV-leak demonstration + cluster-unit CV remain M1/M3.)
+- **kbench#18 M1a DONE:** grouped-sequence `adapt` (dir of 773 well-pairs → Dataset; well-id from filename;
+  toe mask; train/test disjoint) + `rogii/submission` + `rogii-baseline.md`. `metis run` → valid
+  `submission.csv` (14,151 rows == sample_submission). **Baseline held-out RMSE ≈ 74.4** (offline, genuine —
+  the 3 test wells excluded from training but their TVT is in train/).
+- **Generalization proof (partial):** the workbench GENERALIZED onto grouped-sequence regression — the honest
+  flow ran end-to-end on a genuinely new regime (directory ingestion, regression, toe extrapolation). The
+  arena2 thesis's next turn holds at the plumbing level.
+- **Finding for the pull-list:** the naive row-model (RMSE 74) is far worse than trivial persistence (RMSE 10),
+  which is worse than the leaders (RMSE 4.86). The sequence-continuity structure the row-model ignores is the
+  real signal — this is the concrete demand for sequence-aware features (M1b typewell join) and the row-CV
+  leak (M1b) → cluster-unit CV (metis#36 M3).
+- **BLOCKER:** `is_kernels_submissions_only=True` — a live leaderboard number needs a Kaggle *notebook*
+  submission (CSV API → 403). done_when's "live submission" is pending an operator decision on the notebook path;
+  the offline held-out estimate is the honest stand-in. kbench#18 M1b (typewell + leak) is next regardless.
