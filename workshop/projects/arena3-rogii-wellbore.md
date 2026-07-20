@@ -106,5 +106,12 @@ is *expected* to diverge (metis#42 quantified it); the shipped **public** score 
 - **Generalization proof:** the honest ladder geometry 74.4 → +typewell 42.1 → persistence ~10 →
   leaders ~4.86 — the workbench generalized onto grouped-sequence regression AND the domain join helped.
 - **Next (metis#36):** M2 channel core + prospective anchor → M3 cluster-unit CV (rogii's leak closes
-  under well-CV) → M4 delete the seal → M5 acceptance. The live leaderboard number remains kernels-only
-  (operator decision on the notebook path).
+  under well-CV) → M4 delete the seal → M5 acceptance.
+- **Live submission TEED UP, blocked on operator identity-verification.** Built the notebook-passthrough
+  path (kernels-only): dataset `xianxu/rogii-baseline-submission` + kernel `xianxu/rogii-baseline-passthrough`
+  (ran COMPLETE → correct submission.csv). The submit itself 403s with **`IdentityVerificationRequired`**
+  (kaggle.com/settings — a phone-verify, account-level, only the operator can clear) — this was the REAL
+  cause of ALL the earlier submit 403s, not the kernels-only mechanism I first inferred (read-the-body
+  lesson). Once verified: `kaggle competitions submit -c rogii-wellbore-geology-prediction -k
+  xianxu/rogii-baseline-passthrough -v 1 -f submission.csv -m "..."` (or one click in the kernel UI).
+  Then the honest-tracks-leaderboard check (offline held-out ~42 RMSE) closes on its own.
