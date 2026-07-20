@@ -2,7 +2,7 @@
 
 import numpy as np
 import pytest
-from sklearn.datasets import make_classification
+from sklearn.datasets import make_classification, make_regression
 
 from metis.model import (apply_offsets, complexity, cv_score, fold_fit, fold_score, make_model,
                          parse_decide, parse_model_config, predict, predict_proba,
@@ -554,3 +554,104 @@ def test_catboost_as_ensemble_member():
     cb_fit, rf_fit = m.estimators_
     assert complexity(m, "ensemble") == complexity(cb_fit, "catboost") + complexity(rf_fit, "rf")
     assert predict(m, X).shape == (len(y),)
+
+
+# --- metis#36 M0: regression support (rogii-wellbore is RMSE regression) ---
+
+
+def _regression(n=150, seed=0):
+    """A continuous-target frame (make_regression) — the regression analogue of _separable."""
+    X, y = make_regression(n_samples=n, n_features=5, n_informative=4, noise=10.0,
+                           random_state=seed)
+    return X, y
+
+
+def test_is_regression_classifies_kinds():
+    """is_regression discriminates the regressor kinds from the classifier kinds (the branch
+    predict/complexity/fold_fit use to route)."""
+    from metis.model import is_regression
+
+    for k in ("rf_reg", "hist_gbm_reg", "ridge"):
+        assert is_regression(k)
+    for k in ("logreg", "rf", "hist_gbm", "ensemble", "catboost"):
+        assert not is_regression(k)
+
+
+@pytest.mark.parametrize("kind", ["rf_reg", "hist_gbm_reg", "ridge"])
+def test_regression_train_predict_continuous(kind):
+    """A regressor's predict is CONTINUOUS (float), 1-D, and tracks the target — NOT restricted
+    to a label set (predict branches on classes_, which a regressor lacks)."""
+    X, y = _regression()
+    m = train(X, y, kind, seed=42)
+    preds = predict(m, X)
+    assert preds.shape == (len(y),)
+    assert preds.dtype.kind == "f"                       # continuous, not integer labels
+    assert np.corrcoef(preds, y)[0, 1] > 0.5             # a real regressor, not a constant
+
+
+@pytest.mark.parametrize("kind", ["rf_reg", "hist_gbm_reg", "ridge"])
+def test_regression_deterministic(kind):
+    X, y = _regression()
+    assert np.array_equal(predict(train(X, y, kind, seed=7), X),
+                          predict(train(X, y, kind, seed=7), X))
+
+
+def test_regression_make_model_hyperparams():
+    rf = make_model("rf_reg", seed=0, params={"n_estimators": 7, "max_depth": 2})
+    assert rf.n_estimators == 7 and rf.max_depth == 2
+    gbm = make_model("hist_gbm_reg", seed=0,
+                     params={"learning_rate": 0.05, "max_iter": 7, "max_leaf_nodes": 15})
+    assert gbm.learning_rate == 0.05 and gbm.max_iter == 7 and gbm.max_leaf_nodes == 15
+    assert make_model("ridge", seed=0, params={"alpha": 0.5}).alpha == 0.5
+    assert make_model("rf_reg", seed=0).n_estimators == 100          # default holds
+    # seed passthrough is kind-agnostic (metis#65 path) — works for regressors too.
+    assert make_model("rf_reg", seed=3, params={"seed": 9}).random_state == 9
+
+
+def test_rmse_scorer_value_and_perfect():
+    y_true = np.array([1.0, 2.0, 3.0, 4.0])
+    y_pred = np.array([1.0, 2.0, 3.0, 6.0])              # one error of 2 → RMSE = sqrt(4/4) = 1
+    assert resolve_scorer("rmse")(y_true, y_pred) == pytest.approx(1.0)
+    assert resolve_scorer("rmse")(y_true, y_true) == pytest.approx(0.0)
+
+
+def test_regression_complexity_mirrors_classifier_measures():
+    """rf_reg → mean leaves/tree (like rf); hist_gbm_reg → total leaves (like hist_gbm);
+    ridge → coef count (like logreg). The realized-capacity measure is task-agnostic."""
+    X, y = _regression()
+    rf = train(X, y, "rf_reg", seed=42, params={"n_estimators": 10, "max_depth": 4})
+    assert complexity(rf, "rf_reg") == float(np.mean([t.tree_.n_leaves for t in rf.estimators_]))
+    gbm = train(X, y, "hist_gbm_reg", seed=42, params={"max_iter": 20, "max_leaf_nodes": 8})
+    assert complexity(gbm, "hist_gbm_reg") == float(
+        sum(t.get_n_leaf_nodes() for stage in gbm._predictors for t in stage))
+    ridge = train(X, y, "ridge", seed=42)
+    assert complexity(ridge, "ridge") == float(ridge.coef_.size)
+    assert complexity(ridge, "ridge") == 5.0            # _regression has 5 features
+
+
+def test_regression_fold_score_rmse_threads_and_is_mean():
+    """The nested-CV path (fold_score → fold_fit → predict) works for a regressor under
+    metric='rmse' (unstratified folds), and cv_score is exactly the mean of fold RMSEs."""
+    import pandas as pd
+
+    X, y = _regression(n=150, seed=1)
+    folds = cv_folds(pd.DataFrame(X), k=5, seed=3)       # unstratified (continuous target)
+    s0 = fold_score(X, y, folds, 0, "rf_reg", seed=3, metric="rmse")
+    assert s0 >= 0.0
+    assert fold_score(X, y, folds, 0, "rf_reg", seed=3, metric="rmse") == s0   # deterministic
+    per_fold = [fold_score(X, y, folds, f, "ridge", seed=3, metric="rmse")
+                for f in sorted(set(folds))]
+    assert cv_score(X, y, folds, "ridge", seed=3, metric="rmse") == pytest.approx(
+        float(np.mean(per_fold)))
+
+
+def test_decide_offsets_rejected_for_regressor():
+    """The decision layer (probabilities + offsets) is classification-only — a regressor has no
+    predict_proba, so decide=offsets on a regressor must fail LOUDLY, not silently."""
+    import pandas as pd
+
+    X, y = _regression(n=100, seed=0)
+    folds = cv_folds(pd.DataFrame(X), k=2, seed=0)
+    with pytest.raises(ValueError, match="classification-only"):
+        fold_fit(X, y, folds, 0, "rf_reg", 0, metric="rmse",
+                 decide={"offsets": {"holdout": 0.2}})

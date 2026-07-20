@@ -77,8 +77,8 @@ Durable plan: `workshop/plans/000036-channel-split-y-channel-plan.md` (v2 — fr
 `sdlc milestone-close` boundary):
 
 - [x] Design — brainstorm (pensive) → plan v2 → fresh-eyes review → operator decisions. DONE.
-- [ ] **M0** — regression support (metis is classification-only; rogii is RMSE).
-- [ ] **M1** — rogii hits the wall (row-CV demonstrably leaks; kbench#18 drives).
+- [x] **M0** — regression support (metis is classification-only; rogii is RMSE). **DONE — SHIP.** *Close-review effective window = the M0 model-core surface (metis/model.py + tests), NOT the ~30-issue diff the tooling presented (BASE sits far behind HEAD; those closed at their own boundaries). Forward notes for M1: fold_score default metric="accuracy" fails cryptically for a regressor w/o metric= → M1 pairs kind↔metric + sets objective.direction: minimize; train.py ship-refit decide=offsets lacks the is_regression guard fold_fit has.*
+- [ ] **M1** [external: kbench#18] — rogii hits the wall (row-CV demonstrably leaks). *Closes on kbench#18, not #36.*
 - [ ] **M2** — channel split core + prospective anchor (reproduce titanic/s6e7 seal number).
 - [ ] **M3** — cluster-unit CV (`cluster: WELLNAME`).
 - [ ] **M4** — delete the seal (analysis_i cloning, sealed branch); O(k·N)→O(1).
@@ -119,6 +119,8 @@ M0/M2/M3/M4/M5 boundaries (M1 is kbench#18).
 
 ## Log
 
+
+- 2026-07-19: closed M0 — M0 regression support: 12 new unit tests green (rf_reg/hist_gbm_reg/ridge kinds, rmse scorer, is_regression, predict/complexity regression branches, decide=offsets guard); full test_model.py 57 pass, no regression in the existing 45 classification tests; train-step fold path verified regression-clean; vocabulary needs no change (open metric/model); atlas updated. Full-engine regression run deferred to M1 (needs rogii continuous-target Dataset). ACTUAL=N/A: interleaved-session contamination — this session interleaved #26 close + #36 multi-milestone design + metis-v2 migration across many issues; active-time cannot cleanly attribute an M0 increment (per lessons: N/A over a laundered number).; review verdict: SHIP
 ### 2026-07-14
 - Filed as stage B of the three-stage plan agreed with operator (A = metis#35 one-road fix on the
   current seal, closes metis-v2; B = this, the structural redesign; C = metis#37 constructor
