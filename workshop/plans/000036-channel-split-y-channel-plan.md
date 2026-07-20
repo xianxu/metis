@@ -147,14 +147,13 @@ Each `Mx` is an `sdlc milestone-close` boundary. Bite-sized TDD steps are fleshe
 
 ---
 
-## Open Questions / decisions for operator review
+## Decisions (resolved 2026-07-19, operator)
 
-1. **C1 guarantee tradeoff (confirm)** — I chose **O(1) storage + a repurposed chokepoint + the honest "API-enforced, direct-read-refused" framing** over per-fold restricted-y writes (O(k), true physical absence), because O(k·N)→O(1) is a stated goal. Given your structural-guarantee sensibilities (threat-model thinking), confirm you're comfortable with "held bytes on disk but unreachable except via the loader" vs. demanding physical absence.
-2. **arena3 project file** — recommend `metis/workshop/projects/arena3-rogii-wellbore.md` (center-of-gravity metis; spans metis#36 + kbench rogii issues), created before M1. metis or kbench placement?
-3. **kbench rogii-workspace issues** — M1 needs kbench issues for the 773-pair `get-data` + grouped-sequence `adapt`. One "rogii workspace" issue, or per-step-type?
-4. **#37 boundary (confirm)** — #36 excludes the R-scope constructor algebra (scope signatures / aggregate classes / derived placement); #36 = y-channel + label-scope + cluster unit; #37 = the feature-scope algebra on top.
-5. **`pkg/channel` package** — new `pkg/channel` for `DomainRestriction`/`ResampleUnit`/`Estimand` (my lean — distinct concept, single responsibility) vs extending `pkg/record`/`pkg/experiment`.
-6. **rogii toe-masking** — a second within-cluster restriction axis, or a rogii-specific `adapt`/feature detail? (Lean: rogii-specific for M1; generalize only on a second competition's demand — demand-gated.)
+1. **C1 guarantee** → **O(1) storage + repurposed chokepoint + the "API-enforced, direct-read-refused" framing** (over O(k) physical-absence). Held bytes live once in the runner-owned location; unreachable except via `ctx.y()`; the e2e proves a direct read fails. Keeps the O(k·N)→O(1) win.
+2. **arena3 project** → create `metis/workshop/projects/arena3-rogii-wellbore.md` (center-of-gravity metis; spans metis#36 + kbench) + **ONE** kbench "rogii workspace" issue (get-data + grouped-sequence adapt + baseline), not per-step-type.
+3. **#37 boundary** → #36 **excludes** the R-scope constructor algebra (scope signatures / aggregate classes / derived placement). #36 = y-channel + label-scope (S) + cluster unit + estimand knob; #37 = the feature-scope (R) algebra on top.
+4. **`pkg/channel`** → yes, a new package for `DomainRestriction`/`ResampleUnit`/`Estimand` (distinct concept, single responsibility — ARCH-PURE).
+5. **rogii toe-masking** → a rogii-specific `adapt`/feature detail for M1 (demand-gated); generalize to a within-cluster restriction axis only on a second competition's demand.
 
 ---
 
