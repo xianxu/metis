@@ -154,10 +154,11 @@ nothing and fights the freedom to jot. A probe is reproducible when three invari
 1. **Deterministic** — pin every seed; read only pinned inputs; no wall-clock / unseeded randomness. Same code +
    same data → same trace.
 2. **Self-contained invocation** — the exact run command (all args, copy-paste) lives in the probe's docstring.
-3. **Trace committed WITH the code, atomically** — the `.py`, its same-basename `.log` trace, AND the `arrows.md`
-   row it settles land in **one commit**. That commit *is* the pin: `git blame` on any `arrows.md` source-cell
-   resolves to the exact commit holding the exact code + trace that produced the number. So the `source` cell
-   names a **PATH** (`probes/<name>.py`), never a sha — git supplies the version; inline shas are churn.
+3. **The verification commit** — the `.py`, its same-basename `.log` trace, AND the `arrows.md` row it settles
+   land in **one atomic commit** (code + log + ledger-update, always together). That commit *is* the pin: `git
+   blame` on any `arrows.md` source-cell resolves to the exact commit holding the exact code + trace that produced
+   the number. So the `source` cell names a **PATH** (`probes/<name>.py`), never a sha — git supplies the version;
+   inline shas are churn.
 
 **Bar: reproducible CONCLUSIONS, not bit-identical bytes.** A re-run giving 9.962 vs 9.960 still confirms the
 finding — chase same-conclusion-on-re-run, not bit-determinism (that's CAS's job, overkill here).
