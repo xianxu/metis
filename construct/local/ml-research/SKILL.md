@@ -145,6 +145,31 @@ Status ∈ `{open, active, deprioritized, dead, win}`. Each detail section carri
 
 ---
 
+## Reproducible probes (the inner-loop reproducibility model)
+
+Exploratory runs are **cheap and one-shot**, so reproduce them by **RE-EXECUTION, not caching** — CAS /
+content-addressing is for the expensive, *repeated* outer loop (metis sweeps); caching a 5-second one-shot buys
+nothing and fights the freedom to jot. A probe is reproducible when three invariants hold:
+
+1. **Deterministic** — pin every seed; read only pinned inputs; no wall-clock / unseeded randomness. Same code +
+   same data → same trace.
+2. **Self-contained invocation** — the exact run command (all args, copy-paste) lives in the probe's docstring.
+3. **Trace committed WITH the code, atomically** — the `.py`, its same-basename `.log` trace, AND the `arrows.md`
+   row it settles land in **one commit**. That commit *is* the pin: `git blame` on any `arrows.md` source-cell
+   resolves to the exact commit holding the exact code + trace that produced the number. So the `source` cell
+   names a **PATH** (`probes/<name>.py`), never a sha — git supplies the version; inline shas are churn.
+
+**Bar: reproducible CONCLUSIONS, not bit-identical bytes.** A re-run giving 9.962 vs 9.960 still confirms the
+finding — chase same-conclusion-on-re-run, not bit-determinism (that's CAS's job, overkill here).
+
+**Reify before you claim.** Jot scratchpad python freely to *look*; a number becomes a ledger fact only when its
+probe is committed (else it carries `†`). Scratchpad = looking; committed probe = claiming — the ledger is the
+boundary between exploration and record.
+
+**Pin the inputs once** (the one CAS idea worth importing): a workspace-level data-provenance file (source + a
+content checksum), so re-runs verify the same inputs — not per-run. If the inputs change, every `MEASURED` number
+reverts to `†`.
+
 ## Gate the zoo (why this SERVES modeling, not replaces it)
 
 A net is **a refiner of a proposal, not a diviner of absent signal.** An agent facing a bad number reaches for
