@@ -135,6 +135,11 @@ Status ∈ `{open, active, deprioritized, dead, win}`. Each detail section carri
 - **provenance** — every number tagged `ACHIEVED` (LB-confirmed) / `MEASURED` (our CV) / `ORACLE` (ceiling) /
   `CLAIMED` (external, unreproduced). **Strategy may build only on ACHIEVED/MEASURED.** (A `CLAIMED` 5.99 treated
   as `MEASURED` shaped a whole thread falsely.)
+- **source rule** — every number carries its tag **AND a source** (trace path / commit sha / LB-submission id;
+  carried numbers use `old-run`). A number quoted with **no source** gets a trailing **`†`** = *unsourced,
+  revalidate*; **`grep '†'`** is the standing revalidation debt. Reproducing it (with a trace) drops the `†` and
+  adds the link. `†` is only for "no source anywhere" — `CLAIMED`/`old-run` mean "sourced, not by us." (Future
+  `metisser arrows lint`: assert no number without a source or a `†`.)
 - **topline-Δ** — how this arrow moved the headline. Headline results become **prefix-searchable anchors**
   (`~12` → grep `12\.`).
 
