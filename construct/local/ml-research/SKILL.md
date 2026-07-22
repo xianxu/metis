@@ -84,9 +84,23 @@ the zoo** (see below) — do not reach for architecture/tuning knobs before an a
 - **Leak assertion** — scramble the forbidden labels; prediction must not move.
 
 ### 5 · Honest CV — the verdict
-Paired vs baseline, under the **honest CV structure** (grouped/spatial/whole-unit holdout — mimic the real test
-regime; a naive random split leaks). As-measured, no laundering. **This is the number that counts.** metis
-already owns much of this — extend it, don't rebuild.
+Paired vs baseline, under the **honest CV structure**, as-measured, no laundering. **This is the number that
+counts.** metis already owns much of this — extend it, don't rebuild.
+
+**Design the CV to mimic the test regime — the checklist** (what "honest" means, generalized; simple k-fold is
+only the trivial case):
+- **Holdout UNIT = the test unit.** Hold out whatever the hidden test holds out — a whole group / cluster /
+  region, never a row finer than it. A split finer than the test unit leaks (rogii: the *whole well*, not the
+  row — adjacent ~1-ft rows are near-identical).
+- **Reproduce the distribution SHIFT.** If the test is unseen wells / an unseen region / a future period, the
+  fold split must impose the same shift (rogii: *spatial-block* for unseen region — even whole-well CV is
+  optimistic because neighbour wells drill the same rock).
+- **Mask what the test masks.** Whatever is absent/`NaN` at test, blank it in the CV folds too (rogii: the toe
+  `TVT_input`).
+- **Assert no leak channel crosses the fold** — target-derived features, group-shared statistics, neighbour
+  rows. Use the invariance check (Principle #1): scramble a forbidden signal → the fold score must not move.
+- **Report the LADDER, not one number** — the leaky estimate AND the honest one, so the optimism you removed is
+  visible (rogii: row ≪ well ≪ spatial-block). Trust the rung that matches the test regime.
 
 ### 6 · Adjudicate + record — the impostor ladder before "dead"
 A hypothesis cannot be filed **`dead`** until it survives, in order:
