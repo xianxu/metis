@@ -42,6 +42,15 @@ and you can almost always afford *two*. The six families:
 it NOT depend on? · what exact identity relates its I/O? · what case do I know the answer to? · which knob moves
 it predictably?* You won't get all six cheaply; get **two**.
 
+## Principle #1b — check a load-bearing premise before you build on it
+
+A *number* needs a second measurement (#1); a *premise* needs a check. Before building on a load-bearing
+observation — "the model uses X", "signal Y is present", "the interpolator is tapped out" — verify it with the
+**cheapest possible probe** (a `grep`, a one-liner, a schema peek). A false premise wastes a whole thread, and it
+hides *inside* plausible work: the `geo_surface` bug (TVT+Z assumed a shared surface — one `std(a)` check away),
+the 5.99 phantom (a CLAIMED number treated as MEASURED), "the geometry model uses the typewell" (one `grep`
+away). The check costs seconds; the thread it saves costs hours.
+
 ---
 
 ## The loop
@@ -55,6 +64,8 @@ it predictably?* You won't get all six cheaply; get **two**.
 What IS this problem? (geosteering; health-risk factors.) What data exists **train vs test** — and critically
 **what is train-only** (rogii: markers, typewell, heel labels)? The metric, and the eval regime (extrapolation?
 grouped? held-out region?). Keep it concise — it orients everything. Train-only info is where oracles live (§2).
+**Define the domain vocabulary here** — a short glossary of the named parts of the data / trajectory / task — so
+every later doc, arrow, and probe refers to them precisely; imprecise naming is a slow leak that compounds.
 
 ### 1 · Framing + baseline (`framing.md` §framing)
 Model **input** (encodings mostly known) and — the interesting part — **output shape**: autoregressive vs
