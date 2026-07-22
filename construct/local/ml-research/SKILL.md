@@ -42,6 +42,13 @@ and you can almost always afford *two*. The six families:
 it NOT depend on? · what exact identity relates its I/O? · what case do I know the answer to? · which knob moves
 it predictably?* You won't get all six cheaply; get **two**.
 
+**A dose–response worth running before ANY flexible aligner/sequential model: the DOF ladder.** Sweep the
+*match freedom* itself (rigid 1-param → +1 DOF → …) on an oracle-anchored probe and watch signal-margin vs
+false-optimum rate. If adding the first DOF already narrows the margin (alias optima grow faster than the error
+mode it absorbs), a full elastic/path-search model extrapolates worse — kill the family before building it
+(rogii: rigid 0.482 → +tilt 0.437 with placement blowing up 1.24→15.0; the whole matching paradigm died in one
+probe chain, no aligner ever built).
+
 ## Principle #1b — check a load-bearing premise before you build on it
 
 A *number* needs a second measurement (#1); a *premise* needs a check. Before building on a load-bearing
