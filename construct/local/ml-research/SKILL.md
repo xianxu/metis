@@ -1,13 +1,6 @@
 ---
 name: ml-research
-description: >-
-  Use when running an exploratory ML research investigation — a Kaggle competition, or any modeling problem
-  whose only feedback is a soft metric (RMSE/AUC/...) rather than compile/test. This is the workflow that
-  MANUFACTURES a hard, local grounding signal where the domain gives only a soft, global one — so you can tell a
-  real dead-end from a bug / tuning / framing failure, keep a rigorous hypothesis ledger, and (equally the point)
-  extract reusable mechanisms into metis. Prose-first; the `metisser` binary is NOT built yet — follow this by
-  hand. Triggers: "let's work the competition", "why can't we beat the baseline", "is this signal real",
-  "should we mark this dead", "rebuild rogii", starting or resuming any modeling investigation.
+description: "Use when running an exploratory ML research investigation — a Kaggle competition or any modeling problem whose only feedback is a soft metric (RMSE/AUC), not compile/test. The workflow that manufactures a hard, local grounding signal from soft-global feedback: tell a real dead-end from a bug/tuning/framing failure, keep a rigorous hypothesis (arrows) ledger, and extract reusable mechanisms into metis/metisser. Prose-first (the metisser binary is not built yet). Triggers: work the competition, why can't we beat the baseline, is this signal real, should we mark this end dead, rebuild rogii, starting or resuming a modeling investigation."
 version: 0.1-prose
 status: forming
 ---

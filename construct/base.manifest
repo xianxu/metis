@@ -16,3 +16,11 @@
 
 # ── Constitution ──────────────────────────────────────────────────────────────
 internal  prose AGENTS.local.md
+
+# ── Skills ────────────────────────────────────────────────────────────────────
+# metis authors its own ML-workbench skills under construct/local — weave scans
+# each <name>/SKILL.md and lowers them to per-harness symlinks (.claude/skills for
+# Claude, .agents/skills for Codex/Gemini). Bare (not `internal`) = EXPORT: they
+# flow down the layer walk to kaggle + kbench, so rogii-v2 inherits `ml-research`.
+# First skill: ml-research (the ml-research-workflow project's A1).
+skill     construct/local
