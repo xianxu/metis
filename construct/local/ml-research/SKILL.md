@@ -182,6 +182,20 @@ boundary between exploration and record.
 content checksum), so re-runs verify the same inputs — not per-run. If the inputs change, every `MEASURED` number
 reverts to `†`.
 
+## Session continuity (research spans many sessions)
+
+**No continuation file — the workspace + git ARE the handoff**, via one convention (a research investigation is
+long-lived; a separate continuation doc just drifts from the artifacts you're already maintaining):
+
+- **Entry points, in order:** `README` (the map + this protocol) → `framing.md` (the problem) → `arrows.md`
+  (state + a `## The open frontier` section = live thread + **NEXT ACTIONS**) → `git log` (what happened).
+- **Next-steps live in the arrows frontier** — live, editable, single-source. **NOT in commit messages**: a commit
+  is immutable, so a "next step" written into it goes stale the moment it's done. The **commit records what
+  happened** (the verification commit = code + trace + ledger-row, atomic); the **frontier holds what's next**.
+- **Before a session boundary, reify the live thread into the ledger** (the frontier section / arrow notes / open
+  questions) — nothing durable-worthy lives only in chat. Then there is nothing left for a continuation to add.
+- The **user model** is the durable skill disciplines + memory, not a per-session snapshot.
+
 ## Gate the zoo (why this SERVES modeling, not replaces it)
 
 A net is **a refiner of a proposal, not a diviner of absent signal.** An agent facing a bad number reaches for
