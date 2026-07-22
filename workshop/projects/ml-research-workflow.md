@@ -3,7 +3,7 @@ type: project
 name: ml-research-workflow
 goal: "Build the ML-research workflow — a followed SKILL (the workflow contract) + supporting datatypes (framing, arrows-ledger) + metis discipline tools (oracle/arrow-test harness, plausibility checks, training sanity gates, provenance/anchors) — that MANUFACTURES hard-local grounding signals for exploratory ML research, where the domain gives only soft-global feedback (a bad number whose cause — bug / tuning / framing / real-negative — is unknowable from the number alone). Validate it by REBUILDING rogii rigorously under the workflow, building each component when the rebuild pulls it out (demand-driven, per the metis charter). The reset premise: rogii's many dead-ends may have been mis-marked (implementation/tuning vs a proven real-negative) for lack of rigor — the workflow exists to tell those apart and to SURFACE, not hide, the modeling gaps a real leaderboard beat requires (we know a beat is doable from the LB + forum)."
 done_when: "The `ml-research` skill exists as a followed prose contract; rogii is rebuilt through it end-to-end with an arrows-ledger carrying, per hypothesis, {oracle-ceiling, honest-vs-baseline (dual-measured), mechanism, belief-weighted held-fixed WITH links, revisit-trigger, provenance, top-line contribution}; EVERY 'dead' verdict has passed the impostor-ladder (fit → oracle → dual-measure → held-fixed); and the components the rebuild demanded are built in metis (not speculatively). Success is NOT a specific LB number — it is (a) a rigorous, re-runnable map separating proven-dead from under-explored, (b) ≥1 previously-'dead' end reopened or confirmed-under-rigor, (c) the reusable skill + datatypes + tools, earned on the real case."
-status: proposed
+status: executing
 operator: xianxu
 created: 2026-07-22
 updated: 2026-07-22
@@ -167,6 +167,16 @@ which crystallized the thesis: the scarce resource is **epistemic grounding unde
 model-construction sophistication. The rogii investigation (kbench#24 `## Log`) is a ready-made, fully-populated
 worked example for the arrows-ledger. Next: draft the `ml-research-skill` (A1) as prose, then start the rogii
 rebuild (A2) and pull components out on demand.
+
+**A1 DONE** (2026-07-22): `ml-research` skill authored at `metis/construct/local/ml-research/SKILL.md`,
+declared in `construct/base.manifest` (`skill construct/local`, exported), weave-compiled → discoverable as
+`metis-ml-research` in metis AND kbench (the export flows down the layer walk). Prose-only, no `metisser` yet.
+**A2 STARTED** (2026-07-22): fresh `kbench/competition/rogii-v2/` workspace under the skill — README + `framing.md`
+(charter + I/O + baseline) + `arrows.md` (ledger seeded with 12 arrows from the frozen old run, mechanisms +
+revisit-triggers). Old rogii-wellbore frozen as reference; data symlinked. Bar to beat: **12.452**. Next (A2
+cont.): re-establish the baseline + geometry win from the clean charter (Stage 1), confirming each number by a
+second measurement; then the open frontier (GR feature-anchors, residual-to-geometry net). Pull metis components
+(A3–A9) out as the rebuild demands them.
 
 Execution decisions (operator, 2026-07-22): (1) **rogii-v2 = a fresh kbench workspace**, old rogii frozen as
 reference; (2) the skill lives in **metis**; (3) the eventual binary is **`metisser`** (lifecycle/workflow
