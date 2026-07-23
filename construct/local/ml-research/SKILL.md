@@ -317,9 +317,9 @@ never jumped.
 
 Everything here is **prose you follow by hand.** Nothing is enforced by a binary yet — deliberately (fast
 iteration on the process itself). As steps prove themselves, they earn `metisser` subcommands — the metis
-analog of ariadne's `sdlc`. Current lint candidates, each earned by a real audited failure: `†`-scan (unsourced
-numbers) · orphan findings (cited by nothing, changed nothing) · stale framing (a form-changing finding newer
-than the last framing revision) · open-never-run arrows (N sessions old) · dead-verdict-with-unswept-held-fixed
-knob. **Do not build `metisser` before the prose shape settles.** Companion artifacts: `framing.md` (§charter +
+analog of ariadne's `sdlc`. **The earned-subcommand backlog is a living issue: metis#68**
+(`workshop/issues/000068-metisser-earned-subcommand-backlog.md`) — lint scans, ledger verbs, probe discipline,
+evaluation machinery, session ritual, each entry citing the failure that earned it. Append there as
+investigations surface new candidates. **Do not build `metisser` before the prose shape settles.** Companion artifacts: `framing.md` (§charter +
 §framing), `arrows.md` (the ledger), `lessons.md` (per-experiment). Project:
 `metis/workshop/projects/ml-research-workflow.md`.
