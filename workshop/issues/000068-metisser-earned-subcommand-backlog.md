@@ -47,6 +47,14 @@ Candidates, grouped; ordering within groups ≈ earned-strength (each cites what
 - [ ] **index/detail consistency** — every `a-*` index row has a `### a-*` detail section and vice versa;
       status values from the enum.
 
+- [ ] **verdict lineage / staleness propagation** — every verdict's held-fixed list is a dependency edge;
+      when a component is revised (a new emission functional, a new dictionary, a data re-pin), enumerate all
+      verdicts that cite it and mark them STALE-FOR-RETEST, emitting the retest cascade in dependency order.
+      (Earned: the 2026-07-23 layercake event — a-toe-tracker/a-tracker-uncovered/a-gr-validator/a-window-align
+      all held-fixed on the corr functional; the cascade was armed by hand via revisit-triggers and executed
+      manually. Operator: "find all lineage of what decisions we made based on it — an important function for
+      a research workbench.")
+
 ### 2. Ledger mechanics (`metisser arrows`) — the projection/query surface
 
 - [ ] **query verbs** — `open` / `verdicts` / `csv` projections (today: awk one-liners documented in the
