@@ -129,6 +129,18 @@ trying four proxies, while a direct measurement (the model's own residual on lab
 sat unexamined, is the canonical audit failure. Ask first: *what does the test-time data let me measure
 outright?*
 
+**Corollary — measure the target's noise floor before (or alongside) hunting predictors.** A target that
+resists every predictor has two indistinguishable explanations: **(a) it is mostly noise** — nothing could
+predict it — or **(b) it is a real, stable quantity that none of the tried instruments reaches**. They
+dictate OPPOSITE next moves (close the target vs build a new instrument), and no amount of predictor search
+distinguishes them. Measure which, directly: estimate the target's **reliability** — split-half /
+repeated-measurement agreement (two estimates of the per-unit quantity from DISJOINT data; their correlation
+is the reproducible systematic share), with a dose check that the disagreement scales like noise (~1/n).
+Reliability ≈ 0 closes the target honestly; positive reliability converts every predictor failure from
+"signal absent" into "instrument didn't reach" and prices the remaining prize. (Worked example:
+rogii-v2 `f-datum-reliability` — split-half corr +0.26/+0.17 across disjoint control-well halves reopened
+a target that four failed instruments had made look like noise.)
+
 ## Principle #1c — the findings-to-framing loop
 
 **Every finding must either revise the framing or be cited by an arrow. An orphan finding is a leak.** Findings
