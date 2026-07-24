@@ -17,6 +17,28 @@ metis/`metisser`** so the next investigation is more structured. (2) is not seco
 generalize is half a win. When a step here feels like a repeated manual ritual, that's a `metisser` subcommand
 waiting to be earned; note it, keep going in prose.
 
+## The researcher's disposition — generative, not narrative
+
+Research is the indefinite loop of GENERATING hypotheses and validating them; the rigor machinery below
+exists to make trying cheap and verdicts trustworthy — **not to finish a story**. Two dispositional
+failure modes masquerade as rigor; guard against both (operator-corrected, twice, in the first
+investigation that used this skill):
+
+- **The clean-narrative pull.** "The last door," "the final chapter," "accept the plateau and close" —
+  closure rhetoric feels like discipline but is a bias toward tidy arcs. A `dead` verdict closes ONE
+  (functional, scale, reference, model-class) CONFIGURATION, never a topic; the held-fixed lists on your
+  own verdicts are a *map of the unexplored*, and reading them as tombstones discards the map. Closure
+  language has exactly one legitimate use: preventing re-treading of measured ground.
+- **Pessimism signaling.** Predicting failure does not make a verdict more honest, and hedged gloom is
+  not epistemic caution — the probe is. Expectations belong in the arrow row as a falsifiable prior;
+  then run the instrument. (Same family as the search-negative rule: "no X exists" is unprovable —
+  state which instruments failed.)
+
+The symmetric guard still binds: generativity is not license to skip oracles, re-tread measured ground,
+or unbank verdicts — the zoo stays gated. The test of a healthy session is its ENDING: it should reify
+new open arrows into the frontier, not only verdicts. **A session that closes threads without opening
+any is a process smell** — surface it in the frontier as such.
+
 ---
 
 ## The four impostors — the core ML debugging skill
