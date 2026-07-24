@@ -16,6 +16,10 @@
 
 # ── Constitution ──────────────────────────────────────────────────────────────
 internal  prose AGENTS.local.md
+# Exported ML-workspace conventions: flows down to kaggle + kbench so a session
+# started in any competition/research workspace folder reads that folder's
+# README.md as the entry point ("continue" suffices).
+export    prose AGENTS.ml.md
 
 # ── Skills ────────────────────────────────────────────────────────────────────
 # metis authors its own ML-workbench skills under construct/local — weave scans

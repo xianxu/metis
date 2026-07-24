@@ -284,6 +284,12 @@ floor before you waste interpretation on anything downstream.
   is immutable; a "next step" written into it goes stale the moment it's done).
 - **Before a session boundary, reify the live thread into the ledger** — nothing durable-worthy lives only in
   chat.
+- **Version control: single-threaded on `main` (v0).** Research runs single-threaded — verification commits
+  land directly on `main`; no feature branches by default. A research thread is already serialized through
+  the ledger, so branch-per-issue buys nothing and hides the arrow history from the frontier. Revisit only
+  when genuinely parallel model lines appear — and note that merging parallel RESEARCH lines is not a git
+  merge (weights, configs, and ledger verdicts need their own reconciliation design); until that design
+  exists, don't fork.
 
 ## Per-experiment `lessons.md`
 
