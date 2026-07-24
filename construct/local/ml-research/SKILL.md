@@ -288,6 +288,20 @@ awk -F'|' '/^\| [af]-/{gsub(/ /,"",$2);gsub(/ /,"",$4);print $2","$4}' arrows.md
 grep -n '†' arrows.md                                                             # the revalidation debt
 ```
 
+**The knobs ledger (`arrows.md` §knobs) — the assembly's parameter inventory.** Arrows accumulate
+parameters; sweeps done at construction are CONDITIONAL claims (conditioned on the co-fixed knobs and the
+assembly version at sweep time — an axis-wise optimum can move when a coupled knob or a new leg lands).
+Track them in one table per assembly: `knob · live value · class · sweep evidence (grid, shape, trace) ·
+conditioned-on (assembly@, co-fixed) · coupling notes`. Classes carry different obligations: **tuned**
+(swept; re-sweep when conditioning changes) · **measured** (derived from data — re-MEASURE, never re-tune)
+· **guard** (convenience thresholds, unswept by explicit choice — still recorded; an unrecorded cap
+becomes a verdict) · **structural** (family choices — revisit-triggers, not sweeps). Staleness is marked
+like revalidation debt: when the assembly or a coupled knob changes, dependent sweep rows get a `~` —
+**`grep '~' §knobs` is the standing re-tune backlog** (metisser lint candidate). Update the table at every
+assembly change (kernel version), not in a batch later. Joint-sweep caution: wide grids buy conditioning
+coverage at the price of selection noise — a grid-argmax micro-gain is winner's-curse-sized (see the LB
+spend bar in the canonical lessons.md); prefer regime-robust interior structure over argmax.
+
 The experiment's `arrows.md` keeps only a THIN header (frontmatter, a pointer to this skill for process, plus
 any experiment-specific policies) — the process prose lives here, single-sourced.
 
