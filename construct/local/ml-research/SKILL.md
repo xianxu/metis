@@ -136,7 +136,8 @@ What IS this problem? What data exists **train vs test** — and critically **wh
 auxiliary columns, reference logs)? The metric, and the eval regime (extrapolation? grouped? held-out region?).
 Keep it concise. Train-only info is where oracles live (§2). **Define the domain vocabulary here** — a short
 glossary of the named parts of the data/task — so every later doc, arrow, and probe refers to them precisely;
-imprecise naming is a slow leak that compounds.
+imprecise naming is a slow leak that compounds. Show operator those vocabulary to avoid miscommunication. Add
+new terms to the vocabulary as research progresses.
 
 ### 1 · Framing + baseline (`framing.md` §framing)
 Model **input** (encodings mostly known) and — the interesting part — **output shape**: autoregressive vs
