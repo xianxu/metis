@@ -311,7 +311,27 @@ the cheapest visible action — another architecture, more tuning — which vari
 hides underneath. **So gate the model zoo behind a passed arrow-test (§2 oracle).** Then a washout is
 *interpretable* ("the arrow was real but this refiner couldn't exploit it → a genuine modeling gap") instead of
 ambiguous. Baseline-first; weak before strong; **ensemble/stacking LAST** — only once ≥2 legs beat baseline AND
-clear the fusion bar `ρ < σ_strong/σ_weak`.
+clear the fusion bar `ρ < σ_strong/σ_weak` (or its conditional generalization — see combination arrows below).
+
+**Combination arrows (blends of existing legs).** A blend/ensemble is an ORDINARY arrow, not a new entry
+kind — but its anatomy differs, so it gets its own conventions:
+- **The claim is error COMPLEMENTARITY, not a new signal**: "legs X and Y have partially independent errors
+  (conditionally on regime variable r) → a convex mix `w(r)` beats the better leg / the hard handoff."
+  Name the composed legs in the hypothesis cell (`legs: a-x + a-y`); the assembly's product number still
+  lands in §anchors referencing every composing arrow.
+- **Its oracle is an error-geometry measurement**, runnable BEFORE building any mixer: the per-regime
+  head-to-head table of leg errors (where does each win, at what margin) + their error correlation. This is
+  among the cheapest probes available once the legs exist — no new signal source, pure reweighting.
+- **The global fusion bar is the special case**: a conditional mix `w(r)` can pay even when the global bar
+  fails — the weaker leg only needs regimes where it is competitive and decorrelated. The baseline itself
+  is a legitimate leg (it beats nothing globally, yet mixes profitably where the strong leg degrades).
+- **Always sweep the soft-mix family when two legs hand off via a threshold** — a hard switch/gate is the
+  degenerate corner of `w(r)`, never the default winner. (Worked example: rogii-v2 `a-soft-gate` — the
+  swept-optimal hard coverage gate lost ~0.9 blend RMSE to a distance ramp that improved every regime,
+  including the strong leg's home turf.)
+- **Ordering stays zoo-gated**: combination arrows come AFTER the composed legs are individually
+  validated (weak-models-first unchanged) — but once they are, the error-geometry oracle should be run
+  EARLY, not saved for last polish; a cheap complementarity win compounds with every later leg upgrade.
 
 **The fixed-form-first ladder for sequential/structured models**: a probabilistic filter (HMM/Kalman-style,
 ~2 free parameters, components fixed by physics/measured priors) BEFORE any learned recurrence. It works at
