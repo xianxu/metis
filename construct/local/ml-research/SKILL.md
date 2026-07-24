@@ -159,10 +159,29 @@ An **arrow** is an idea to extract signal: a falsifiable A→B link. **Before bu
 Build the **simplest** predictor on **validated arrows**. Beat the baseline. Weak models before strong. **Gate
 the zoo** (below) — no architecture/tuning knobs before an arrow is oracle-validated.
 
-### 4 · Train — sanity gates that fail loudly
-- **Monitor the loss** — converging? (Long runs: incremental progress reports, always.)
-- **Overfit experiment** — can it fit in-sample? (Degenerate check: rules out broken-pipeline/can't-express.)
+### 4 · Train — sanity gates + the ML-infra discipline
+Sanity gates (fail loudly):
+- **Monitor the learning curve** — per-epoch (or per-N-step) in-sample loss AND the honest eval metric,
+  printed to the trace as they land. A curve that explodes (NaN/spike) or flat-lines from step 0 aborts the
+  run loudly; long runs emit incremental progress, always — a hung run must be visible in minutes.
+- **Overfit experiment** — can it fit a tiny sample? (rules out broken-pipeline/can't-express = underfit
+  by bug). Underfit by CAPACITY shows as train ≈ eval ≈ weak; overfit as a wide train-vs-eval gap.
+- **The overfit meter is the train/cross-group PAIR** — every trace prints the in-sample number NEXT TO the
+  cross-group (cross-well/fold) number; the gap is the reading. (Earned: a placement-learner trace printed
+  only the cross-well number — fine only because it showed zero skill; the pair is mandatory.)
 - **Leak assertion** — scramble the forbidden labels; prediction must not move.
+
+ML infra (compute + speed):
+- **Check the machine spec before choosing an implementation.** Default = CPU-vectorized numpy for small
+  sequential models (a per-group HMM's tiny matrices lose more to GPU transfer than kernels gain; tree
+  ensembles are already multicore). GPU/accelerator only when the model shape fits (large batched tensor
+  ops) — and then decided by a BENCHMARK PROBE, not assumption (worked example: rogii's bench_cpu_mps).
+- **The ~20-minute rule:** any run expected or observed to exceed ~20 min triggers a speedup review before
+  it becomes the inner loop — vectorize, batch the predict path, subsample, cache the invariant stage, or
+  move device. Sweeps should be engineered to full-fleet minutes; a casual dose-response ask must stay casual.
+- **Smoke-first:** every expensive probe takes an N=small argument and runs it before the full fleet.
+- **A vectorized/accelerated refactor must reproduce the scalar path bit-for-bit** on a smoke set before
+  its numbers are trusted (cross-method check #4 — a silent numeric drift corrupts every sweep after it).
 
 ### 5 · Honest CV — the verdict
 Paired vs baseline, under the **honest CV structure**, as-measured, no laundering. **This is the number that
