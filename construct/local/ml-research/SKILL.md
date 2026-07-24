@@ -407,6 +407,20 @@ Replace a component with a learned one ONLY when its mis-specification is MEASUR
 heavy-tailed; calibration off; smoothing hurts) — the HMM→RNN spectrum is walked one measured rung at a time,
 never jumped.
 
+## Notes — promoted cross-experiment lessons
+
+Generic rules earned in one experiment and promoted here so every investigation applies them (the vivid
+per-experiment story stays in that experiment's `lessons.md`; operator-directed section, 2026-07-24).
+
+- **Train on the operating regime, not the measurement convention.** A learned component's objective must
+  mirror the discrimination it performs AT DEPLOYMENT, not the frame the rig happens to measure in. The
+  canonical miss: training a learned emission with negatives drawn over the evaluation rig's full ±40 ft
+  candidate grid — a coarse task the analytic baseline already owns — when the deployed filter runs
+  post-proposal with a narrow posterior, so the emission's real job is ±few-ft LOCAL discrimination. A
+  tie-with-baseline verdict earned under the wrong operating regime closes nothing about the right one.
+  Before training, write down: what decision does this component make in the deployed assembly, over what
+  candidate set, at what error scale? That is the loss. (rogii-v2 `a-cnn-emission` v0→v2.)
+
 ## Status — what's prose vs built
 
 Everything here is **prose you follow by hand.** Nothing is enforced by a binary yet — deliberately (fast
