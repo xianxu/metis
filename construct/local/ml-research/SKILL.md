@@ -173,6 +173,18 @@ glossary of the named parts of the data/task — so every later doc, arrow, and 
 imprecise naming is a slow leak that compounds. Show operator those vocabulary to avoid miscommunication. Add
 new terms to the vocabulary as research progresses.
 
+**If there is an EXTERNAL JUDGE, charter it in its own section (`framing.md` §submission-and-scoring):**
+what artifact the judge accepts (a CSV? a notebook/container it RE-RUNS server-side? an API endpoint?),
+what must live inside the judge's environment (a re-run judge means code + all reference data ship in the
+artifact — anything learned offline must be inlined or attached, which constrains the model families you
+can even deploy), the exact submit/score procedure as copy-paste commands (tooling gotchas included), the
+scoring cadence and submission caps, and how the judge's population maps to your CV (the per-family CV→judge
+gaps; the anchor-calibration rule from §5). Write this at CHARTER time, not at first submission — the judge's
+constraints shape framing choices (e.g. analytic-recomputable beats weight-shipping under a no-internet
+notebook judge), and the submit procedure is exactly the kind of tribal knowledge that evaporates between
+sessions. Spend policy for a capped judge belongs here too (submissions are a scarce instrument; see the
+LB-spend-bar lesson pattern).
+
 ### 1 · Framing + baseline (`framing.md` §framing)
 Model **input** (encodings mostly known) and — the interesting part — **output shape**: autoregressive vs
 joint-over-positions, target parameterization (direct value? residual to a proposal? a latent surface the value
