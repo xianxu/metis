@@ -424,6 +424,19 @@ never jumped.
 Generic rules earned in one experiment and promoted here so every investigation applies them (the vivid
 per-experiment story stays in that experiment's `lessons.md`; operator-directed section, 2026-07-24).
 
+- **Throughput is an epistemic asset — insight density tracks instrument quality × iteration speed
+  (operator, 2026-07-27).** The rigor machinery (oracles, gates, ledgers) makes each verdict
+  trustworthy; THROUGHPUT determines how many verdicts you can afford, and a hypothesis you cannot
+  test this session tends to die untested. Treat the inner loop's wall-clock as a standing measured
+  quantity with its own ladder: capability-probe the machine OUTSIDE any sandbox (accelerators are
+  masked inside — the twice-bitten MPS lesson), bench before porting, cache invariant stages (keys
+  encode the full generating config), smoke-first, the ~20-minute rule, background fleets so
+  adjudication overlaps training. When the hypothesis queue outgrows the loop's wall-clock,
+  UPGRADING THE LOOP IS THE HIGHEST-VALUE NEXT PROBE — spend one rung on speed rather than ten
+  rungs slowly. (Worked example: rogii-v2's MPS port, ~100× train / ~650× eval, turned learned-model
+  probes into ~4-minute experiments; the entire architecture/augmentation/synthetic-world program —
+  30+ fleet runs across three days — was affordable only because of it.)
+
 - **Train on the operating regime, not the measurement convention.** A learned component's objective must
   mirror the discrimination it performs AT DEPLOYMENT, not the frame the rig happens to measure in. The
   canonical miss: training a learned emission with negatives drawn over the evaluation rig's full ±40 ft
