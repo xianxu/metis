@@ -173,6 +173,11 @@ glossary of the named parts of the data/task — so every later doc, arrow, and 
 imprecise naming is a slow leak that compounds. Show operator those vocabulary to avoid miscommunication. Add
 new terms to the vocabulary as research progresses.
 
+**If the judge is a KAGGLE competition, load `kaggle-base`** — the platform layer owns submission
+formats, CLI/kernel procedure, the silent server-environment gotchas, commons intel, and the
+exploit catalog; this skill keeps the epistemics. Anything that touches the Kaggle API or the
+competition's scoring mechanics belongs there, not here.
+
 **If there is an EXTERNAL JUDGE, charter it in its own section (`framing.md` §submission-and-scoring):**
 what artifact the judge accepts (a CSV? a notebook/container it RE-RUNS server-side? an API endpoint?),
 what must live inside the judge's environment (a re-run judge means code + all reference data ship in the
@@ -420,6 +425,20 @@ heavy-tailed; calibration off; smoothing hurts) — the HMM→RNN spectrum is wa
 never jumped.
 
 ## Notes — promoted cross-experiment lessons
+
+- **Metric-gaming mechanisms are QUARANTINED from the belief ledger (2026-07-28).** Whenever the
+  external judge's measurement channel can be moved *without solving the problem* — a leaked or
+  duplicated test entity, a metric fittable by successive scored probes, a proxy that diverges from
+  the goal — those mechanisms get their own section, structurally separate from the arrows ledger:
+  **no verdict there feeds an arrow's belief, and nothing there graduates into an extracted
+  mechanism.** They have exactly one legitimate use: run one to EXPLAIN AN UNEXPLAINED GAP between
+  the judge and your honest CV, then record the verdict and stop. Also record the ones you refuse —
+  a refused exploit is charter, not an oversight. Without the quarantine, a gaming result reads as
+  evidence about the modeling problem and poisons every downstream prior; with it, the same
+  measurement cheaply retires a whole class of false explanations. (Platform-specific catalog and
+  detection procedure: `kaggle-base` §6. Worked example: rogii-v2's four-channel diagnosis, which
+  converted "the public frontier is 2 ahead of us" into a well-posed transfer question for the cost
+  of two submissions.)
 
 Generic rules earned in one experiment and promoted here so every investigation applies them (the vivid
 per-experiment story stays in that experiment's `lessons.md`; operator-directed section, 2026-07-24).
