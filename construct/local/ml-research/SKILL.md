@@ -183,13 +183,18 @@ new terms to the vocabulary as research progresses.
 deliberate pass over what is already known about this problem, and make it a GATE rather than
 background reading. The form varies with the setting: a novel research problem gets a literature /
 existing-method survey; a mature public competition gets "reproduce the best public artifact you can
-run, and decompose it into legs." What does not vary is the reason it must be a gate: **the cost is
+run, and decompose it into legs" (the platform layer owns that procedure in detail — `kaggle-base`
+§5 "Reading the commons"; this skill owns only the ORDERING, i.e. that it is a gate). What does not
+vary is the reason it must be a gate: **the cost is
 large and lumpy, so greedy arrow selection never picks it** — every individual arrow looks cheaper —
 while its payoff is often the largest single move available. Two things to extract, whatever the
 form: (a) a CALIBRATION of what "good" means before you spend a week defining it yourself, and (b) a
 decomposition into COMPONENTS you can measure on your own folds and correlate against your own legs
 (§combination arrows).
-*(Earned, rogii-v2: the best public kernel was read end-to-end on day 10 of 11. It took a day and
+*(Earned, rogii-v2 — and note the failure was ORDERING, not knowledge: `kaggle-base` §5 already
+said "reproduce the best one under your own account," so the procedure existed and was simply not
+scheduled early. That is precisely why the fix belongs here as a gate rather than there as more
+detail. The best public kernel was read end-to-end on day 10 of 11. It took a day and
 produced the largest single step of the investigation — plus the finding that its author's advantage
 was assembly, not modelling, which invalidated the premise of the preceding three days. The governing
 rule — "when an external anchor is explained by exactly one in-formulation hypothesis, enumerate
