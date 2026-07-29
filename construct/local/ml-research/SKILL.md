@@ -168,10 +168,36 @@ Concretely:
 ### 0 · Charter — understand the domain (`framing.md` §charter)
 What IS this problem? What data exists **train vs test** — and critically **what is train-only** (labels,
 auxiliary columns, reference logs)? The metric, and the eval regime (extrapolation? grouped? held-out region?).
-Keep it concise. Train-only info is where oracles live (§2). **Define the domain vocabulary here** — a short
+Keep it concise. Train-only info is where oracles live (§2). **Verify the train-vs-test table against
+the ACTUAL test files on disk, not the data description** — open a test artifact and list its columns;
+give every column an explicit test-availability verdict. (Earned, rogii-v2: the charter's table claimed
+a reference-log column ships at test while its own train-only paragraph three lines below said the
+opposite; the test files settle it in one command. It survived 8 days, harmless only by luck — nothing
+happened to use it. A column you believe is test-legal and is not will license an entire leg that cannot
+deploy.) **Define the domain vocabulary here** — a short
 glossary of the named parts of the data/task — so every later doc, arrow, and probe refers to them precisely;
 imprecise naming is a slow leak that compounds. Show operator those vocabulary to avoid miscommunication. Add
 new terms to the vocabulary as research progresses.
+
+**Survey the prior art BEFORE you build — scaled to how much of it exists.** Budget one early,
+deliberate pass over what is already known about this problem, and make it a GATE rather than
+background reading. The form varies with the setting: a novel research problem gets a literature /
+existing-method survey; a mature public competition gets "reproduce the best public artifact you can
+run, and decompose it into legs." What does not vary is the reason it must be a gate: **the cost is
+large and lumpy, so greedy arrow selection never picks it** — every individual arrow looks cheaper —
+while its payoff is often the largest single move available. Two things to extract, whatever the
+form: (a) a CALIBRATION of what "good" means before you spend a week defining it yourself, and (b) a
+decomposition into COMPONENTS you can measure on your own folds and correlate against your own legs
+(§combination arrows).
+*(Earned, rogii-v2: the best public kernel was read end-to-end on day 10 of 11. It took a day and
+produced the largest single step of the investigation — plus the finding that its author's advantage
+was assembly, not modelling, which invalidated the premise of the preceding three days. The governing
+rule — "when an external anchor is explained by exactly one in-formulation hypothesis, enumerate
+formulation-level alternatives first" — had been written down on the right day and simply not
+executed. That is why this is a gate and not a lesson.)*
+**Calibrate the effort honestly:** entering a well-populated public competition late is the extreme
+case (much intel, cheaply available); a genuinely novel problem may have almost none, and then this
+pass is short. Do not manufacture a survey where there is nothing to survey.
 
 **If the judge is a KAGGLE competition, load `kaggle-base`** — the platform layer owns submission
 formats, CLI/kernel procedure, the silent server-environment gotchas, commons intel, and the
@@ -189,6 +215,25 @@ constraints shape framing choices (e.g. analytic-recomputable beats weight-shipp
 notebook judge), and the submit procedure is exactly the kind of tribal knowledge that evaporates between
 sessions. Spend policy for a capped judge belongs here too (submissions are a scarce instrument; see the
 LB-spend-bar lesson pattern).
+
+**AFTER every submission, verify the judge ran the model you cross-validated.** Honest measurement
+requires that both sides measure the SAME artifact, and a re-run judge is a second execution
+environment you do not control. Pull the judge's own run log and diff the REALIZED configuration
+against the validated one: device/accelerator actually used, library and image versions, epochs or
+iterations actually executed, any silent fallback branch, row/well counts, and the input paths that
+resolved. Record the realized config next to the score. Treat any divergence as invalidating the
+CV→judge mapping until re-measured, not as noise.
+*(Earned, rogii-v2, twice over: (i) the kernel's GPU probe failed against the allocated card under a
+PINNED container image whose torch could not target it, so it silently fell back to CPU and HALVED
+its in-kernel training epochs — for eleven days every offline number used an 80-epoch leg while the
+judge deployed a 40-epoch one, worth 0.115 on the deployed product and larger than the change that
+was being spent on submissions at the time. (ii) A separate ~0.13 discrepancy between two near-identical
+builds was carried in the ledger for days as "environment drift / rerun noise" and used to widen a
+spend bar — the run logs later showed the training was bit-identical across every run, so whatever it
+was, it was not rerun randomness. Both were one API call away the whole time.)*
+Environment drift is the general hazard: pinned images age, accelerator fleets rotate, library
+versions move under you, and a graceful degradation path silently changes the model. **A fallback
+branch that changes the model must announce itself in the trace and be treated as a config change.**
 
 ### 1 · Framing + baseline (`framing.md` §framing)
 Model **input** (encodings mostly known) and — the interesting part — **output shape**: autoregressive vs
@@ -221,6 +266,19 @@ Sanity gates (fail loudly):
   cross-group (cross-well/fold) number; the gap is the reading. (Earned: a placement-learner trace printed
   only the cross-well number — fine only because it showed zero skill; the pair is mandatory.)
 - **Leak assertion** — scramble the forbidden labels; prediction must not move.
+
+**When a learned component washes, instrument it BEFORE sweeping it.** The reflex after a washed
+learned model is to vary width/depth/LR/augmentation; that tests capacity while the actual constraint
+may be elsewhere and invisible. Run the diagnostic pass first — feature effective rank at each block,
+gradient norms per block, update/weight ratios, and input-channel sensitivity broken out BY OPERATING
+REGIME (with a dead/zeroed channel included as the measure's own noise floor). It converts "keep trying
+architectures" into a mechanism, cheaply, and it de-motivates whole sweep families in one run.
+*(Earned, rogii-v2: the instrumentation pass measured feature effective rank ≈ 2 of 64 — the network
+was ~30× over-provisioned, which mechanistically explained a flat width sweep from 32 to 128 — plus
+healthy U-shaped gradient flow (no starved long-range blocks, killing a planned dilation sweep) and
+per-regime channel sensitivity that was FLAT, revealing the model had no coverage input at all and so
+could not represent regime-conditional caution. It ran at the END of a three-day program, after nine
+axes had already washed.)*
 
 ML infra (compute + speed):
 - **Check the machine spec before choosing an implementation.** Default = CPU-vectorized numpy for small
@@ -258,6 +316,20 @@ counts.** metis already owns much of this — extend it, don't rebuild.
   regime-robust choice; better, replace selection with *calibration* — fit confidence parameters to truth-path
   likelihood, not to score argmax. An over-confident component betrays itself when smoothing/aggregating makes
   results worse; calibration then derives the honest weight from first principles instead of re-tuning.
+
+**A gain for a config you SELECTED must be reported with a nested estimate.** Choosing (arch, knob,
+arm) by argmin over a candidate set and then reporting that same fold's number is selection bias, and
+robustness checks run on the ALREADY-CHOSEN config — split-halves, tail trims, per-regime tables — do
+not price it, because splitting after selecting does not undo the selection. Nest it: select on one
+part, score on the held-out part, repeat over many splits, and report the held-out gain alongside the
+full-data one. The gap IS the selection penalty. Make it cheap by dumping per-candidate per-group
+errors once — then the nesting is arithmetic, not re-training.
+*(Earned, rogii-v2: an emission config chosen by argmin over 77 cells on all 773 wells, reported on the
+same 773. Nested over 800 half-splits the penalty measured +0.026 on a −0.285 effect — the verdict held,
+but only because the candidate set was a dose-response along one physical axis crossed with one knob.
+An earlier 32-config argmax over UNRELATED configs inverted on the external judge by +0.12. Structure
+in the candidate set is what makes selection cheap; an unstructured grid is where the winner's curse
+lives — so report the penalty rather than assuming which case you are in.)*
 
 ### 6 · Adjudicate + record — the impostor ladder before "dead"
 Run the four-impostor discrimination (top of this skill). Only a full ladder earns `dead`; else `deprioritized`
@@ -394,8 +466,32 @@ A net is **a refiner of a proposal, not a diviner of absent signal.** An agent f
 the cheapest visible action — another architecture, more tuning — which varies *capacity* while a *framing* bug
 hides underneath. **So gate the model zoo behind a passed arrow-test (§2 oracle).** Then a washout is
 *interpretable* ("the arrow was real but this refiner couldn't exploit it → a genuine modeling gap") instead of
-ambiguous. Baseline-first; weak before strong; **ensemble/stacking LAST** — only once ≥2 legs beat baseline AND
+ambiguous. Baseline-first; weak before strong; **DEPLOY an ensemble late** — only once ≥2 legs beat baseline AND
 clear the fusion bar `ρ < σ_strong/σ_weak` (or its conditional generalization — see combination arrows below).
+
+**But MEASURE correlation early — deploying late and measuring late are different decisions, and
+conflating them is expensive.** From the moment two legs exist, `ρ(leg, deployed assembly)` is a
+one-line computation that predicts the blend outcome to ~0.01 via the variance formula. Keep it
+standing, and keep with it the table of *what a hypothetical new leg would be worth* at a grid of
+(σ, ρ) — it is the instrument that tells you whether to IMPROVE a leg or go FIND a different one.
+
+**Then use decorrelation prospectively — to choose what to explore, not only to grade what you built.**
+This is the balance between "explore new modelling directions" and "blend what you have": they are not
+competing phases, because blending is a measurement that costs nothing and exploration is where new
+legs come from. The real question is *which* exploration, and decorrelation belongs in that choice as a
+first-class criterion beside expected strength — **a leg at σ=10, ρ=0.3 can beat a leg at σ=9, ρ=0.7.**
+The decisive empirical point: **ρ is a function of the INFORMATION DIET, not of the algorithm.** So
+before starting a modelling direction, write down what it reads. Reads the same inputs as the deployed
+assembly → expect high ρ, expect little blend value, and judge it as a REPLACEMENT that must win
+outright. Reads a structurally different diet → judge it as an ADDITION, where even a mediocre leg pays.
+*(Earned, rogii-v2, and the numbers are stark. A competitor's leg — different team, different algorithm,
+~200 different features, everything one would call "diverse" — sat at ρ=0.651 and was worth **+0.008**.
+Their per-well leg whose only distinction was that it READ NO OTHER WELL sat at ρ=0.422 and was worth
+**−1.07**, the largest single step of the investigation. Meanwhile every leg we built ourselves sat at
+ρ=0.46–0.73 with our own assembly, and in the optimal blend they ALL received weight 0.00: an inventory
+built without a decorrelation criterion was worth nothing to combine. The standing (σ, ρ) table, once
+finally built, priced a new decorrelated leg at 5–10× any available improvement to existing legs — a
+strategic fact that had been computable for a week.)*
 
 **Combination arrows (blends of existing legs).** A blend/ensemble is an ORDINARY arrow, not a new entry
 kind — but its anatomy differs, so it gets its own conventions:
