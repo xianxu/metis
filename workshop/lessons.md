@@ -1,395 +1,75 @@
-# metis — lessons
-
-Rules distilled from work in metis, to prevent repeats (AGENTS.md §4).
-
-## Go / build
-- **Offline Go module bring-up.** Before assuming network is needed for a new `go.mod`, check `$(go env GOMODCACHE)/cache/download/...` for the dep **and its transitive `go.mod` graph** (a pre-1.17 dep like `gopkg.in/yaml.v3` pulls `check.v1`'s go.mod into the unpruned graph). If present, `GOPROXY=off go mod tidy` builds `go.sum` with zero network — no sandbox override. (metis#1 M2)
-
-## Provenance / identity
-- **A repro-identity must be minted from the INTENDED config, not the config that happened to execute.** metis#3's record derived its point-address from `Runner.Run`'s returned StepRuns — but a failed run returns only the *pre-failure* steps, so a first-step failure gave an *empty* resolved-config → the point-address (a) diverged from the sweep's full-config run-id and (b) **collided** across distinct failed configs (both empty → same hash), silently collapsing distinct failed rows in #8's aggregation. A point's identity is its *intended* config (you'd re-run the same config); thread the full step list into the address, keep per-step provenance from the executed steps. The reviewer reproduced the collision; the happy-path identity test (ok points only) missed it — pin failed-point identity + distinctness explicitly. (metis#7/#3)
-
-- **A "do X once for the batch" optimization gated by a flag turns unsound when a NEW item joins the flow outside that batch.** metis#18 M1a-5's `driver:single` ship set `runOpts.inSweep=true` to ride the sweep's single code-capture — but `captureSweepCode` runs BEFORE the ship exists and its closure is the union of the *fold* runs only, so the ship (the run that produces the actual submission, incl. ship-only steps predict/submission) silently lost its metis#14 durable SHA on a dirty tree. When you suppress per-item work because "the batch already did it," verify the *specific new item* is in that batch — don't trust the comment. The ship is ONE run: let it capture itself (`inSweep=false`), non-redundant (the optimization only avoids N×k redundant per-*fold* captures). The boundary review caught it; the happy-path ship test (asserting only `"shipped"` + a file exists) had no teeth for provenance. (metis#18 M1a-5)
-
-## CLI / test-through-the-entrypoint
-- **An e2e that calls the handler directly bypasses the CLI parse — test through the real entrypoint.** metis#8's `promote`/`ledger show` e2es called `runPromote`/`cmdLedger` with pre-ordered args, so two Critical bugs shipped green: (1) `cmdPromote` injected `commit: nil` and no concrete `gitCommitter` existed, so promote wrote the file, **printed "committed"**, and never committed; (2) Go's stdlib `flag` stops at the first positional, so the *documented* `metis promote <shape> --best` order errored (only flags-first worked). Both are in the CLI wiring the e2e skipped. Add a test that drives the actual `cmd*` entrypoint with the **documented arg order**, and one that asserts the side effect the success message claims (here: the file is really committed). Don't let the success print outrun the action. (metis#8)
-
-## Sweep / self-observation
-- **A process that writes into its own repo can't use the whole-repo dirty flag as a "did the world change" signal.** metis#7's detect-and-abort froze on `git status --porcelain` (HEAD sha + dirty), but the sweep writes `runs/`/manifest into the tree → after point 1 the tree is dirty → point 2 false-aborted ("sha → sha-dirty"). A change-detector must exclude the actor's *own* outputs: freeze on the HEAD **commit sha only** (catches the realistic commit/branch drift), or scope the dirty check to code paths. The unit tests (constant clean fake probe) all passed — only the **real CLI run** surfaced it. Drive the real flow for anything that observes its own side effects. (metis#7)
-
-## Testing / defensive copies
-- **A deep-copy guard test must exercise the dimension the shallow bug lives in.** metis#6's `Expand` deep-cloned only the *current* step's `with` while the outer per-step map stayed shallow — so sibling points spawned by a *later* step's expansion aliased every *earlier* step's map. The guard test used a **single step**, so it structurally couldn't reach the cross-step case → false confidence (it passed while the bug shipped). A copy-isolation test must mutate the *specific* nesting level / index the shallow copy fails to clone (here: a **non-terminal** step in a **≥2-step** shape). Regression-proof it: revert to the shallow copy and confirm the test FAILS. (The boundary review reproduced the alias empirically; the green single-step test did not.) (metis#6)
-
-- **Every NEW run-producing code path must re-assert the project's defended invariants (reproducibility/#14, cache soundness/#24) with a test that has teeth — a surface signal is not proof.** metis#18 M1a-5's ship-path test asserted `"shipped"` in stdout + a `submission.csv` exists; both pass while code-capture is silently skipped. A defended invariant's test must assert the invariant's OWN evidence (here: the ship record's `CaptureStatus=="captured"` + the side-ref resolves — the same shape the invariant's origin tests use), not a downstream artifact that exists regardless. When you add a run path, ask "which invariants does a run promise?" and copy their teeth. (metis#18 M1a-5)
-
-## Caching / soundness testing
-- **A load-bearing serialization invariant deserves a DIRECT codec test, not an implicit e2e guard.** metis#18 M1a-3b's migration guard rests entirely on `[] ≠ nil` surviving the JSON round-trip: a genuine #24 empty transitive-`D` closure must decode to a *non-nil* slice (so an empty-closure step still HITs), while a legacy entry with no key decodes to *nil* (→ MISS). Dropping `omitempty` is what makes `[]` survive as non-nil — but that was only exercised *transitively* by an unrelated warm-HIT e2e (`test/echo` steps have empty `D` and must warm-HIT through the on-disk round-trip). A re-added `omitempty` would silently break the guard AND make every empty-closure step MISS forever, while that e2e might still pass for other reasons. When correctness hinges on "empty-non-nil round-trips as non-nil while absent decodes to nil," pin it with an explicit `Encode→Decode→nil-check` test (+ a legacy/`null` blob → nil) so the regression fails THAT test loudly, independent of any e2e fixture's step choices. (Fresh-eyes review caught this as the one revert-risk in an otherwise-SHIP change.)
-- **A CAS/wipeable-cache *consumer* must honor the store's recompute contract, not just the store.** metis#9's `pkg/cas` documents that a consumer treats `ErrNotFound`/`ErrCorrupt` as recompute triggers; metis#2's `cachingExecutor.materialize` propagated them verbatim → a wiped/evicted/corrupt output blob hard-failed the run (exit 1), contradicting the design's "`rm -rf cas/` is safe." A "wipeable cache" is only wipeable if every consumer falls through to recompute on a missing blob — check `errors.Is(err, cas.ErrNotFound|cas.ErrCorrupt)` at the consumer and MISS, don't propagate. Test it: store an entry, `rm -rf cas/`, re-run, assert recompute (not error). Latent-until-eviction: harmless with `maxBytes=0`, breaks the moment LRU eviction is enabled. (metis#2)
-- **A "passing" cache e2e can be blind to the cache's core soundness.** metis#2's two e2es both HIT on a re-run — but `TestCache_CheapSweeps` used `test/echo` steps that write no `reads.json` (empty read-set D → *vacuous* HIT), and the toy-pipeline test only re-ran *identically* (HITs whether D is real or empty). So a regression silently emptying D would false-HIT with green CI. The soundness claim ("recompute only what changed") needs a test that **changes something and asserts a MISS**: edit a file in a step's D → that step MISSes, an unaffected step HITs. A HIT-only test proves nothing about invalidation. (The boundary review caught this; the e2es did not.) (metis#2)
-
-## Content-addressed storage / durability
-- **Content-addressed dedup must verify, not trust existence.** A CAS `Put` that skips the write when the path *exists* silently defeats the wipeable-cache "recompute-into-place" contract: a *corrupt* blob exists yet fails integrity, so `Get→ErrCorrupt→recompute→Put` hits the dedup-skip and never heals. Verify the existing blob hashes to the key before skipping; overwrite (heal) when absent-or-corrupt. The boundary review caught this as Critical; the happy-path tests didn't. (metis#9)
-- **A key→path base primitive is a latent path traversal — validate the key at the boundary.** `shardPath(key) = root/<key[:2]>/<key>` made `Has("..")` return `true` (`..` escaped to root's parent). Gate with a strict format check (`isHash`: exactly 64 lowercase hex) so a malformed key reads as absent, keeping every on-disk path inside `root` — even though today's only callers pass internal sha256 keys (downstream consumers won't). (metis#9)
-- **Best-effort maintenance must be consistent across sibling ops.** If a failed recency-stamp (`touch`) is swallowed so it never fails a valid Get/Put, then a failed eviction (`evict`'s `os.Remove`) must be too — otherwise a maintenance hiccup returns `(validHash, err)`, which a consumer reads as "not stored." Make all post-success cache-maintenance best-effort (return nothing, swallow/log). (metis#9)
-- **Inject the clock for filesystem recency.** mtime-LRU eviction needs a deterministic recency signal — stamp the file mtime from an injected `Clock` (`os.Chtimes(clock())`) on put/get, don't read wall-clock. Keep the eviction victim-math a *pure* function fed a directory listing (`selectEvictions(entries, maxBytes, keep)`), unit-tested with no filesystem. Re-declare a one-line `Clock` type locally rather than importing upward from a higher layer (a storage *floor* must not depend on `pkg/experiment`). (metis#9)
-
-## Testing
-- **A documented concurrency contract needs a concurrent `-race` test.** Running `-race` over a single-goroutine suite proves nothing about a "safe for concurrent use" claim — the race detector only flags races on paths that actually run concurrently. If you write the guarantee in a doc comment (esp. one a downstream consumer is told to rely on), pin it with a `t.Parallel`/goroutine stress test. The boundary review flagged the untested claim as Important. (metis#9)
-- **External-binary drift guards.** To stop Go structs drifting from a CUE/schema single source, add a test that shells the sibling validator (e.g. `vocabulary validate-instance`) on a fixture the structs also parse; `t.Skip` when the binary/toolchain is absent so bare checkouts stay green while the guard runs wherever the tool exists. (metis#1 M2)
-- **e2e tests that run against fixtures copy them into `t.TempDir()` first.** The step-runner writes `runs/` (+ `record.json`) next to the experiment; running against committed `testdata/` would dirty the tree. (Since #13 the experiment `.md` itself is immutable input — never written back — but the `runs/` artifacts still justify the TempDir rule.) Verify clean with `git status`. (metis#1 M2)
-- **Absolute-path fixtures can mask relative-path bugs.** An e2e that fed the runner an absolute `t.TempDir()` path passed green while the natural `metis run <relative-path>` invocation was broken (relative env paths double-joined into `<dir>/<dir>/…`). Exercise the *natural* invocation (chdir + bare filename), not just the convenient absolute one — the boundary review caught this class of bug; `go test` alone did not. (metis#1 M2)
-
-## Python / uv
-- **Pin `requires-python`; let uv provision the interpreter — don't build on the system one.** The machine's `python3` was 3.14, which had no binary wheels for pandas/scikit-learn/pyarrow. Setting `requires-python = ">=3.12,<3.13"` made `uv sync` fetch a managed CPython 3.12 and resolve wheels cleanly (no source builds). Check `uv run python -c "import pandas, sklearn, pyarrow"` succeeds *before* writing code on top. (metis#1 M3)
-- **Reproducibility is a runner concern, not a per-step one.** Inject the experiment's single `seed` (and any stable anchor like the experiment dir) via env from the runner, rather than duplicating `seed` into every step's `with`. One source (the `#Experiment.seed`), all steps derive — a re-run then reproduces identical outputs (verified: same cv_score + predictions across runs). (metis#1 M3)
-- **Step wrappers run with cwd = the step dir, so resolve the project root from `$0`, not cwd.** `steps/metis/*` do `ROOT="$(cd "$(dirname "$0")/../.." && pwd)"; exec uv run --project "$ROOT" …`; a cwd-relative resolution would break because the runner chdirs into `runs/<id>/<step>/`. (metis#1 M3)
-
-## Testing
-- **A `uv run` e2e inside `go test` needs a pre-synced venv + a skip guard.** `TestToyPipeline_EndToEnd` shells the real wrappers (`uv run`); run `uv sync` first so per-step invocations are fast/offline, and `t.Skip` when `uv` isn't on PATH so bare checkouts stay green. Confirm `uv run` doesn't dirty the repo (`git status` — the lockfile must be current). (metis#1 M3)
-- **A CUE drift-guard for a record with no `type:` discriminator uses `cue vet -d`.** `#Experiment` has a markdown fixture + `validate-instance`, but `#Run` is emitted as `run.json` and carries no `type` field, so guard it by marshaling a Go `Run` to JSON and `cue vet -d '#Run' run.json experiment.cue` (closed schema → renamed/removed/extra field fails). Skip when `cue` is absent. (metis#1 M3)
-
-## Workflow
-- **Fresh weave-bootstrapped derivatives need a `construct/base.manifest`.** Without one, the transitive walk stops at the manifest-less repo and a downstream consumer silently under-compiles (only the gitignore action, no error). Author a minimal `internal prose AGENTS.local.md` manifest per new derivative. Tooling fix tracked in `ariadne#155`. (metis#1 M1)
-- **Boundary review checks the committed artifact, not the dirty tree — and generated review sidecars are part of the diff once committed.** metis#49's first close review correctly rejected a dirty/untracked implementation because `HEAD` still had the old board; after committing, the generated close-review sidecar itself carried whitespace that broke `git diff --check`. Before running/committing close, commit the implementation to be reviewed; after close generates sidecars, rerun `git diff --check` on the final commit contents and normalize/remove generated whitespace before the close commit. (metis#49)
-
-## Integration / verification
-- **The acceptance/integration demo IS the invocation-path test — build it before claiming a substrate "done".** metis#7's sweep was only ever exercised with the `test/echo` step, so the sweep→train **hyperparam path was never run** — metis/train did `kind = w["model"]` (a string) and `make_model` ignored C/n_estimators/max_depth. Every piece was contract-correct + unit-green, yet the first real sweep (kbench#4) failed 42/42 points on the `$oneof` model dict (metis#12; `$oneof` was unified into the `$any` map form in metis#17). Corollary: **unit tests with fixed-value fakes mask real-CLI behavior.** metis#8's promote round-trip test used a `fakeGitProbe{sha:"sha"}`, so it "reproduced the point-address" — but in the real CLI `promote` commits the winner (advancing HEAD), and the point-address is code-version-sensitive, so a real round-trip reproduces the *result* (cv_score), not the address. Run the real end-to-end early; a fake that pins the varying input hides exactly the seam the demo exists to test.
-
-## Cross-repo / caching
-- **A "walk up to the git repo root" heuristic mis-roots the stdlib when HOME is a git repo.** metis#11's multi-root sensor classified `~/.local/share/uv/python/.../lib/python3.12/*` as first-party because an ancestor (`~`) had a `.git`. The old single-`_PROJECT_ROOT` code was implicitly protected; multi-root wasn't. Exclude the Python install/stdlib prefixes (`sys.base_prefix`, `os.path.dirname(os.__file__)`, `sysconfig` stdlib paths), not just `site-packages`/`.venv`.
-- **A persisted cache key's store and validate sides must group/format identically — or you get a false HIT/MISS.** When D went repo-qualified (metis#11), `recordMiss` (store) and `isHit` (validate) both had to group by repo via one shared helper (`hashDByRepo`); asymmetry is a silent soundness bug. And a format bump (v1→v2 `reads.json`) must fail LOUD if an old file is read, never parse to an empty D → a vacuous K_pre-only HIT (worse than the bug being fixed).
-
-## Verification / CLI-invocation
-- **A manual-verification command must put flags before positionals AND exercise the code path it claims to.** Go's stdlib `flag` stops parsing at the first non-flag, so a trailing `--dry-run <file>` becomes a second positional and trips arity checks (`metis run` wants exactly one experiment). Worse, a mode flag only affects the branch that reads it: `--dry-run` is sweep-only, so "dry-running" a plain experiment either errors or silently does a full live run — proving nothing about step resolution. Write the proof command against the branch you're actually asserting (here: a hermetic full run that must resolve all three layers), flags first. And never seed a plan's test snippet with speculative imports ("if not already imported") — Go hard-errors on an unused import. (metis#16, plan review)
-
-## Capture / git paths
-- **Mixing `filepath.Abs` (keeps the symlink) with git's `--show-toplevel` (realpath) breaks `Rel`.** On macOS a temp path is `/var/folders/…` (a symlink to `/private/var/…`); `git rev-parse --show-toplevel` returns the realpath. `filepath.Rel(realpathRoot, symlinkAbs)` then yields a broken `../../` path that `git hash-object` rejects — silently aborting the whole repo's capture. Fix: `filepath.EvalSymlinks` the path before `Rel`, and symlink-resolve repo-root map keys for a stable identity. (metis#14)
-- **Best-effort capture must skip a missing/uncapturable file, not abort the closure.** Adding the run-spec `.md` to the closure hashed a file that didn't exist on disk (a test fixture) → one `git hash-object` failure killed the whole repo's capture → empty D. Guard each optional closure member (spec) with an existence check; a per-file failure should degrade, not zero out. (metis#14)
-
-## Deleting a language/algebra construct (metis#17 plan review)
-- **Grep for committed testdata/fixtures the removal breaks, and migrate them in the SAME commit as the engine change — and run `go test ./...`, not a scoped `go test ./pkg/X/`.** Deleting the `$oneof` case from `pkg/shape` broke `cmd/metis/shape_e2e_test.go` (it reads a committed `.md` shape still using `$oneof`), but a shape-package-scoped test would report false-green because the broken consumer lives in `cmd/`. Any commit that removes a grammar/algebra construct must migrate every in-tree consumer (testdata, fixtures, AND the engine file's own doc comments — which describe the deleted semantics) atomically, gated by a whole-module `go test ./...`.
-
-## Design / prior-art (metis-v2 experiment-algebra design)
-- **For a load-bearing design decision, run a parallel prior-art survey that MAPS findings to your model — and treat cross-survey convergence as a strong signal.** metis-v2's driver/sweeper/pipeline design dispatched 3 orthogonal researchers (ML frameworks · config/sweep/adaptive · reproducible-caching), each briefed on OUR model + specific open questions and asked to map findings back (not describe tools). Two independent surveys (ML-frameworks *and* caching) arrived at the *same* missing element (a per-step purity/target-safety property) — that convergence was the sharpest evidence in the whole design. It also *validated* the operator's own layering (mlr3 was the exact structural twin) and named the differentiator (1-SE selection is uncontested across all six systems). Cheaper and higher-signal than reasoning from first principles alone.
-- **When a design "knob" is really a footgun, the mature-framework move is to REMOVE the degree of freedom, not tune it — prefer a structural/emergent mechanism over a hand-declared marker.** Two of my elaborations got *simpler* under operator pushback: a movable resample cut (`over:`) → one structural `data│pipeline` cut (no mature framework exposes a movable cut — it's a leakage footgun); a per-step `fit_scope` marker → cross-fold safety emergent from the DAG + target-safety owned by the feature step (sklearn `TargetEncoder`). Bias toward "derive/enforce structurally," and if you must know a per-step property, DERIVE it from a trace (metis already traces code reads → extend to column reads), never a hand-typed tag.
-
-## Plan authoring / cache-key changes (metis#18 M1a plan review)
-- **Swapping a cache-key term? Trace the FULL invalidation-propagation graph, not the local swap — a term can transitively carry a soundness property that physically lives in a DIFFERENT subsystem.** The M1a plan proposed making the interior input-addressed by replacing `Kpre`'s upstream-*output-hash* term with the upstream's `Kpre`. But metis's read-set `D` deliberately EXCLUDES data + upstream artifacts (`trace.py`: they're "class-1", keyed via upstream output-hashes in `Kpre`), so the output-hash-chain is the *only* carrier of upstream-**code-edit** propagation to downstream steps. Deleting it makes an edit to `features.py` re-run `features` (its own `D` catches it) but NOT re-key `train` (whose `Kpre` uses upstream's code-invariant `Kpre`, and whose `D` excludes upstream output) → `train` serves a stale output. Input-addressing is only sound if paired with a replacement propagation (validate the transitive-`D` closure at HIT-check). The plan's own test asserted the *desired* nondeterminism-suppression — the *identical* mechanism silently suppresses legitimate code-edit propagation, and the key can't tell them apart. Always add a test: "edit an upstream step's code → the downstream step MISSes."
-- **Cross-check a plan's canonical example artifact against EVERY task that names the same entity.** Task 5's reshaped shape had no `cv-split` step (resample declared in `sweeper.resample.cv`), but Task 12 assumed a `cv-split` data-phase step — a contradiction visible only when the two tasks are read together, never within either alone. A config-invariant artifact (the partition) must materialize ONCE above the sweeper, and single-sourced config (`k`/`stratify` in one place) must not be duplicated into a step's `with`. When a plan has a worked example, diff it against each task's assumptions.
-- **A "validate against upstream state" cache scheme is UNSOUND in a topo executor that heals upstream entries on re-run.** The M1a-3 fix (round 1) was "at a step's hit-check, re-hash its transitive-upstream entries' `D`." But the topo executor runs upstream first: an edited upstream MISSes → re-runs → `recordMiss` OVERWRITES its `Entry.D` with the *new* code hash — *before* the downstream is checked. So the downstream's walk re-hashes the already-healed entry → clean → HIT → serves a stale output (the exact bug the fix targeted, one level up). Sound version: store the **transitive-`D` snapshot in the DOWNSTREAM's own `Entry`** (a topo-fold `transitiveD[id] = ownD ∪ ⋃_{d∈needs} transitiveD[d]`), and validate the current tree against *that* snapshot — store and validate then key on the same bytes (symmetry), and it needs no upstream-entry lookup at validate time (eviction-robust). When a key is deliberately insensitive to an upstream edit (input-addressing), the downstream must carry its own snapshot of what it depended on.
-- **A soundness property whose correctness depends on run-time ORDERING is inert under a pure unit test — drive the real executor.** The round-1 `Validate`-level unit test ("move a file in the root's `D`, assert the leaf MISSes") used hand-built entries and went green, blind to the recordMiss-heal ordering that made the mechanism inert. Only a real-executor e2e (warm run → edit `features.py` → assert `train` MISSes) exposes it. If a mechanism's correctness rests on heal-before-check / topo accumulation, the faithful test drives the actual edit→re-run sequence.
-- **When a run-time coordinate (fold idx, partition) distinguishes otherwise-identical step invocations, verify it actually enters `Kpre` — don't assume side-channel injection carries it.** `Kpre` has no fold term; if the fold-context is injected like `seed` (env side-channel), all k folds of a step share one `Kpre` → collide (first-runner-wins, wrong scores) and the reducer told-set collapses to one identity. Overlay the coordinate into the step's `with` (or add a `Kpre` arg), and add a "two variants → two distinct cache entries" test (revert the overlay → it FAILS).
-- **A `"X→Y"` rename shorthand in a plan is unsafe when `X` has a *second* consumer or its replacement-justification is unverified.** M1a-3's "`upstreamHashes→upstreamKpres`, `c.outputs→c.kpres`" read as clean renames, but `upstreamHashes` the *function* must SURVIVE (the record-provenance path re-uses it independently), while `c.outputs`/`recordOutput` become genuinely DEAD once `Kpre` stops reading them — and the plan's "keep the output-hash for provenance" was a phantom justification (no consumer reads it). Spell out **survive / delete / dead** for each touch-point, and grep the sole-reader before asserting "kept for X." A shorthand rename also silently staled the doc comments claiming the executor `Kpre` and the record derive an identical upstream term (post-change they diverge by design).
-- **When a cache soundness mechanism has an asymmetric HIT-vs-MISS population path, the boundary test must exercise the HIT-feeds-downstream arm specifically.** M1a-3's `c.transitiveD[id]` is built from a fresh fold on MISS but *repopulated from the stored entry* on HIT. Every all-MISS soundness test (edit upstream → everything downstream misses) is BLIND to a dropped HIT-repopulation — the bug surfaces only one edit later: edit the *downstream's own* code so the upstream HITS + the downstream re-stores an **empty** upstream closure, THEN edit the upstream → it no longer invalidates. The faithful test edits the downstream first (forcing an upstream HIT into a downstream re-store), then edits the upstream; reverting the repopulation line must fail exactly that test.
-
-## Boundary decomposition (metis#18 M1a-1 impl)
-- **A schema-struct change at a foundational boundary breaks its downstream consumers' build; when the decomposition defers the consumer-rewire, scope that boundary's "green" to the changed package + flag the deferred consumer — don't force whole-module green by pulling later-boundary work forward.** M1a-1 removed `Shape.Steps/Sweep/Experiment`, which breaks the 4 `cmd/metis` files (`run.go`/`sweep.go`/`ledger*.go`) that M1a-4 rewires into the nested Sampler loop. Correct move: verify the breakage is *confined* (`go build ./...` names ONLY `cmd/metis`), scope M1a-1's green to `pkg/experiment`+CUE, and flag "`cmd/metis` red until M1a-4" so intermediate milestone-closes review against a known-non-building main package rather than chasing a false whole-module-green bar.
-- **A drift-guard / self-test FIXTURE is a hidden consumer of a schema change.** M1a-1's `TestShapeConformsToCUE` reads `testdata/experiment/titanic-baseline-shape.md` — a fixture that had to be reshaped to v2 alongside the live kbench shape the plan named. Grep for the testdata fixtures a schema validates and reshape them in the same commit as the struct/CUE change. **Corollary (M1a-1 review):** a *reference/authoring doc* is a hidden consumer too — the milestone-review's Docs gate caught `construct/datatype/experiment-shape.md` + `atlas/index.md` still describing the deleted v1 vocabulary (an author following them produces a now-rejected shape). Sweep docs, not just fixtures.
-- **`yaml.v3` `,inline` on an *exported* embedded struct DOES coexist with `KnownFields(true)`** (promoted fields count as known) — but every existing composite literal of the outer struct that named a now-promoted field breaks and must move to `Outer{Embedded: Embedded{…}}`. Let the compiler enumerate the breakages rather than grepping. (M1a-1 header-DRY refactor.)
-- **Size a merged boundary by its VERIFICATION surface, not just its logical cohesion.** M1a-3 (cache) + M1a-4 (IO) were merged so the cache soundness gate could run (it needs `cmd/metis` green). But un-redding `cmd/metis` IS a ~1000-line sweep-driver re-architecture (37 removed-`Shape`-field refs across `run.go`/`sweep.go`/`ledger*.go`) — so "merge so the test can run" silently pulled the whole rewire into one boundary, blowing past its ~1h estimate + one fork's runway. When a boundary's gate is coupled to a large rewire, the boundary inherits the rewire's size. **Corollary — the dependency order was IO-first:** `cmd/metis` red blocks *testing* the cache, and the IO rewire is what un-reds it, so IO must land BEFORE the cache #24 change (reorder, don't just merge). The clean primitives (`Entry.TransitiveD`/`MergeTransitiveD`/`fold_score`) can land first regardless — they're pure + testable without `cmd/metis`.
-
-## Spec design / select-rule + measured complexity (metis#19 design + 2 spec reviews)
-- **Trace a selection/scoring rule over the REAL data before a spec claims it "recovers" an empirical result.** #19's v1 spec said the parsimony rule recovers the md=4/6-feature config that scored public 0.782; a reviewer ran it over the cached ledger and it shipped a *different*, unvalidated config (md=4/1-feature) — multi-axis Pareto drove to the joint corner, dominating the 6-feature config on the feature axis. When a spec cites an empirical artifact as the thing a mechanism recovers, verify the mechanism actually *selects that artifact* over the real ledger, not merely something in its neighborhood; word the Done-when as "verified, not asserted."
-- **"Minimize X, tie-break Y" only lands on the Y-preferred config when X ties EXACTLY.** #19 relies on realized rf leaf-count being ~feature-independent so the mean tie-break recovers the more-feature config — but `minimize` is primary and unforgiving: one extra leaf re-selects the sparse corner. If a design's correctness rests on an empirical near-equality, (a) gate it in Done-when AND (b) pre-commit a fallback — here, bin the scalar with a tolerance ε so near-equal values tie, then the tie-break decides. "Verified later" with no plan-B re-invites the original failure.
-- **A single summary scalar can silently re-encode an axis you declared neutral.** #19's rf complexity as *total* leaf count folds `n_estimators` (declared capacity-neutral per Breiman's LLN) back into the number, wrongly ranking 200 trees "simpler" than 500. Commit to *mean* per-tree. Verify a proposed scalar against the *rationale that justified it*, not just its name.
-- **"The reducer" (singular) hides a dual-path ripple; and storage-plumbing ≠ reduction-plumbing.** A metric that must reach a decision flows through EVERY reduction/selection surface — for metis that's `pkg/sampler` (in-memory → shipped `Winner`) AND `pkg/ledger`/`promote` (offline CSV leaderboard, no family grouping). A spec saying "the reducer" under-scopes the plan. Separately: an arbitrary per-metric may already round-trip through record→cache→ledger (`map[string]float64`) while the *typed fold output* (`float64`) and the *reduction into a per-config quantity* do not — "captured + cached" being true does not make "reduced + consumed" true.
-- **"Mirrors X / reuses the existing idiom (ARCH-DRY)" must be checked at EVERY representation layer.** The `select` union mirrors `driver` in Go (optional pointers + exactly-one count check) but a first draft claimed a CUE *closed disjunction* — which driver does NOT use (driver is optional CUE fields, Go-only exactly-one). Read the referenced code at each layer (CUE, Go, Python); an idiom is rarely uniform across them.
-- **"Property P is recoverable straight off struct S" needs its failure modes enumerated.** #19 first claimed the model family reads off `shape.FreeParam`; but `FreeParam` doesn't record the `$any` FORM, so a tagged branch-label and an untagged bare-string alternative are indistinguishable there. The robust signal lives in a *different* struct — `Point.With`'s single-key-map `{label: sub}` bundling. When a design routes a load-bearing decision through a struct, confirm the struct genuinely carries the distinguishing bit.
-- **Check the literature before inventing a capacity/complexity model — and measure the realized artifact, don't predict it from config.** `2^depth` and `min(features, depth)` were both plausible first-principles guesses; `min()` empirically *inverts* (ranks the overfitter simpler). The literature (cost-complexity `|T|` = realized leaves; Breiman LLN → n_estimators-neutral; RF non-parametric → cross-family param-count unsound; tidymodels declares-not-computes) settled it and pivoted the whole design: complexity is a property of the *fitted* model (each model class reports `complexity(fitted)`, e.g. realized leaf count), measured + cached + reduced — not estimated from hyperparameters (static bounds like `2^depth` overstate). One measured scalar collapsed three layers of declared-schema machinery.
-
-## Plan authoring — type-param ripple & tolerance test arithmetic (metis#19 plan review)
-- **Widening a Go GENERIC type parameter (a `Sampler[…,O,R]`'s `O`/`R`) is a signature change, not an additive struct change — grep EVERY file in the package, especially internal `_test.go` composition proofs.** #19's plan widened the fold output `float64`→`FoldOutcome` and named the obvious consumers (`folds_test.go`, `configs_test.go`, `driver_test.go`) but missed `pkg/sampler/run_test.go` — an *internal* test that composes all three nested `Run` calls. Because it shares the package, its non-compilation makes `go test ./pkg/sampler/` red, so the plan's per-task "→ PASS" checkpoints were false. Adding a struct FIELD is backward-compatible; changing a type PARAM is not — the "adding fields is safe" intuition does not transfer. Grep the type name across the whole package (incl. `_test.go`) before claiming a package stays green.
-- **When a plan pins a tolerance/threshold constant AND hand-writes unit-test numbers around its boundary, arithmetic-check each datum falls on the intended side.** #19 pinned `complexityBinRelTol = 0.05` then wrote a "within-ε" test case of cx 15 vs 16 — a 6.7% gap that is *outside* 5%, so the test would have selected the opposite config and been unwritable as specified. The ε-binning was the exact mechanism the corner-fix rests on, so the silent off-by-a-boundary would have surfaced only when the load-bearing regression test refused to pass. Compute `min·(1+ε)` (or the analogous boundary) against each test datum when authoring the plan.
-
-## Schema migration — Go test-helper fixtures (metis#19 M1)
-- **Inline-schema YAML inside Go *test helpers* (not just committed `.md` fixtures) are hidden consumers of a struct/schema change.** Migrating `objective.select` scalar→union broke `cmd/metis/shapesweep_test.go`'s shared `foldShape` helper (fed multiple e2e tests) and `ledger_cmd_test.go`'s inline shape — neither was in the plan's migration list (which named only the `.md` shapes). Grep the WHOLE `cmd/` + `pkg/` tree for the changed field/scalar (`select: argmax-mean`), not just the named shape files; a shared test helper multiplies one stale literal into several red tests. (Extends the drift-guard-fixture note above.)
-
-## Ledger analysis — re-run appends a new code-fingerprint cohort (metis#19 M2; re-keyed metis#27)
-- **Re-running a sweep after a step's code changes APPENDS a new `code_fingerprint` cohort to the ledger — it does not replace the old rows.** `AggregateView` groups by `(free-params, code_fingerprint, level)`, so old and new configs are *distinct* groups; an unscoped `metis ledger select`/`show` over the mixed ledger silently blends two code-versions (in #19 M2: argmax-mean picked the OLD pre-complexity md=8 with cx 0.0, and the parsimony guard tripped on the old complexity-less rows). Scope offline analysis to the fresh cohort via `--fingerprint <prefix>` after any re-fit (git-style prefix match; `metis ledger fingerprints` lists the cohorts with their commit/dirty/timestamps). This is by-design (code-version-addressed provenance = the point of the fingerprint), but a real analysis footgun — the mixed ledger looks like one run. *(Pre-#27 this cohort key was the repo-HEAD `sweep_sha` column, scoped by `--sweep <full-SHA>`; #27 re-keyed cohort identity to the per-file D-closure `code_fingerprint` and folded the shape blob-hash into `point_addr` — so the vocabulary above supersedes any lingering `sweep_sha`/`--sweep` references.)*
-
-## Plan authoring — temporal availability of runtime-discovered values (metis#27)
-- **When a value is runtime-discovered, its compute+write site must be where that input actually exists in the control flow — not a function that runs before it.** #27's `code_fingerprint` = hash of the post-run `D` closure; the first plan drafted it into `buildRecord`, which runs BEFORE `captureRunCode` produces `D` (temporally impossible — would hash an empty closure). The correct site is `backfillCodeManifest` (post-capture, already re-writes the whole record). A plan can cite correct file:line ranges yet place a computation at a point where its input isn't available. When reviewing a plan, trace the *temporal availability* of every input at its claimed compute site, not just that the line numbers are real.
-
-## Ensemble complexity measure follows combination semantics (metis#21 — GBM branch)
-- **The reduction over an ensemble's sub-models must match how the ensemble COMBINES them — mean for averaging, SUM for additive.** #19 set rf complexity = *mean* leaves/tree (bagging averages independent trees → count-neutral, Breiman's LLN). GBM (metis#21) is the inverse: boosting is *additive* (F=Σ trees, sequential; ESL §10.2, Friedman 2001), so complexity = *total* leaves *summed* across all boosted trees — count-SENSITIVE, because iteration count is boosting's primary overfitting knob (ESL §10.12; "unlike RF, GBT can overfit"). A mean-per-tree GBM measure would be max_iter-blind → the parsimony rule couldn't prefer fewer rounds → affirmatively wrong. Don't copy a sibling model's reduction; derive it from the combination rule. (XGBoost's own Ω=γT sums leaves across the ensemble — the production precedent.) Measure the REALIZED artifact on the fitted object (`n_iter_ < max_iter` under early stopping), not the configured cap.
-- **A regularization/shrinkage knob can decouple a structural complexity proxy from effective capacity ACROSS its values — contain by fixing the knob in the sweep (a stratum), not by inventing an unvalidated correction.** GBM's `learning_rate` (shrinkage) means a low-ν/many-tree config has more leaves yet often regularizes better (Bühlmann–Hothorn: shrinkage slows per-step DoF growth) — so total-leaves misranks across ν. The fix is NOT to bolt on a ν-weighted measure (an untested modeling assumption) but to fix `learning_rate` in the baseline shape (fixed-ν stratum, where the proxy is a clean monotone DoF measure) and defer the correction until a real sweep exposes the misranking (measure-before-rebuild). The model branch stays ν-general; only the demo shape fixes it.
-
-## Nested-CV + read-confinement (metis#23 design + M1/M2 reviews)
-- **A "reuse the existing trace" plan must confirm the trace captures the reads you actually need.** #23 planned to reuse metis's read-trace for leakage confinement, but recon found it's a *code* closure (`.py`+`uv.lock` allowlist + `METIS_RUN_DIR` exclusion + parquet's C-extension bypass of the audit hook) — the *data* reads to confine were never in it. The enforcement had to move to the `metis.io` **data chokepoint** (`exp_path`), which covers parquet because it asserts at path-resolution, not via the audit hook. Verify a to-be-reused mechanism's *content*, not just its existence.
-- **A confinement chokepoint's placement is decided by the resolver's branch structure, not by "where data is loaded."** The assert belongs in `exp_path` ONLY — `load_dataset`/`dataset_dir`-upstream also serve run-dir handoff reads (a sibling of the analysis root) and confining there crashes every legit `features→train` handoff. And this is **invisible to every offline test** (base-dataset tests never exercise a confined handoff; fake-exec e2e bypasses `metis.io`) → a "handoff-read-PASSES" regression test is mandatory. Corollary (M2): a run-dir artifact (`analysis_i`) read as a *handoff* takes the upstream branch and **bypasses the chokepoint** — to be confined it must be referenced **exp-relative** so the read routes through `exp_path`.
-
-## Plan authoring — structural-security claims + estimand-changing refactors (metis#36 design review)
-- **A "structurally impossible" security claim must name the exact residual on disk — and O(1) storage is mutually exclusive with physical-absence.** #36's plan claimed leakage is "structurally impossible because an X-reading step never sees a label," but resolved the y-artifact to a *full-domain* file (O(1), written once) sitting in the step-readable dataset dir — so every held label is physically present and reachable by a direct `read_parquet(<base>/y.parquet)`, a road a `with`-level one-road parse check can't catch (it's the same `dataset: adapt` reference the legit X-read uses). The old seal had the strictly-stronger property: assessment rows *physically absent* + an FS chokepoint. You can't have both O(1) storage and physical-absence. Honest framing: "structural for X-reads (X carries no target column); for label-reads, sanctioned-API-enforced + a chokepoint that refuses the *direct* read." And the leakage e2e must assert the **direct** read fails, not just the API road — else "structural" is untested. (When a design promises both O(1) and absence, it hasn't found the tension yet.)
-- **When a refactor changes the estimand, "reproduce the old number" is a self-contradictory regression anchor.** #36's plan anchored M2 on reproducing the seal-era honest-beat *on the new transductive default* — but transductive diverges from the seal *by design* (that divergence is the whole point), and metis#42 had already quantified it (ticket_survival inner increment 4× as coverage rose). Anchor on the mode that *matches* the old semantics (here: prospective row-drop), treat divergence under the new default as the expected result, and disambiguate *which* number: the internal CV estimate diverges, but the shipped **public** score is invariant to the refactor (ship refits on all rows regardless) — so say which one the anchor tests, or it tests nothing.
-- **A selection-correctness guard is NOT a ship-only step — it belongs on every path that trusts a winner.** M2 forked `GuardComplexity` out of the nested path along with the genuinely ship-only tail (writeManifest/reportWinner/shipWinner), so `driver:cv` + a parsimony rule + a non-reporting model would **silently mis-select per outer fold** while `driver:single` loudly rejected the same shape. When forking a path's tail, classify each step as *ship-only* vs *correctness* — the latter runs on both. (Refactor the guard's input builder to a free function so both paths share it — ARCH-DRY.)
-- **When a full real e2e is blocked, prove the mechanism through the real chain in composable pieces + record the residual as a tracked deferral.** #23's confinement: a real-subprocess test drives `execStep → uv cv-split → exp_path` (enforcement), the driver wiring is code-confirmed, and the missing orchestration-level e2e (blocked on a toy data-step) is filed as a follow-up issue — not left as an implied-but-absent guarantee. A composition of real-chain proofs beats one mock e2e; a named deferral beats a silent gap.
-- **A full-context fork that stops at a genuine design blocker (rather than guess-building) is working as intended.** The M2 fork built the one unambiguous piece (`CVDriver`), hit the confinement-routing decision, and reported it instead of guessing ~400 lines — exactly right. Resolve the decision in the main session (warm context), then either re-fork the now-unambiguous remainder or build it in-session.
-
-## Leakage-safe target features — prove at the feature level, two-level safety (metis#20 plan review)
-- **A target-encoding self-leak is proven at the FEATURE level, not the CV level.** The crisp, non-flaky proof is `corr(encoding, own_label)` on synthetic *no-signal small-group* data: naive-incl-self ≈ 0.7, cross-fit ≈ 0 (huge margins, seed-robust) — plus a real-signal counter-test (`enc.std() > 0` + per-group enc ≈ true rate) to kill a "return prior/constant" cheat. This isolates the leak from model + CV noise; measuring downstream cv-inflation is noisier and harder to make discriminating. A feature that correlates with its own label is the *cause* of cv inflation, so proving it at the encoding level is a strictly superior operationalization of a "naive inflates cv" Done-when.
-- **"LOO leaks more than K-fold" is NOT visible in `corr(enc, own_label)` on random data — both are ≈ 0.** LOO's leak is *within-group invertibility*: in a realized group, raw-LOO `enc_i = (S − y_i)/(n−1)` is a deterministic function of (group, own label) — all survivors collapse to one value, all non-survivors to another, separated by exactly `1/(n−1)`, which a flexible model that isolates the group inverts. Test that *structure* directly on a constructed group (deterministic, crisp); never assert a marginal-correlation inequality between two near-zero noise quantities (it passes/fails by seed — a fragile test that looks meaningful).
-- **The shrinkage prior conventionally includes the encoded row** (global `y.mean()` blended via `m·prior`), matching sklearn `TargetEncoder` — an O(1/N) residual self-dependence that is accepted, not a bug. Don't write an absolute "own label never used" claim in a docstring; qualify it "never via the group aggregate."
-- **Two-level leakage safety for a target feature is separable in code, and both levels are needed.** The *fit-mask* (only analysis rows in `fit_idx`) gives cross-*fold* safety even when assessment rows carry real labels (they're excluded from every aggregate); the *internal cross-fit* gives *within*-fold safety (a fit row's own label never enters its own OOF encoding). The engine gives the first for free (features live in the `pipeline` phase); the feature step owns the second (no marker — the step's own responsibility). Keeping them separate makes each independently testable.
-
-## Parallelizing an injected-seam / content-addressed system (metis#31 plan review)
-- **Parallelizing a loop turns every serialized side-effect into a stampede — audit ALL of them, not just the obvious shared writes.** A per-iteration `git status`/`git rev-parse` (or any lock-taking helper) that was harmless serially becomes concurrent contention (`.git/index.lock`) once the loop fans out; combined with error-swallowing that maps "probe failed" onto a domain signal ("code changed mid-sweep"), it becomes a spurious whole-run abort. When adding concurrency, grep the leaf for EVERY subprocess/lock/file-write, not only the data you're protecting — and make a swallowed probe error never masquerade as a definite state change (`if s != "" && s != frozen { abort }`).
-- **A concurrency fix needs a reader-vs-writer test, not writer-vs-writer.** Concurrent identical-content `os.WriteFile`s whose only read is after `wg.Wait()` can't observe a torn write, and `-race` treats filesystem ops as non-races — so the test passes even against the non-atomic code it exists to condemn. To prove a temp+rename atomicity fix, race a `lookup`/read loop against the writers (or vary payload length) and assert the reader never sees a partial/parse-failing file.
-- **When a test seam injects a fake at the enforcement point, add ONE test that exercises the real enforcement.** If the semaphore/lock lives in the production leaf (`execStep`) but every e2e injects a fake exec that re-implements the guard, the suite validates the PATTERN, never the WIRING — a forgotten acquire or a mis-threaded `runOpts.leafSem → execStep.sem` passes green. A thin test hitting the real leaf (a trivial resolvable subprocess, sem cap 1, two concurrent Execute, assert serialization) closes the gap.
-- **Order-preserving fan-out gives bit-identical float reductions — but only for the reduce, not for append-order side-records.** Index-addressed result writes + fixed-order `Tell` make `Aggregate` bit-identical to serial (the honest `Done`); but separate bookkeeping slices (`pass.points`, ledger rows) appended INSIDE the concurrent `runPoint` land in completion order → non-deterministic `manifest.json`/`.ledger.csv` bytes. Sort append-order side-records by a content key before persisting if reproducible bytes matter (content-addressing posture).
-- **"Wrap X in a mutex" written in a design's prose is not done until a task builds it.** A promised synchronization affordance (a locked `out` writer) that never appears in the task list is an aspiration; the `-race` gate (or a torn progress line) bills you for it. Track it as a task or delete the promise and make `-race` tests pass `io.Discard`.
-
-## Testing order-preservation without deadlocking the serial baseline (metis#31 impl)
-- **A completion-reversal barrier proves a parallel exec keeps INPUT order — but it DEADLOCKS a serial exec.** To prove `ParExec` writes results by index (not completion order), the strongest runPoint makes point `i` block until point `i+1` finishes (so completion order is the reverse of input). But a serial `SeqExec` runs point 0 first, which waits for point 1, which never runs → hang. Fix: use the reversal barrier ONLY on the parallel run; give the serial baseline a plain (no-barrier) runPoint that computes the same scores. Equal results then prove order-preservation. (Corollary: any "wait-for-another-point" test harness is parallel-only by construction.)
-
-## Milestone-splitting a content-address-feeding schema field (metis#32 M1)
-- **A schema field that feeds the content-address can't be milestone-split from its downstream consumers.** metis#32's plan split "delete `driver:`" (M1) from "the no-auto-ship behavior + retire the old flow" (M2). But `driver:` is a hashed shape term, and deleting it forces the run-mode to be *derived* (config-count dispatch), which *mechanically* flips every multi-config shape from flat-ship to nested-no-ship AND breaks ~9 inline-`driver:` test fixtures — so the behavior change + the in-repo test migration are pulled into the SAME milestone as the field deletion, not the next one. When a plan splits "delete field X" from "handle X's downstream behavior," check whether X is load-bearing for a derived dispatch or the content-address; if so, they're one boundary. (Only genuinely-decoupled consumers — a peer-repo RUNBOOK, retiring sibling commands, atlas docs — stay in the later milestone.)
-
-## Deleting a "self-contained" command's helpers (metis#32 M2)
-- **Before deleting a retired command's helpers, grep the WHOLE package (every file), not just the command's own file.** Retiring `metis promote` (`ledger_cmd.go`), I confirmed its helpers had "no non-promote refs" — but scoped the grep to exclude `ledger_cmd.go` and missed that `freeParamTupleMap` was ALSO called by `ledger show`'s `freeParamTuple` in the SIBLING `ledger.go`. The build caught it (an undefined ref), but a package-wide `grep -rn <helper> pkg cmd` (no per-file exclusion) would have caught it before the delete. A "self-contained" block often has one helper a sibling quietly reuses.
-
-## Deferring PART of a migration surface to yourself (metis#32 kbench migration)
-- **When you scope impl forks to "this repo only, I'll do the peer write myself," enumerate EVERY peer file the plan listed — not just the doc.** metis#32 removed the shape `driver:` field + `metis run` auto-ship (a breaking CLI change). The plan's migration surface named the kbench RUNBOOK **and** the kbench sweep shapes **and** the kbench e2e test. I told the forks "metis-repo only, defer kbench to me," then migrated only the RUNBOOK — leaving `titanic-sweep.md`/`-smoke.md` still carrying `driver:` (so `metis run` hard-failed to parse) and `e2e/thread_test.py` asserting the old flat+auto-ship model. The operator hit the parse error immediately after "merged + done." A breaking change isn't done until its DOWNSTREAM CONSUMERS parse/run/pass — grep the peer repo for the removed field/command/behavior (`driver:`, `ledger select`, `metis promote`, "shipped winner") before declaring the migration complete, and treat the peer-repo consumers as part of the issue's close-verification, not an afterthought.
-
-## A substitution seal needs a sole-road check (metis#35)
-- **A seal that substitutes a derived artifact and deletes its producers is sound ONLY if that artifact is the sole road from the deleted producers into the consumers — check for bypass edges before deleting.** metis#23 substituted `analysis_i` for the base dataset and dropped the data phase; `features`' `raw: get-data` was a second road (an upstream step-id ref, resolved by `upstream_path` which the L2 confinement deliberately exempts) → dangling read the crafted fixtures never hit. Before deleting a producer, enumerate EVERY `with` leaf of every downstream step for references to it — and note that the ADDRESSING SCHEME decides which guard even sees the read (exp-relative path → confined `exp_path`; step-id → exempt `upstream_path`).
-- **A shadow-sweep grep must match every serialization of the reference, not just the canonical one.** The same `raw: get-data` edge existed as YAML in shapes and as JSON (`"raw":"get-data"`) in generated winner experiments; a pattern built from the hand-authored form under-enumerates. Derive the pattern from the KEY NAME, run it from the repo root (so `atlas/`, `workshop/`, generated artifacts are in the net).
-- **A two-repo fix must enumerate BOTH repos' atlases** — the close gate only checks the repo you close in; the peer's atlas goes stale silently by default (kbench's atlas documented the two-road boundary verbatim).
-- **An assertion written for a path that has never executed is untested code — expect it to be wrong the first time the path runs.** The nested smoke e2e's `0.0 < score` bound (authored in the #32 migration while the test was xfailed) rejected a legitimate 0.0 accuracy on ~3-row fixture folds the first time the test actually ran.
-
-## Default `--parallel NumCPU` thrashes on real sklearn leaves — pin BLAS threads
-
-**metis#42 probe (2026-07-14).** First launch of the k10 sweep with default `--parallel` (NumCPU=12)
-drove load-avg to 83: ~22 Python leaves × multi-threaded BLAS each. 885 trains STARTED, zero
-finished in ~4 min — the run looked alive while making no progress. The `--parallel` help text
-documents exactly this caveat; it still shipped as the default behavior on a real sweep. Relaunch
-with `OMP_NUM_THREADS=1 …=1 --parallel 8` → load ~21, ~107 trains/min, done in ~28 min.
-
-**Rule:** for a real (subprocess-leaf) sweep, the leaf's thread env must be pinned and
-`--parallel` capped below core count. **RESOLVED BY DEFAULT since metis#48** — bare `metis run`
-now injects the four pins at both spawn seams (export a `*_NUM_THREADS` value to override); the
-rule survives for non-metis contexts and as the WHY behind the default. Diagnostic signature of
-the thrash: starts ≫ completions with the process alive (throughput ≈ 0) — which is also why the
-#38 progress board needs a moving-average runs/sec line, not just liveness.
-
-## Plan-sketch folds: set-cardinality, not incremental counts (metis#39 plan review)
-- **A "keep the latest, count the others" fold specified incrementally silently overcounts under non-monotone input — specify it as set-cardinality (`len(set)-1`) with the latest tracked separately.** The #39 plan's ExtraCommits sketch counted displacement transitions per ROW; interleaved-timestamp records (two concurrent sweeps, same fingerprint) would have inflated it row-for-row, and the plan's own happy-path fixture (2 records, monotone) structurally couldn't catch it — add an out-of-order fixture whenever a fold's correctness depends on input order. metis-specific ground truth: **ledger rows are NOT time-ordered** (`sortPointRuns` orders by content key; append order is sweep-completion order).
-- **When a plan states the same helper in two places (Core-concepts table + task sketch), the signatures WILL drift — single-source the signature in one place and make the other reference it.** The #39 plan declared `printFingerprintLine` with and without a `status` param in two sections; an implementer following either writes a different function, and output-fragment tests wouldn't catch the divergence.
-
-## Plan-review lessons (metis#30 plan)
-- **A plan that says "extend the existing e2es" must be verified against what those tests actually exercise and capture.** The #30 plan named a "flat e2e" that never enters the instrumented code path (it runs a plain single experiment, not a sweep) and passes `out: io.Discard` — plans inherit stale mental models of the test suite; grep the named test before approving the task. (There is NO real-uv sweep e2e in this repo; nested e2es drive foldFakeExec.)
-- **Event-carried metadata is only as fresh as the first event.** For hierarchical progress, the outer level's first completion can be the END of the run — static facts (totals) must be seeded at wiring time from the same single source, not learned from the stream.
-- **For a fan-in event seam shared across concurrent contexts, the payload OR the closure binding must carry the context identity — and beware lookalike identities.** `FoldPoint.Partition` looks like an outer-fold discriminator but is byte-identical across all outer folds; the real identity comes from per-pass closure binding (`runOuterFold` knows `i` at closure creation).
-- **Grep-verify counting claims in plans ("all N call sites").** A wrong count signals the enumeration was estimated, not run — the same plan also missed that `countSampler` hardcodes its point-set (a required test-fake refactor left unstated).
-
-## Plan-review lessons (metis#38 plan)
-- **Writer identity is temporal, not call-graph.** When a plan claims "all output routes through one wrapper," audit every construction-time capture of the underlying writer (pools, closures, structs built earlier in the call chain) — a component that grabbed the writer BEFORE the wrap exists is an invisible bypass. Grep the writer variable at every `new*(out)` site, not just Fprintf sites. (The forkserver pool + captureSweepCode's o.out both captured pre-board writers.)
-- **"Ticker calls repaint()" is a deadlock-or-staleness smell.** In state-owner + painter designs, fix ONE global lock order (state.mu → painter.mu) and route timers through the state owner; a painter-first timer either inverts locks via a state callback or repaints a frame that can't refresh time-derived values (ETA/rate decay).
-- **A stdlib-only TUI plan must name its terminal-size mechanism explicitly.** Width detection is the one capability ANSI pin-bottom genuinely needs beyond stdlib's comfortable surface, and a wrong width isn't cosmetic — a wrapped line breaks the cursor-up erase-count bookkeeping the whole repaint scheme rests on.
-
-## Plan-review lessons (metis#48 plan)
-- **A constructor-grep is not a coverage proof — also grep direct callers of the layer BELOW the wiring point.** Wiring computed in an entry function (`runExperiment`) silently misses call paths that enter beneath it (select_cmd.go builds fresh `runOpts` and calls `runResolvedExperiment` directly). When a plan claims "every production construction is threaded," check the constructor sites AND downstream-function callers; every bypass found is either threaded or documented as a conscious exclusion.
-- **Doc-consistency sweeps must include Go sources, not just `*.md`** — operator guidance lives in flag `--help` strings and load-bearing comments (main.go's `--parallel` help told operators to hand-pin BLAS).
-- **A plan's inline test code must be written against the VERIFIED fixture/format; promote any fixture gap to an explicit numbered step.** A parenthetical "check the fixture" hedge next to code that contradicts it breaks the TDD red-green sequence and invites wrong-reason debugging (env-dump dumps METIS_* only; experiment steps live in YAML frontmatter, not a fenced block).
-- **A cross-repo deliverable is invisible to the closing repo's review window — pin the peer repository + exact commit in the issue Log before close.** A checked plan row and prose saying “RUNBOOK updated” are not independently traceable when the actual diff lives in kbench. Record the peer commit as soon as it lands so the boundary reviewer can verify the requirement without trusting the implementor's assertion.
-
-## Plan-review lessons (metis#25 plan)
-- **Env-dependent truth can't live in a shared static config.** Before pinning hashes (or any
-  environment-specific constant) into a config file, enumerate every consumer of that file — the
-  same kbench shapes are driven by both the live CLI (real data) and the hermetic e2e (fixture
-  data), so one pin block cannot satisfy both; the seam must be explicit (here: pin only the
-  live-only shape).
-- **When hashing "everything in a directory," mirror the runner's existing exclusion set.** Step
-  dirs mix artifacts with contract files (with.json etc.); any scheme where a config file would
-  pin its own hash is a self-reference red flag to check for explicitly.
-
-## Close-review lesson (metis#51)
-- **A new column/read on a struct field must be checked against EVERY producer of that field —
-  including aggregation/view layers that repurpose it.** PointAddr was overwritten with a
-  synthetic group key by AggregateView; the new `ledger show` column rendered it verbatim on
-  the --sort path (the operator's actual flow) while the direct-render test stayed green. When
-  a Done-when names a specific invocation form, the round-trip test must drive THAT form
-  end-to-end, not the nearest pure function.
-
-## Close-review lesson (metis#53)
-- **An injected test fake must mirror the production seam's FAILURE semantics, not just its
-  happy path.** gitBlobHashes fails the whole batch on one missing path; a fake that
-  per-path-skips instead certified behavior production can't exhibit (the "missing detected"
-  unit test passed while the real flow rendered every sibling as missing). When faking a
-  batched IO call, fake the batching.
-
-## Plan-review lessons (metis#45 plan)
-- **Content-hash compat is a field-tag question.** Adding a field to any struct that reaches
-  record.CanonicalHash/json.Marshal needs `json:",omitempty"` for absent-value backward compat —
-  yaml-only-tagged structs marshal under raw Go field names WITH zero values. Grep for
-  hash/marshal consumers of any struct you extend before claiming "byte-identical".
-- **Re-grep by FIELD, not by local variable.** A completeness net keyed on the threading
-  variable (splitK) misses sites reading the source field directly (partitionRef, dry-run
-  banners) and whole-struct marshals. Shadow-sweep the struct field.
-- **A drift guard is only as strong as its fixture.** An optional-field schema addition is
-  unexercised by a fixture that omits the field — pair every optional-key CUE change with a
-  fixture carrying the key.
-
-## Close-review lesson (metis#55)
-- **Cite only tests that exist in the tree.** A diagnosis-time tool (pyte terminal replay,
-  used interactively in #46) is not a checked-in harness — referencing it in Done-when/Log
-  asserts coverage the suite doesn't have. Before writing "X test stays green," grep for X.
-
-## Plan-review lessons (metis#58, 2026-07-18)
-
-- **`go build ./...` never compiles `*_test.go` — it cannot find all consumers of a type
-  change.** A rename/retype plan must also grep `_test.go` and name each affected test as a
-  REWORK item: tests asserting old CLI surface (banner substrings, error text) need design
-  decisions (which assertions survive), not mechanical compile fixes.
-- **"The parser rejects X" only guards the CLI path.** `runOpts` is a direct-construction
-  seam (every e2e builds it without flag parsing) — an invariant a plan relies on ("< 1 can't
-  occur") must hold at the validation layer too. Before deleting a guard, check whether an
-  existing test (e.g. "negative m") exists precisely for that seam.
-- **When splitting a conflated variable (splitK → splitK+runK), trace BOTH code paths through
-  every display/totals consumer.** The flat path shared `seededTotals`; a wrong denominator
-  there is silent (display-only, untested). Enumerate consumers per-path and state which
-  value each path passes.
-
-## Implementation lessons (metis#58, 2026-07-18)
-
-- **Escalation/cache tests need subset-stable fakes.** Exact spawn-count assertions (run B =
-  2 trains + outer-refit HIT) only pin down because the fake's winner is invariant under any
-  fold subset (`b` 0.90 > `a` 0.80 + nudge ≤ 0.04). If the fake's argmax could flip between a
-  2-fold and 3-fold mean, the refit's HIT/MISS goes nondeterministic and the test flakes.
-  Check winner stability before pinning counts.
-- **A "zero hits" doc-sweep gate must exempt text documenting the removal itself.** Retirement
-  notes legitimately quote the retired form; scope the gate accordingly or it's unsatisfiable.
-- **`go build ./cmd/metis` bare fails here** ("output metis already exists and is a
-  directory" — the package-dir/binary name collision). Always `-o bin/metis`; plans should
-  carry the flag.
-
-## Plan-review lessons (metis#59, 2026-07-18)
-
-- **Verify referenced fixtures exist.** A plan test invoking a noun like "the skewed fixture"
-  must be checked against the tree — specs mint nouns that were never built. One `ls testdata/`
-  at plan time prevents an implement-time scramble.
-- **Pin the failure site for threaded validation knobs.** A knob threaded through N layers
-  with at-use validation silently accepts garbage on any path that never consumes it (the
-  foldless ship refit). State WHERE the loud error fires; eager validation at the entrypoint
-  is usually the answer.
-- **An empty Done-when at plan time is a finding.** Synthesize it from the Spec when planning —
-  it's the acceptance contract the close gate demands; writing it late invites post-hoc
-  rationalization.
-
-## Plan-review lessons (metis#60, 2026-07-19)
-
-- **Check split legality against the smallest frame a test will actually feed it** — per-fold
-  training-row and per-class counts, not full-frame counts (12-row frame → 6 training rows →
-  StratifiedKFold(4+) illegal; the full-frame arithmetic looked fine).
-- **When a test asserts recovery of an analytically known optimum, compute the optimum and
-  confirm it lies inside the search grid** (−log-prior 3.11 vs grid max 3.0) before writing
-  the assertion — else ε silently absorbs a real design flaw.
-- **A plan that deviates from its spec must carry the artifact-reconciliation task itself**
-  (issue ## Revisions) — deviation rationale only in the plan leaves the issue lying by
-  aspiration at close.
-
-## Implementation lessons (metis#60 M1, 2026-07-19)
-
-- **Verify WHY each new test is red, not just that the suite fails.** One of four step tests
-  was green pre-implementation (the unknown `with` key was silently ignored → both compared
-  runs identical); a vacuously-green test is a spec bug unless a sibling carries its red.
-- **Tie-breaking in grid searches is a contract, not an accident.** "The grid includes the
-  no-op" doesn't make the no-op win ties — initialize best AT the no-op and replace only on
-  strict improvement, else uninformative inputs return an arbitrary grid corner.
-- **Pin indices-vs-labels in any decision function's docstring** — index returns silently
-  coincide with labels for 0..K-1 int codes and explode otherwise; callers map via classes_.
-
-## Plan-review lessons (metis#60 M2, 2026-07-19)
-
-- **A "reuse, don't reimplement" instruction is only real once the plan names the symbol.**
-  "The existing single-step exec path" sounded settled but didn't exist — and the plausible
-  substitute (runResolvedExperiment) would clobber the design's own record.json. Verify the
-  named reuse point against the code before approving.
-- **A new verb entering a system with loud-honesty guards must inherit the guard posture.**
-  Data-shape validation (ids/columns) comes naturally; provenance guards (fingerprint/shape
-  identity) get missed — grep the sibling verbs' guards and ask which apply.
-
-## Implementation lessons (metis#60 M2, 2026-07-19)
-
-- **A plan that names the exact reuse symbol turns implementation into transcription** —
-  execStep.Execute + stepPath() named at review time meant zero exploration; the pre-review
-  "existing single-step exec path" (which didn't exist) is the whole argument for
-  symbol-level plan review.
-- **A 2-line #!/bin/sh step script makes single-step exec hermetically testable** — a toy
-  submission step (copy predictions → $METIS_STEP_DIR) exercises the full env contract +
-  literal-path landing with no real binary or venv; reuse for future step-seam verb tests.
-
-## Implementation lessons (metis#65 — ensemble/catboost/seed, 2026-07-19)
-
-- **Adding a model kind is genuinely Python-only** (confirmed a third time): `MODELS` +
-  `make_model` + `complexity`, and the Go `FamilyOf` derives `train.model=<kind>` structurally
-  from the `$any`-map branch label — no Go/CUE enum, no README kind list. Keep kind names
-  hyphen-free (the ensemble member-name recovery does `rsplit("-", 1)`).
-- **Seed-effect tests need NON-separable data + a `predict_proba` comparison.** rf bootstraps
-  (different seeds) converge to identical HARD predictions on trivially-separable data —
-  `predict()` equality is a false negative for "did the seed reach the fit". Use a noisy frame
-  and compare probabilities. (hist_gbm's `random_state` is a further trap: a no-op below the
-  ~10k early-stopping cutoff — use rf for seed-diversity tests.)
-- **A `$any` model map keys branches by KIND**, so only ONE `ensemble` branch fits per shape
-  (blend and seed-bag are both `ensemble` → same `FamilyOf` → indistinguishable in select).
-  Multiple ensembles must live in separate sweep cohorts.
-- **CatBoost integration checklist** (any heavy external estimator): `allow_writing_files=False`
-  (its default writes `catboost_info/` — an IO side-effect breaching ARCH-PURE), `logging_level="Silent"`,
-  `thread_count=1` (orchestrator owns parallelism + determinism); lazy-import it inside the
-  make_model branch (keeps matplotlib/plotly/graphviz out of the forkserver preload for other
-  kinds); `.predict()` returns `(n,1)` and can return FLOAT labels → normalize at the ONE
-  `predict()` site with `.reshape(-1).astype(classes_.dtype)` (a no-op for sklearn kinds).
-- **Estimate block grammar (ariadne #182-branch parser):** `item:` lines must be BARE
-  (`item: <slug>  design=<f> impl=<f>`) — a trailing `# comment` breaks `itemRE` and the line
-  falls through to "unknown estimate field". Total must reconcile: `total = Σdesign×(1+buffer) + Σimpl`.
-  Slugs are a CLOSED vocabulary (`helptext/estimate.md` / `internal/estimate/vocab.go`) — invented
-  slugs are rejected; map work to `greenfield-go-module`/`smaller-go-module`/`tui-screen`/
-  `method-b-decisions`/`milestone-review`/`atlas-docs`/…
-- **Commit the milestone's CODE before `sdlc milestone-close`/`sdlc close`.** The boundary review
-  reviews the COMMITTED window (`BASE^..HEAD`); uncommitted working-tree code is invisible to it, so
-  a close run with dirty code gets a meaningless review (I ran M1's close on spec-only commits once —
-  had to stop it, commit, and re-run). Flow: implement → `go test`/`vet` → COMMIT → milestone-close.
-- **Don't edit the issue/plan/atlas files WHILE a close's review subprocess runs.** `milestone-close`/
-  `close` release the SDLC lock during the (multi-minute) LLM review and reacquire at finalization; if
-  the issue file or HEAD changed meanwhile they REFUSE ("reviewed state changed"). Commit ALL
-  issue/doc/plan edits BEFORE launching the close; let the binary own its own log-line/trailer write.
-- **FIX-THEN-SHIP is fixed in the SAME close commit, not a re-review loop (#174).** Fix the findings,
-  bundle them + the issue-file close mutations into ONE commit carrying the `Review-Verdict:`/
-  `Review-Window:` trailers; do not re-run the same close. (A genuinely wrong review window — e.g.
-  codeless — IS a legitimate re-run.)
-
-## Reuse the domain reducer — don't hand-roll a biased twin
-- **When a codebase already has a dedicated reducer for a concept, reuse it; a hand-rolled "close
-  enough" version silently drifts.** metis#66 M2's `readIncumbent` reduced the ledger's per-family
-  incumbent with `ledger.AggregateView` (groups by EXACT free-params) — but `family.go` documents
-  that a family's winning config varies across outer folds, so AggregateView splits one family into
-  per-config subgroups and returns the optimistic MAX subgroup mean, inflating the bar and
-  over-stopping would-be winners. The correct reducer (`FamilyEstimate`/`familyEstimateFromLedger`,
-  what `metis select` ships) already existed. The single-config-per-family e2e couldn't catch it
-  (the two reducers coincide there) — the boundary review did. Lesson: if the Spec says "the same
-  X that Y uses," literally call Y's function; and add a test whose fixture EXERCISES the divergence
-  (multi-fold rows with a varying winner), not just the degenerate case where the twins agree.
-
-## Multi-agent SDLC coordination (metis#66, 2026-07-19)
-
-- **A subagent that "waits for a review verdict via a Monitor" can stall silently.** The #66
-  subagent implemented well but kept stopping/re-notifying without progressing — its Monitor-based
-  verdict-wait never delivered. Do NOT keep re-resuming a stalled subagent (it re-enters the same
-  wait). Instead: INSPECT the repo state (`git log --oneline`, `ls workshop/plans/*review*`,
-  `sdlc state`), verify tests YOURSELF, and drive the remaining gates directly.
-- **Two agents driving the same issue's closes RACE.** While one agent's `sdlc close` was mid-
-  review (lock released for the LLM subprocess), the other committed a milestone-close, moving
-  HEAD — so the first close refused to finalize as "reviewed state changed / stale". Rule:
-  `TaskStop` the other agent BEFORE taking over, confirm HEAD is stable, then run the gate once.
-  A close that applied its file mutations but refused to finalize (concurrency) can be committed
-  by hand (the close "does NOT commit; the agent commits") + `sdlc merge` — the publish gate's
-  anchor check accepts the hand-committed codecomplete when HEAD is stable.
-- The fresh-eyes boundary review still caught the one real bug (I1: `readIncumbent` used
-  `AggregateView` — a per-config MAX — instead of the canonical per-family `FamilyEstimate`,
-  biasing the incumbent optimistic → over-stop). The review discipline held through the mess.
-- **A byte-identical / unobservable decision must be extracted to a PURE function to be testable
-  (metis#67).** The default scheduler choice (`prioritySem` vs `chanSem`) produces byte-identical
-  run artifacts by design, so it can't be asserted from any output — and it was buried in
-  `runExperiment`'s IO glue operating on a local `o`. The change-code plan judge (correctly) failed
-  the plan: the promised "default-uses-prioritySem" test was unwriteable. Fix: extract
-  `selectLeafBudget(maxParallel, globalFanout) leafBudget` — a pure function unit-tested by
-  concrete return TYPE. ARCH-PURE isn't just cleanliness; here it was the ONLY way to make the
-  guarantee testable. When a decision has no observable output, the pure function IS the seam.
+# Lessons
+
+Compact guidance for Metis experiments, ledgers, schemas, and reproducible data
+work. Keep numerical and incident detail in the issue or experiment record.
+
+## Reproducibility and provenance
+
+- Every result carries code fingerprint, data fingerprint, configuration, seed,
+  dependency versions, and the cohort/ledger epoch that produced it. A display
+  label or cache filename is not provenance.
+- A rerun appends a new fingerprint cohort; it must not overwrite evidence from a
+  prior code or data state. Content-addressed storage writes atomically and
+  verifies the object it reads.
+- Cache keys include every input that changes semantics, including schema fields,
+  model options, feature policy, fold definition, and runtime-discovered values.
+  Never reuse a compatibility cache after an authority downgrade.
+- A durable ledger is append-only and exposes commit outcome. Test partial writes,
+  duplicate appends, restart, and a reader that sees mixed-format history.
+- A substitution or migration is complete only when the old path is impossible
+  or explicitly supported; prove the sole road with an executable guard.
+
+## Data and statistical validity
+
+- Separate selection, fitting, and evaluation. Nested CV and read confinement
+  must prevent target, fold, time, and future-data leakage at the feature level.
+- A feature is predict-time safe only under an invariance test: scramble or drop
+  the target and verify the prediction path does not change for the forbidden
+  reason.
+- Measure an evaluation noise floor before optimizing a leaderboard or threshold.
+  A small score delta without paired folds, repeated seeds, or a two-scheme diff
+  is not evidence of an improvement.
+- Complexity follows combination semantics. Count set cardinality and actual
+  combinations, not incremental loops or a proxy selected for convenience.
+- A domain-informed baseline and residual target are hypotheses. Compare paired
+  against the same folds and the explicit residual-zero baseline.
+- A result that survives multiple independent washes is a structural finding;
+  stop tuning and report the limitation rather than inventing a lever.
+- Public test rows, hidden duplicates, cluster anchors, spatial buffers, and
+  regional trends need a stated estimand. Do not call a learned structure a leak
+  without quantifying the alternative scheme.
+
+## Architecture and boundaries
+
+- Reuse the domain reducer; do not hand-roll a biased twin. A helper is pure only
+  when its dependencies are pure, not because its expression looks deterministic.
+- A content-addressed or injected seam has a production scheduling owner. Tests
+  must cross that owner and join every worker before asserting order or cleanup.
+- Parallelization changes ordering, cache pressure, and failure timing. Pin
+  order-preservation without deadlocking the serial baseline, and bound BLAS or
+  NumPy threads when `--parallel NumCPU` fans out real leaves.
+- A schema field that feeds content identity must be migrated in its own bounded
+  stage. Partial migrations need old/new readers and an explicit overlap epoch.
+- A command's helper is not self-contained until its callers, CLI flags, and
+  integration fixtures no longer rely on it. Delete the full production chain.
+
+## Testing and CLI
+
+- Test through the CLI entry point for path, environment, and serialization
+  behavior. A unit test that hand-builds argv proves the helper, not the wiring.
+- Fakes must model the state the fix reads, including absence, cache miss, failed
+  IO, and partial ledger. A fake with the same value shape as production masks
+  format mismatches.
+- Run the named suite in the named environment (`uv`, Go, or the project runner)
+  and verify exit status. A filtered or skipped run is not evidence.
+- A test property must disagree with the implementation under the mutation it
+  claims to pin. Equal sets, disabled features, and a baseline that shares the
+  same bug produce false greens.
+- Plans state the estimand, tolerance arithmetic, fold cardinality, cache key,
+  and failure behavior. Close only after the measured evidence exists.
+
+## Working rule
+
+For every experiment, write down what is held constant, what is allowed to vary,
+what data can be seen at prediction time, and which artifact proves the answer.
+Prefer paired comparisons and explicit provenance over a plausible single number.
