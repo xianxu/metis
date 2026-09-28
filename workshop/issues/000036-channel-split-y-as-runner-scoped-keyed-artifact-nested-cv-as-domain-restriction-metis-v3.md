@@ -7,6 +7,7 @@ created: 2026-07-14
 updated: 2026-07-19
 estimate_hours: 17
 started: 2026-07-19T16:22:10-07:00
+card_mirror: '763f814293fedd324678b2ed179ea4b01cb2bfb7' # card fields mirrored from issue-cards; edit via sdlc
 ---
 
 # channel split: y as runner-scoped keyed artifact — nested CV as domain restriction (metis-v3)

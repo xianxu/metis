@@ -6,6 +6,7 @@ github_issue:
 created: 2026-07-18
 updated: 2026-07-18
 estimate_hours:
+card_mirror: '636a5a3e2a86b9d27351d2d4cc1cac93ab65a312' # card fields mirrored from issue-cards; edit via sdlc
 ---
 
 # metis debug verb family: feature-importance first

@@ -6,6 +6,7 @@ github_issue:
 created: 2026-07-02
 updated: 2026-07-02
 estimate_hours:
+card_mirror: 'f7e29e1e5416b45bb3e8e7a7a695cc2a21ca8132' # card fields mirrored from issue-cards; edit via sdlc
 ---
 
 # metis/describe step: per-feature distribution + class balance for human inspection

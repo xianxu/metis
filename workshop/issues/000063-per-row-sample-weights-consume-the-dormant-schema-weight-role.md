@@ -6,6 +6,7 @@ github_issue:
 created: 2026-07-18
 updated: 2026-07-18
 estimate_hours:
+card_mirror: '45f1bdce1dd9aa1f0079719a03c2a5a266b4f591' # card fields mirrored from issue-cards; edit via sdlc
 ---
 
 # per-row sample weights: consume the dormant schema weight role

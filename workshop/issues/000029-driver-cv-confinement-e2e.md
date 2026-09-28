@@ -6,6 +6,7 @@ github_issue:
 created: 2026-07-12
 updated: 2026-07-12
 estimate_hours:
+card_mirror: '2878abf190f0f4cc8344357b5b1efd94f1e7ca4b' # card fields mirrored from issue-cards; edit via sdlc
 ---
 
 # real-data driver:cv confinement e2e — leak caught through exp_path within the orchestration

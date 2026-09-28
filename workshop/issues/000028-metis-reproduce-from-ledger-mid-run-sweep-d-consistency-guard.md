@@ -6,6 +6,7 @@ github_issue:
 created: 2026-07-11
 updated: 2026-07-11
 estimate_hours:
+card_mirror: '3b2e47479b42da2d55ea4965eb8b4ecf4aecf62b' # card fields mirrored from issue-cards; edit via sdlc
 ---
 
 # metis reproduce from ledger + mid-run/sweep D-consistency guard

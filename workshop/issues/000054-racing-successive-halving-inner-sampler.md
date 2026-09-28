@@ -6,6 +6,7 @@ github_issue:
 created: 2026-07-17
 updated: 2026-07-17
 estimate_hours:
+card_mirror: 'f04b2d06bca6f0b0e832baf2bdfbfb48d07e0d8c' # card fields mirrored from issue-cards; edit via sdlc
 ---
 
 # racing successive-halving inner sampler

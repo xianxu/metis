@@ -6,6 +6,7 @@ github_issue:
 created: 2026-07-13
 updated: 2026-07-13
 estimate_hours:
+card_mirror: '83021d28a3d77750b084c97b57c2ad1b6b3df28c' # card fields mirrored from issue-cards; edit via sdlc
 ---
 
 # GBM overfits hard on Titanic — bug vs regularization defaults vs effective-complexity measure

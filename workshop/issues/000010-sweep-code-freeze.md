@@ -6,6 +6,7 @@ github_issue:
 created: 2026-07-05
 updated: 2026-07-05
 estimate_hours:
+card_mirror: '76409f18058cb705c1bd36224a431b9f4b08ff7a' # card fields mirrored from issue-cards; edit via sdlc
 ---
 
 # Mid-sweep code-freeze upgrade: snapshot-at-start then resident worker (hermetic + faster sweeps)

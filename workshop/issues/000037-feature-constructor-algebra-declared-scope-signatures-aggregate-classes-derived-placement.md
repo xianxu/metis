@@ -6,6 +6,7 @@ github_issue:
 created: 2026-07-14
 updated: 2026-07-14
 estimate_hours:
+card_mirror: '38f84ae3b4f528eb7085b13deda2fa3eb8a43150' # card fields mirrored from issue-cards; edit via sdlc
 ---
 
 # feature-constructor algebra: declared scope signatures + aggregate classes + derived placement

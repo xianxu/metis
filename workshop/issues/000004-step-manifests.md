@@ -6,6 +6,7 @@ github_issue:
 created: 2026-07-02
 updated: 2026-07-02
 estimate_hours:
+card_mirror: 'bee12e9e8919e3e8cf27452761e003d4e7379a10' # card fields mirrored from issue-cards; edit via sdlc
 ---
 
 # Collocated step manifests + a generated single step reference (declare inputs/outputs/knobs)

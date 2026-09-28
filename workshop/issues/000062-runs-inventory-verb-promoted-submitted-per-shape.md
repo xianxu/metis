@@ -6,6 +6,7 @@ github_issue:
 created: 2026-07-18
 updated: 2026-07-18
 estimate_hours:
+card_mirror: '5806b0a9ad5d0d521cb74bb64fa987101e3ca729' # card fields mirrored from issue-cards; edit via sdlc
 ---
 
 # runs inventory verb: promoted + submitted per shape

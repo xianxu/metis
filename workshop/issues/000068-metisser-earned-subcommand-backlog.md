@@ -6,6 +6,7 @@ github_issue:
 created: 2026-07-23
 updated: 2026-07-23
 estimate_hours:
+card_mirror: 'bafc88ef588541d31f9be4daca7fe007da9e8f9d' # card fields mirrored from issue-cards; edit via sdlc
 ---
 
 # metisser: the earned-subcommand backlog (living list from ml-research investigations)

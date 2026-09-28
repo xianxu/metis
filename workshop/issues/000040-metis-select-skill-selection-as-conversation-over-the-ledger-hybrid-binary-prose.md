@@ -6,6 +6,7 @@ github_issue:
 created: 2026-07-14
 updated: 2026-07-14
 estimate_hours:
+card_mirror: '06c12a8b5082d3f8a5eb71fc72bc283eae4b8c9a' # card fields mirrored from issue-cards; edit via sdlc
 ---
 
 # metis-select skill — selection-as-conversation over the ledger (hybrid binary+prose)
