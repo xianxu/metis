@@ -1,13 +1,21 @@
 ---
 id: 000073
-status: open
-deps: []
+status: working
+deps: [metis#71]
 github_issue:
 created: 2026-10-23
 updated: 2026-10-23
 estimate_hours:
 collaboration-mode: collaboration
-card_mirror: '3186df48535037d6a1b4f3c052a0989d4a6e88c4' # card fields mirrored from issue-cards; edit via sdlc
+card_mirror: 'c4bf1df0e14fd3b31e367075728dfc1d2a63d337' # card fields mirrored from issue-cards; edit via sdlc
+started: 2026-10-23T19:48:43-07:00
+claimant:
+    operator: Xian Xu
+    machine: 4716879978a7b90f6b583da1716fd0e9
+    machine_name: MacBook Pro
+    workspace: metis:1
+    worktree: /Users/xianxu/workspace/worktree/metis-slot1/metis
+    repository: github.com/xianxu/metis
 ---
 
 # Repeat-shaped run records and ledger rows without CV folds
@@ -30,8 +38,9 @@ Support repeat-shaped experiment results through Metis's existing record and led
 
 ## Plan
 
-- [ ]
+Durable plan: `workshop/plans/000073-repeated-run-ledger-plan.md` (single review boundary, Tasks 1 to 7). Design decisions 1 to 9 there wait for TL approval.
 
 ## Log
 
 2026-10-23: Filed unclaimed for the ariadne#577 re-plan. Seams: cmd/metis/run.go, sweep.go, ledger.go and pkg/ledger dedupKey. No implementation changed.
+2026-10-23 (metis:1): Concurrent claims in this slot: #71, #75, #76, #72 and #73 are open at once while #75 waits on the operator CI pin (metis#70). Active-time attribution across them is approximate until ariadne#580 lands.
