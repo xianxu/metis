@@ -42,3 +42,7 @@ Add a `test` target to the metis Makefile that runs the full suite: `go test ./.
 
 2026-10-23 (metis:1): In a fresh clone with no .venv and the network denied (default sandbox, no allowed domains), `make test` passed: go test ./... ok, then pytest 137 passed with the venv built offline from the uv cache.
 2026-10-23 (metis:1): The first recorded suite on 8e8b3c96 failed in Go setup: the local-check checkout (/Volumes/TestScratch/local-checks/sdlc-local-*) has no sibling ../ariadne for go.mod's replace. Fix: when ../ariadne is absent and sdlc exports SDLC_DEP_SUBSTRATE, test with -modfile pointing at a throwaway go.mod copy whose replace targets that path. Rejected a temp go.work: it matches `use` against the cwd, so a symlinked cwd (/tmp vs /private/tmp) breaks it. Verified in a clone without ../ariadne, network denied: Go all ok, pytest 137 passed.
+
+## Revisions
+
+- 2026-10-23 (metis:1), reason: the first recorded suite showed local-check checkouts lack the sibling `../ariadne` that go.mod's replace needs (Done-when #3). Delta to Spec and Plan item 1: when `../ariadne/go.mod` is absent and sdlc exports `SDLC_DEP_SUBSTRATE`, `make test` runs the Go suite with `-modfile` pointing at a private per-run copy of go.mod and go.sum (made with `mktemp -d`, removed on exit), whose `replace` targets the substrate. Slots and clones are unchanged. Close review round 1 (BR-1): the per-run private dir replaces a fixed shared temp path, which concurrent runs could collide on and nothing removed.

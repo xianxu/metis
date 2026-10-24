@@ -29,22 +29,18 @@ metis-build:
 # with `make test-deps`.
 # go.mod replaces ariadne with ../ariadne, which a local-check checkout (sdlc-local-*)
 # lacks; sdlc exports SDLC_DEP_SUBSTRATE (the caller's ariadne, from construct/deps), so
-# test against a throwaway copy of go.mod (+ go.sum) whose replace points there. A slot
-# or clone keeps ../ariadne and the real go.mod.
-ifeq ($(wildcard ../ariadne/go.mod),)
-ifdef SDLC_DEP_SUBSTRATE
-TEST_MODFILE := $(or $(TMPDIR),/tmp)/metis-test.mod
-TEST_GOFLAGS := -modfile=$(TEST_MODFILE)
-endif
-endif
-
+# there the Go suite runs against a private, per-run copy of go.mod (+ go.sum) whose
+# replace points at it, removed on exit. A slot or clone keeps ../ariadne and the real go.mod.
 .PHONY: test test-deps
 test:
-ifdef TEST_MODFILE
-	cp go.mod "$(TEST_MODFILE)" && cp go.sum "$(basename $(TEST_MODFILE)).sum"
-	go mod edit -modfile="$(TEST_MODFILE)" -replace=github.com/xianxu/ariadne="$(SDLC_DEP_SUBSTRATE)"
-endif
-	UV_OFFLINE=1 go test $(TEST_GOFLAGS) ./...
+	@set -e; modflag=; \
+	if [ ! -f ../ariadne/go.mod ] && [ -n "$$SDLC_DEP_SUBSTRATE" ]; then \
+	  d=$$(mktemp -d "$${TMPDIR:-/tmp}/metis-test.XXXXXX"); trap 'rm -rf "$$d"' EXIT; \
+	  cp go.mod "$$d/test.mod"; cp go.sum "$$d/test.sum"; \
+	  go mod edit -modfile="$$d/test.mod" -replace=github.com/xianxu/ariadne="$$SDLC_DEP_SUBSTRATE"; \
+	  modflag="-modfile=$$d/test.mod"; echo "make test: ariadne => $$SDLC_DEP_SUBSTRATE"; \
+	fi; \
+	echo "UV_OFFLINE=1 go test $$modflag ./..."; UV_OFFLINE=1 go test $${modflag:+"$$modflag"} ./...
 	UV_OFFLINE=1 uv run --offline pytest -q tests
 
 test-deps:
