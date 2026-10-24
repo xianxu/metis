@@ -39,7 +39,7 @@ Extend the existing execution owner with explicit step timeouts, persistent boun
 
 ## Plan
 
-Durable plan: `workshop/plans/000072-step-timeout-live-log-plan.md` (full flow, M1 legacy and cancellation, M2 forkserver). Design decisions 1 to 9 there wait for TL approval.
+Durable plan: `workshop/plans/000072-step-timeout-live-log-plan.md` (full flow, M1 legacy and cancellation, M2 forkserver). Design decisions 1 to 9 there were approved by the TL (see Log).
 
 - [ ] M1 — policy, outcome, bounded live log, legacy path, cancellation
 - [ ] M2 — forkserver path
@@ -87,3 +87,4 @@ The thorough plan gives a +15% design buffer, and impl is 40% of the v2 ranges.
 - 2026-10-23 (metis:1), reason: plan-quality round 1. Delta:
   - PQ-1: declared `deps: [metis#71]`. ExecPolicy follows #71's `with.cache` parser and drift guard, and Task 4 threads ctx through `cachingExecutor`, which #71 rewrites. Code starts only once #71 has landed (#71 itself waits on #75), and the branch takes main then.
   - Minors folded into the plan: `reservedStepFiles` is new, extracted from the inline list at exec.go:239. The cancellable acquire covers the `leafBudget` interface, `chanSem` and `prioritySem`. A context cancelled during the forkserver ready wait returns a `cancelled` step error, never `ok=false`, so it never falls back to legacy.
+2026-10-23 (metis:1): change-code passed: plan-quality clean after 2 rounds; estimate 3.0h (estimate-logic-v3.1); estimate-quality INFO. Accepted risks from it: the fixture-heavy items may overrun; rebasing onto #71 seam changes is unbudgeted (#71 is already implemented, so its seam is known). Code waits for #71 to land.
