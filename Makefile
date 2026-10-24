@@ -21,3 +21,16 @@ tools: metis-build
 metis-build:
 	@mkdir -p bin
 	go build -o bin/metis ./cmd/metis
+
+# Full suite (metis#75): Go + Python, what `sdlc local-check run --name suite` runs.
+# Offline by contract: UV_OFFLINE reaches uv here and in the step subprocesses the Go
+# tests spawn, so a cold checkout builds its venv from the warm uv cache and a missing
+# package fails loudly instead of waiting on the network. Warm the cache once, online,
+# with `make test-deps`.
+.PHONY: test test-deps
+test:
+	UV_OFFLINE=1 go test ./...
+	UV_OFFLINE=1 uv run --offline pytest -q tests
+
+test-deps:
+	uv sync

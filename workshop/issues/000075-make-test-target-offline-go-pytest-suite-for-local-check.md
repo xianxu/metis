@@ -1,12 +1,20 @@
 ---
 id: 000075
-status: open
+status: working
 deps: []
 github_issue:
 created: 2026-10-23
 updated: 2026-10-23
 estimate_hours:
-card_mirror: '9ceeeadc6e3de9d26c7b267cd84040de2c49057c' # card fields mirrored from issue-cards; edit via sdlc
+card_mirror: '5adab9b3f5c5eaca4dc8c7e90d6f398f8faa431e' # card fields mirrored from issue-cards; edit via sdlc
+started: 2026-10-23T17:24:43-07:00
+claimant:
+    operator: Xian Xu
+    machine: 4716879978a7b90f6b583da1716fd0e9
+    machine_name: MacBook Pro
+    workspace: metis:1
+    worktree: /Users/xianxu/workspace/worktree/metis-slot1/metis
+    repository: github.com/xianxu/metis
 ---
 
 # make test target: offline Go + pytest suite for local-check
@@ -27,8 +35,9 @@ Add a `test` target to the metis Makefile that runs the full suite: `go test ./.
 
 ## Plan
 
-- [ ] Add `test` and `test-deps` targets in `Makefile` (with a comment on the offline contract).
+- [x] Add `test` and `test-deps` targets in `Makefile` (with a comment on the offline contract).
 - [ ] Verify: in a fresh clone with no `.venv`, with the network denied (default sandbox), `make test` passes; `sdlc local-check run --name suite` records.
 
 ## Log
 
+2026-10-23 (metis:1): In a fresh clone with no .venv and the network denied (default sandbox, no allowed domains), `make test` passed: go test ./... ok, then pytest 137 passed with the venv built offline from the uv cache.
