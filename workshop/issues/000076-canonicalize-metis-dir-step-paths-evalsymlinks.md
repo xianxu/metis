@@ -1,12 +1,20 @@
 ---
 id: 000076
-status: open
+status: working
 deps: []
 github_issue:
 created: 2026-10-23
 updated: 2026-10-23
 estimate_hours:
-card_mirror: '415a776e997ede5dc65cca602ee0f244e347a9be' # card fields mirrored from issue-cards; edit via sdlc
+card_mirror: 'adcd72909f1bc4293d4c0b4acd679481c79f9cd7' # card fields mirrored from issue-cards; edit via sdlc
+started: 2026-10-23T17:48:39-07:00
+claimant:
+    operator: Xian Xu
+    machine: 4716879978a7b90f6b583da1716fd0e9
+    machine_name: MacBook Pro
+    workspace: metis:1
+    worktree: /Users/xianxu/workspace/worktree/metis-slot1/metis
+    repository: github.com/xianxu/metis
 ---
 
 # Canonicalize METIS_*_DIR step paths (EvalSymlinks)
@@ -26,8 +34,9 @@ Canonicalize the experiment dir at the runner boundary with `filepath.EvalSymlin
 
 ## Plan
 
-- [ ] Resolve expDir with EvalSymlinks in runResolvedExperimentAdmitted; derive runDir from it.
-- [ ] Add the symlinked-dir test.
+- [x] Resolve expDir with EvalSymlinks in runResolvedExperimentAdmitted; derive runDir from it.
+- [x] Add the symlinked-dir test.
 
 ## Log
 
+2026-10-23 (metis:1): Implemented in runResolvedExperimentAdmitted: Abs, then EvalSymlinks on expDir (error if unresolvable), with runDir joined under it. TestRun_StepEnvPathsArePhysical runs the real execStep (test/env-dump) through a symlinked experiment dir and asserts physical EXP_DIR, RUN_DIR and STEP_DIR. Mutation: with the resolve disabled, all 3 asserts fail. go test ./cmd/metis ./pkg/... is green. The recorded suite waits for #75 (make test) to land.

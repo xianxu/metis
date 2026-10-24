@@ -256,3 +256,43 @@ func TestExecStep_InjectsBlasPins(t *testing.T) {
 		}
 	}
 }
+
+// metis#76: an experiment reached through a symlinked directory hands its steps PHYSICAL
+// METIS_* paths (couch-bench's ariadne backend refuses non-physical ones; /tmp and a macOS
+// TMPDIR are symlinked). Driven through runExperiment with the real execStep (test/env-dump).
+func TestRun_StepEnvPathsArePhysical(t *testing.T) {
+	root := repoRoot(t)
+	real := t.TempDir()
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	md := "---\ntype: experiment\nid: phys\nseed: 3\nstatus: active\nsteps:\n  - id: e\n    uses: test/env-dump\n---\n"
+	if err := os.WriteFile(filepath.Join(real, "exp.md"), []byte(md), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runExperiment(runOpts{
+		expPath:  filepath.Join(link, "exp.md"),
+		runID:    "p1",
+		stepPath: []string{filepath.Join(root, "testdata", "steps")},
+		now:      fixedNow(),
+		git:      fakeGitProbe{name: "metis", sha: "sha", dirty: false},
+		out:      io.Discard,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	phys, err := filepath.EvalSymlinks(real)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(phys, "runs", "p1", "e", "env.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	runDir := filepath.Join(phys, "runs", "p1")
+	for _, want := range []string{"EXP_DIR=" + phys, "RUN_DIR=" + runDir, "STEP_DIR=" + filepath.Join(runDir, "e")} {
+		if !strings.Contains(string(b), want+"\n") {
+			t.Errorf("env.txt missing %q (physical path); got:\n%s", want, b)
+		}
+	}
+}

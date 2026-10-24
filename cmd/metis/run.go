@@ -240,15 +240,18 @@ func runResolvedExperimentAdmitted(exp experiment.Experiment, o runOpts, runID s
 	// Absolutize at the runner boundary: execStep injects runDir/stepDir/expDir into
 	// the child's env, and the child's cwd IS the step dir — a relative path would
 	// resolve $METIS_STEP_DIR/with.json under itself. Absolute paths are correct
-	// from any cwd, so `metis run pipelines/foo.md` (a relative arg) works.
-	runDir, err := filepath.Abs(filepath.Join(baseDir, "runs", runID))
-	if err != nil {
-		return experiment.Run{}, err
-	}
+	// from any cwd, so `metis run pipelines/foo.md` (a relative arg) works. Physical, too
+	// (metis#76): symlinks resolved (/tmp → /private/tmp, a macOS TMPDIR under /var), since
+	// a step may hand these paths to a backend that refuses non-physical ones. runDir may not
+	// exist yet, so it derives from the resolved expDir rather than resolving itself.
 	expDir, err := filepath.Abs(baseDir)
 	if err != nil {
 		return experiment.Run{}, err
 	}
+	if expDir, err = filepath.EvalSymlinks(expDir); err != nil {
+		return experiment.Run{}, fmt.Errorf("resolve experiment dir: %w", err)
+	}
+	runDir := filepath.Join(expDir, "runs", runID)
 
 	var exec experiment.StepExecutor = execStep{stepPath: o.stepPath, expDir: expDir, seed: exp.Seed, readRoot: o.readRoot, out: out, budget: o.leafBudget, priority: o.priority, pool: o.forkPool, pins: o.leafPins}
 	if o.exec != nil {
