@@ -5,9 +5,9 @@ deps: [metis#71]
 github_issue:
 created: 2026-10-23
 updated: 2026-10-23
-estimate_hours:
+estimate_hours: 1.74
 collaboration-mode: collaboration
-card_mirror: 'c4bf1df0e14fd3b31e367075728dfc1d2a63d337' # card fields mirrored from issue-cards; edit via sdlc
+card_mirror: 'e7fc7b9217ba51c21e80dcbc073ebc4f1c7023e4' # card fields mirrored from issue-cards; edit via sdlc
 started: 2026-10-23T19:48:43-07:00
 claimant:
     operator: Xian Xu
@@ -16,7 +16,7 @@ claimant:
     workspace: metis:1
     worktree: /Users/xianxu/workspace/worktree/metis-slot1/metis
     repository: github.com/xianxu/metis
-flow: {kind: quick, provenance: inferred, spec: "caffd774", done: "d796f8c4"}
+flow: {kind: full, provenance: operator}
 ---
 
 # Repeat-shaped run records and ledger rows without CV folds
@@ -48,6 +48,37 @@ Durable plan: `workshop/plans/000073-repeated-run-ledger-plan.md` (single review
 - [ ] Task 5: rowFromRecord, locked publishRows, single-run rows, metis ledger publish
 - [ ] Task 6: e2e repeats, conflicts, interrupted publication, parallel writers, legacy unchanged
 - [ ] Task 7: atlas
+
+## Estimate
+
+```estimate
+model: estimate-logic-v3.1
+familiarity: 1.0
+item: smaller-go-module      design=0.05 impl=0.14
+item: greenfield-go-module   design=0.1 impl=0.24
+item: smaller-go-module      design=0.05 impl=0.16
+item: smaller-go-module      design=0.1 impl=0.2
+item: smaller-go-module      design=0.05 impl=0.2
+item: smaller-go-module      design=0.0 impl=0.16
+item: atlas-docs             design=0.05 impl=0.04
+item: milestone-review       design=0.0 impl=0.14
+design-buffer: 0.15
+total: 1.74
+```
+
+Items, in order:
+1. One atomic-write helper (consolidating pkg/cas and caching.go).
+2. Ledger changes: Repeat and Extra, the key, conflict refusal and replace, unknown columns.
+3. Repeat aggregation.
+4. `--repeat`, the claim, the record field plus CUE, and the in-memory backfill refactor.
+5. Locked publishRows and `metis ledger publish`.
+6. e2e and concurrency tests.
+7. Atlas.
+8. One close review.
+
+Design hours are near zero because the TL approved the plan, and it cleared 2 plan-quality rounds. Impl is 40% of the v2 ranges.
+
+*Produced via `brain/data/life/42shots/velocity/estimate-logic-v3.1.md` against `baseline-v3.1.md`. Method A only.*
 
 ## Log
 
