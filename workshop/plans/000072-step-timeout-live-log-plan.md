@@ -2,6 +2,8 @@
 
 > **For agentic workers:** Consult AGENTS.md Section 3 (Subagent Strategy) to determine the appropriate execution approach: use superpowers-subagent-driven-development (if subagents are suitable per AGENTS.md) or superpowers-executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Depends on:** metis#71 (landed first: the `with.cache` parser pattern and the `cachingExecutor` changes this threads ctx through). Code starts after #71 lands.
+
 **Goal:** A metis step can run for hours (a Couch session) under a declared timeout, with its output visible in a bounded log file while it runs, and every way it can end (success, failure, timeout, cancellation, unconfirmed cleanup, unretired external resources) is recorded honestly and never retried or published as success.
 
 **Architecture:** One execution owner, `execStep`, gains a `context.Context` (cancellation from SIGINT/SIGTERM) and a per-step timeout from a validated `with.exec` policy. Both launch paths, the legacy subprocess and the forkserver, write child output through one bounded live log writer into `step.log`, and end through one pure outcome classifier that writes `outcome.json`. Termination is TERM, then a grace period, then KILL, then a bounded join. In the forkserver path the server, as the process that reaps the child, is the only one that signals it.
@@ -20,7 +22,7 @@
 6. **Live, bounded log.** Child stdout and stderr go to `<stepDir>/step.log` as bytes arrive, up to a cap of 64 MiB. Past the cap, the writer appends a single truncation marker, then drains and discards the rest, so the child never blocks on a full pipe. A 64 KiB in-memory tail feeds the error message, replacing today's unbounded `CombinedOutput`. In the forkserver path the server's waiter thread streams the pipe into the same file with the same cap, instead of buffering everything until exit. The request carries `log_path` and `log_cap`, and the response's `output` becomes the tail. `step.log` and `outcome.json` join the reserved step-dir names, so they are never artifacts and never enter the output hash. The step's start line on `out` names the log path, which is the existing progress surface; there is no second runner or UI.
 7. **Outcome record: `<stepDir>/outcome.json`.** It is written on every executed (non-cache-hit) step, whatever the result: `{outcome, exit_code?, signal?, started, ended, runtime_seconds, log_truncated, pending_resources?}`. `outcome` is one of `ok | failed | timed-out | cancelled | cleanup-unconfirmed | resources-unretired`. `runtime_seconds` is compute runtime, from launch to the child's exit. #74 adds `wait_seconds` (human wait) as a separate field; it never folds into runtime. The format is additive JSON (ARCH-EVOLVE). Nothing in metis reads it back in this issue; #73/#74 do.
 8. **External resources: a domain-free contract.** The env gains `METIS_PENDING_RESOURCES=<stepDir>/pending-resources.json`. A step that starts independently managed resources (Couch actors) writes them there and removes the file once they are retired. On any ending, if the file exists and is non-empty, the outcome is `resources-unretired`, even when exit is 0. The error names the file and its contents for reconciliation, and the artifacts are kept. metis never kills those resources: a timeout terminates only the child's process group.
-9. **No duplicate execution.** The forkserver keeps the existing rule: legacy fallback only when nothing was dispatched. A timeout, cancel, lost response or cleanup-unconfirmed ending after dispatch is a step error, never `ok=false`. The rule that settles a late result is that **the first terminal event the step's select observes wins**. If the deadline fires first, the outcome is `timed-out` even if an `exit: 0` response arrives during termination. That late response is logged on `out` and dropped. The `<-s.ready` wait becomes context-bounded.
+9. **No duplicate execution.** The forkserver keeps the existing rule: legacy fallback only when nothing was dispatched. A timeout, cancel, lost response or cleanup-unconfirmed ending after dispatch is a step error, never `ok=false`. The rule that settles a late result is that **the first terminal event the step's select observes wins**. If the deadline fires first, the outcome is `timed-out` even if an `exit: 0` response arrives during termination. That late response is logged on `out` and dropped. The `<-s.ready` wait becomes context-bounded. A context cancelled during it returns a `cancelled` step error, never `ok=false`, so it can never route to the legacy path.
 
 ## Core concepts
 
@@ -31,7 +33,7 @@
 | `ExecPolicy` / `ParseExecPolicy` | `pkg/experiment/execpolicy.go` | new |
 | `Outcome` / `classifyOutcome` | `cmd/metis/outcome.go` | new |
 | `boundedLog` | `cmd/metis/steplog.go` | new |
-| `reservedStepFiles` | `cmd/metis/exec.go` | modified |
+| `reservedStepFiles` | `cmd/metis/exec.go` | new (extracted from the inline names at exec.go:239) |
 
 - **ExecPolicy**: `{Timeout time.Duration}` parsed from `with.exec`. Validate calls it, next to `ParseCachePolicy`. **DRY:** it reuses #71's pattern: one parser per `with.<policy>` sub-map, called by both Validate and the executor. **Extensions:** `grace`, `log_cap` keys, if a real need appears.
 - **Outcome / classifyOutcome**: a pure function from `(endEvent, exitStatus, joinConfirmed, pendingResources, logTruncated, times)` to an `Outcome` plus an error or nil. `endEvent` is one of `exited | deadline | cancelled`. It is the single place that decides success, so neither launch path can publish success on its own (ARCH-ORDER: an explicit transition table). The table:
@@ -55,7 +57,7 @@
 |------|----------|--------|-------|
 | `execStep.Execute(ctx, …)` | `cmd/metis/exec.go` | modified | `os/exec` child, process group, signals |
 | `StepExecutor` | `pkg/experiment/run.go` | modified | adds `ctx` to `Execute` |
-| `leafBudget.acquire(ctx, prio)` | `cmd/metis/prioritysem.go` | modified | slot handoff, now cancellable |
+| `leafBudget.acquire(ctx, prio)` (interface + `chanSem` + `prioritySem`) | `cmd/metis/prioritysem.go` | modified | slot acquire, now cancellable in every implementation |
 | `forkServer.execute(ctx, …)` + cancel request | `cmd/metis/forkexec.go` | modified | JSONL protocol to the server |
 | forkserver `cancel` + streaming waiter | `metis/forkserver.py` | modified | `os.fork`, `waitpid`, `killpg` |
 | signal context | `cmd/metis/main.go` | modified | SIGINT/SIGTERM |

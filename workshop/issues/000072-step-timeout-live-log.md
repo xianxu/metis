@@ -1,7 +1,7 @@
 ---
 id: 000072
 status: working
-deps: []
+deps: [metis#71]
 github_issue:
 created: 2026-10-23
 updated: 2026-10-23
@@ -48,3 +48,9 @@ Durable plan: `workshop/plans/000072-step-timeout-live-log-plan.md` (full flow, 
 2026-10-23: Filed unclaimed for ariadne#577. Primary seam: cmd/metis/exec.go execStep.Execute, with forkexec.go and runcontrol.go lifecycle integration. No code changed.
 2026-10-23 (metis:1): Concurrent claims in this slot: #71, #75, #76 and #72 are open at once while #75 waits on the operator CI pin (metis#70). Active-time attribution across them is approximate until ariadne#580 lands.
 2026-10-23 (metis:1): The TL (ops:0) approved the plan with decision 2 as written: the timeout counts from launch, not step entry, with a cancellable leaf-budget acquire. All other decisions stand as written. Code starts after #75 lands (its suite needs make test).
+
+## Revisions
+
+- 2026-10-23 (metis:1), reason: plan-quality round 1. Delta:
+  - PQ-1: declared `deps: [metis#71]`. ExecPolicy follows #71's `with.cache` parser and drift guard, and Task 4 threads ctx through `cachingExecutor`, which #71 rewrites. Code starts only once #71 has landed (#71 itself waits on #75), and the branch takes main then.
+  - Minors folded into the plan: `reservedStepFiles` is new, extracted from the inline list at exec.go:239. The cancellable acquire covers the `leafBudget` interface, `chanSem` and `prioritySem`. A context cancelled during the forkserver ready wait returns a `cancelled` step error, never `ok=false`, so it never falls back to legacy.
