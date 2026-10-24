@@ -16,6 +16,7 @@ claimant:
     workspace: metis:1
     worktree: /Users/xianxu/workspace/worktree/metis-slot1/metis
     repository: github.com/xianxu/metis
+flow: {kind: quick, provenance: inferred, spec: "8893ff21", done: "37783db0"}
 ---
 
 # Step-level never-cache policy with safe downstream invalidation
