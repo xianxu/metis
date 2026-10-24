@@ -1,13 +1,21 @@
 ---
 id: 000074
-status: open
-deps: []
+status: working
+deps: [metis#71, metis#72, metis#73]
 github_issue:
 created: 2026-10-23
 updated: 2026-10-23
 estimate_hours:
 collaboration-mode: collaboration
-card_mirror: '8ab83f8f0d0b8a84a29d8d132bc7151ef8182484' # card fields mirrored from issue-cards; edit via sdlc
+card_mirror: '0862d9a7b7271903efe32c9acf202d8582de7b24' # card fields mirrored from issue-cards; edit via sdlc
+started: 2026-10-23T19:53:25-07:00
+claimant:
+    operator: Xian Xu
+    machine: 4716879978a7b90f6b583da1716fd0e9
+    machine_name: MacBook Pro
+    workspace: metis:1
+    worktree: /Users/xianxu/workspace/worktree/metis-slot1/metis
+    repository: github.com/xianxu/metis
 ---
 
 # Manual grading step with attributable result and separate human wait
@@ -30,8 +38,12 @@ Provide the minimal generic manual-step support needed by couch/grade: a never-c
 
 ## Plan
 
-- [ ]
+Durable plan: `workshop/plans/000074-manual-grading-step-plan.md` (full flow). Design decisions 1 to 8 there wait for TL approval.
+
+- [ ] M1 — request, submit, wait, evidence
+- [ ] M2 — resume and reconciliation
 
 ## Log
 
 2026-10-23: Filed unclaimed from authenticated ops:0 addition f28bfafd-75e4-4f81-993c-acf79910fa1a for ariadne#577. Coordinate with the never-cache, timeout/live-log and repeat-ledger issues. No new grading scale is imposed here; the consumer declares its coarse scale.
+2026-10-23 (metis:1): Concurrent claims in this slot: #71 to #76 are open at once while #75 waits on the operator CI pin (metis#70). Active-time attribution across them is approximate until ariadne#580 lands.
