@@ -6,6 +6,11 @@ reproducible unit of ML work (the **experiment**) and, as they land, the step-ru
 and the Dataset/Split/step-type data plane. "Platform-independent" test: *would this be
 identical on a non-Kaggle platform?* — if yes, it lives here.
 
+- **Full suite** (`make test`, metis#75): `go test ./...` plus `pytest tests`, offline
+  (`UV_OFFLINE=1`; `make test-deps` warms the uv cache). It is what
+  `sdlc local-check run --name suite` records. In a local-check checkout without a sibling
+  `../ariadne`, it tests against a temporary `go.mod` copy whose `replace` points at sdlc's
+  `SDLC_DEP_SUBSTRATE`.
 - [experiment datatype](experiment.md) — the reproducible pipeline noun: the CUE schema
   (`#Experiment`/`#Step`/`#Status`/`#Run`), the `xx-datatype` authoring prototype, the
   `vocabulary validate-instance` structural validator, the enforcement merge-check (M1), the
