@@ -36,7 +36,7 @@ Add a `test` target to the metis Makefile that runs the full suite: `go test ./.
 ## Plan
 
 - [x] Add `test` and `test-deps` targets in `Makefile` (with a comment on the offline contract).
-- [ ] Verify: in a fresh clone with no `.venv`, with the network denied (default sandbox), `make test` passes; `sdlc local-check run --name suite` records.
+- [x] Verify: in a fresh clone with no `.venv`, with the network denied (default sandbox), `make test` passes; `sdlc local-check run --name suite` records.
 
 ## Log
 
