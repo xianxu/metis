@@ -5,9 +5,9 @@ deps: [metis#71]
 github_issue:
 created: 2026-10-23
 updated: 2026-10-23
-estimate_hours:
+estimate_hours: 3
 collaboration-mode: collaboration
-card_mirror: 'ce904a72581940e603167613ec708d9255cb030a' # card fields mirrored from issue-cards; edit via sdlc
+card_mirror: 'f7187b15a233480c8bb666cb23752b4136055335' # card fields mirrored from issue-cards; edit via sdlc
 started: 2026-10-23T19:38:26-07:00
 claimant:
     operator: Xian Xu
@@ -16,6 +16,7 @@ claimant:
     workspace: metis:1
     worktree: /Users/xianxu/workspace/worktree/metis-slot1/metis
     repository: github.com/xianxu/metis
+flow: {kind: full, provenance: inferred}
 ---
 
 # Bound step execution with timeout and live logs
@@ -42,6 +43,38 @@ Durable plan: `workshop/plans/000072-step-timeout-live-log-plan.md` (full flow, 
 
 - [ ] M1 — policy, outcome, bounded live log, legacy path, cancellation
 - [ ] M2 — forkserver path
+
+## Estimate
+
+```estimate
+model: estimate-logic-v3.1
+familiarity: 1.0
+item: greenfield-go-module   design=0.2 impl=0.24
+item: smaller-go-module      design=0.1 impl=0.2
+item: smaller-go-module      design=0.2 impl=0.2
+item: greenfield-go-module   design=0.2 impl=0.32
+item: smaller-go-module      design=0.2 impl=0.2
+item: smaller-go-module      design=0.2 impl=0.2
+item: atlas-docs             design=0.05 impl=0.04
+item: milestone-review       design=0.0 impl=0.14
+item: milestone-review       design=0.0 impl=0.14
+design-buffer: 0.15
+total: 3.0
+```
+
+Items, in order:
+1. Pure core: ExecPolicy, classifyOutcome, boundedLog.
+2. ctx threaded through StepExecutor, decorators and fakes.
+3. Cancellable acquire (leafBudget, chanSem, prioritySem) with its interleaving test.
+4. Legacy lifecycle: pgid, timer, TERM/KILL, join, outcome.json, pending resources, plus fixtures.
+5. Python forkserver: streaming capped log and cancel.
+6. Go forkexec: cancel, bounded ready wait, late result.
+7. Atlas.
+8. Two milestone reviews.
+
+The thorough plan gives a +15% design buffer, and impl is 40% of the v2 ranges.
+
+*Produced via `brain/data/life/42shots/velocity/estimate-logic-v3.1.md` against `baseline-v3.1.md`. Method A only.*
 
 ## Log
 
