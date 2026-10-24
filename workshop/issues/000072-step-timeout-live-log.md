@@ -1,13 +1,21 @@
 ---
 id: 000072
-status: open
+status: working
 deps: []
 github_issue:
 created: 2026-10-23
 updated: 2026-10-23
 estimate_hours:
 collaboration-mode: collaboration
-card_mirror: '30b9d2c9dbc1571a5454460c53367e4744530037' # card fields mirrored from issue-cards; edit via sdlc
+card_mirror: 'ce904a72581940e603167613ec708d9255cb030a' # card fields mirrored from issue-cards; edit via sdlc
+started: 2026-10-23T19:38:26-07:00
+claimant:
+    operator: Xian Xu
+    machine: 4716879978a7b90f6b583da1716fd0e9
+    machine_name: MacBook Pro
+    workspace: metis:1
+    worktree: /Users/xianxu/workspace/worktree/metis-slot1/metis
+    repository: github.com/xianxu/metis
 ---
 
 # Bound step execution with timeout and live logs
@@ -30,8 +38,12 @@ Extend the existing execution owner with explicit step timeouts, persistent boun
 
 ## Plan
 
-- [ ]
+Durable plan: `workshop/plans/000072-step-timeout-live-log-plan.md` (full flow, M1 legacy and cancellation, M2 forkserver). Design decisions 1 to 9 there wait for TL approval.
+
+- [ ] M1 — policy, outcome, bounded live log, legacy path, cancellation
+- [ ] M2 — forkserver path
 
 ## Log
 
 2026-10-23: Filed unclaimed for ariadne#577. Primary seam: cmd/metis/exec.go execStep.Execute, with forkexec.go and runcontrol.go lifecycle integration. No code changed.
+2026-10-23 (metis:1): Concurrent claims in this slot: #71, #75, #76 and #72 are open at once while #75 waits on the operator CI pin (metis#70). Active-time attribution across them is approximate until ariadne#580 lands.
