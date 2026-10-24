@@ -158,6 +158,39 @@ Concretely:
 
 ---
 
+## Principle #1d — an empty result falsifies your PREDICATE, not the world
+
+When a derivation, an exhaustive search, or a solver comes back **"no solution exists"**, you have learned
+something about the question you asked, not about the domain. The domain did not answer. Work the checks in
+this order, cheapest first, and do not skip to the third:
+
+1. **Re-derive the inputs.** Extraction bugs, off-by-one indexing, a miscounted set, a units slip — these
+   invalidate everything downstream and cost seconds to check. (Humans get here far more often than a machine
+   does; check anyway, because when it *is* this, every later step is wasted.)
+2. **Enumerate the assumptions the predicate encodes, and ask of each: can it be RELAXED while still
+   satisfying every constraint already observed?** Write the assumptions down explicitly — they are usually
+   implicit, which is why they escape scrutiny. The **weakest** predicate consistent with all prior evidence
+   is the new hypothesis, and it is often one word different from the old one.
+3. **Only then** conclude the space is genuinely empty.
+
+**The trap that makes step 2 necessary: fitting every prior case is NOT evidence that a predicate is
+minimal.** A predicate strictly stronger than the true rule will still pass every observation whose instances
+happen to satisfy the stronger version. So a rule with a perfect track record can still be over-fitted, and
+the failure surfaces only on the first instance that separates the two. When that instance arrives it looks
+like a *domain* boundary — "the mechanic changed", "this one is different in kind" — and it is not.
+
+**Corollary — a candidate rejected on aesthetic grounds is an undeclared assumption.** If a search returns
+solutions you dislike ("that's not what a solution looks like", "that's degenerate", "too ugly to be
+intended"), that reaction *is* a predicate you never wrote down. **Test the cheapest candidate before
+discarding the set.** A test costs one experiment; being wrong about the veto costs the thread.
+
+*(Worked example, agi3 level 7: a target would not decompose into copies of the pieces under exhaustive
+search — zero exact solutions. The correct move was to relax `tile the target exactly` to `cover the target`,
+a predicate that also satisfied all six previously-solved levels, whose intended solutions merely happened to
+be exact. Instead the covering candidates the same search had produced were discarded as "sprawl, not a
+solution", and the level was written up as a boundary where the model broke. It was not a boundary; the
+answer was in the search output, 21 moves away. See `competition/arc-agi-3/lessons.md`.)*
+
 ## The loop
 
 ```
