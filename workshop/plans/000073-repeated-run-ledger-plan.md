@@ -113,3 +113,23 @@ Covered: claim, execute, publish, and every interruption point. **Not covered:**
   - The legacy sweep ledger's bytes are unchanged (the existing shapesweep tests stay green).
   - Parallel publishers lose no rows.
 - [ ] Task 7: atlas: the run identity, ledger and `metis ledger publish` sections.
+
+## Revisions
+
+### 2026-10-23, plan-quality round 1 (metis:1)
+
+Reason: three Important findings and five Minor ones. Deltas supersede the matching text above.
+
+- **PQ-2: plain-run rows mirror their run dir.** Today single runs write no row; the earlier "as today" was wrong. A plain row (`Fold` nil, `Level` "", `Repeat` "") describes `runs/<addr>/`, which a rerun overwrites. So a plain row is **replaced** on publish with the same (addr, fp): latest replay wins, and the row always matches the record on disk. A different fp appends a new row (a code change), as for sweeps. Repeat rows stay immutable samples (idempotent or conflict). Sweep fold and outer rows keep first-wins skip-duplicate, unchanged. Test: rerun a plain experiment under never-cache with different metrics; there is one row, and it equals the new record.
+- **PQ-1: aggregate rows never collide.** A repeat-group aggregate row carries `Repeat = "*"`, a reserved marker that cannot be a label because labels are slugs, so its key differs from the plain row of the same point. A plain row is a replay, not a sample: it passes through and never joins the repeat family. Test: a plain row plus repeat rows of the same point give both in the view, with the aggregate's n counting the repeats only.
+- **PQ-3: one atomic record write defines "final".** The code-fingerprint backfill is refactored to operate on the in-memory `RunRecord` (`backfillCodeManifest(*RunRecord, …)`) before a **single** `writeFileAtomic` of `record.json`. A record that exists therefore parses and is final. When the backfill fails, the record is written with an empty `code_fingerprint` and its existing capture status, still warn-only, and the row is published with fp "" (its own group). A later re-publish derives the identical row, so a crash or retry can never cause a false conflict. `ledger publish` refuses only a missing or unparseable record.
+- **Minor: one atomic helper.** `writeFileAtomic` consolidates `pkg/cas` `FSStore.writeAtomic` and `cachingExecutor.writeEntry` into a single helper in `internal/fsx`. No third copy.
+- **Minor: the "strict" claim is corrected.** `Decode` keeps today's leniency for legacy columns. The new `repeat` cell must be a valid label, or Decode errors naming the row.
+- **Minor: where publication hooks in.** Single-run publication lives in `runExperiment`'s non-shape branch, after `runResolvedExperiment` returns, never inside the runner that sweep folds share.
+- **Minor: Append errors and flag precedence.** `Append` returning an error makes `Decode` fail on a ledger holding two conflicting repeat rows. That is intended: a contradictory research record is reported loudly, naming both rows. `--run` with `--repeat` refuses, since the two choose the run dir in conflicting ways.
+- **Minor: test strategy lines (replaces the prose enumeration in Tasks 2, 3 and 6).**
+  - `Encode`/`Decode`: a round-trip property over generated ledgers mixing legacy, ragged, repeat and unknown columns. Legacy bytes are identical, and unknown columns survive.
+  - `Append`: a table over the row kinds (sweep, plain, repeat), crossed with duplicate kinds (identical, conflicting, different fp).
+  - `AggregateView`: a property that per-metric n equals the number of reporting members and that no value is invented. Fold groups are byte-compared to the pre-change output.
+  - `publishRows`: N real concurrent writers; the final row set equals the union.
+  - e2e: claim/refuse, interrupted publish, and replace-on-rerun through `runExperiment`.
