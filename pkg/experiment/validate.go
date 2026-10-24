@@ -16,6 +16,7 @@ var usesRE = regexp.MustCompile(`^[a-z0-9-]+/[a-z0-9-]+$`)
 //   - step ids are unique and non-empty,
 //   - every `needs` id resolves to a real step in the same experiment,
 //   - every `uses` matches "<layer>/<steptype>",
+//   - every `with.cache` is a well-formed CachePolicy (metis#71),
 //   - the needs-graph is acyclic (delegated to TopoSort — one impl, ARCH-DRY).
 //
 // Pure. Returns a single joined error (errors.Join) listing ALL violations, so an
@@ -43,6 +44,9 @@ func Validate(exp Experiment) error {
 			if !ids[n] {
 				errs = append(errs, fmt.Errorf("step %q: needs %q which is not a step in this experiment", s.ID, n))
 			}
+		}
+		if _, err := ParseCachePolicy(s); err != nil {
+			errs = append(errs, err)
 		}
 	}
 

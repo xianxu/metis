@@ -44,15 +44,15 @@ Add a step-level never-cache policy at the existing StepExecutor/cache boundary.
 
 **Policy surface:** stays in the existing `with.cache` sub-map, next to `leaf: immutable` (one home for cache policy, ARCH-DRY). Allowed: `leaf: immutable`, `policy: never`. Refused at `experiment.Validate` (which `Runner.Run` and `ValidateShape` already call before any execution): `cache` not a map, an unknown key, an unknown value, or `leaf` + `policy: never` together. This also ends today's silent "malformed leaf means not a leaf". Metis stays domain-free: a human-grade step uses the same `policy: never`.
 
-- [ ] `pkg/experiment`: a typed `CachePolicy` parsed from `with.cache` (pure; one parser for Validate and the executor; `isImmutableLeaf` re-expressed over it); `Validate` refuses malformed values. Pure `UncachedSteps(steps) map[string]bool` (closure over `needs`, O(steps+edges)).
-- [ ] `cmd/metis/caching.go`: `newCachingExecutor` takes the steps (alongside seed), computes the set once; `Execute` branches first: uncached → print `step X (never-cache)`, run inner, return. Only glue in the IO shell (ARCH-PURE).
-- [ ] Vocabulary: `construct/vocabulary/experiment.cue` `#Step.with` gains `cache?: #CachePolicy` (closed: `leaf?: "immutable"`, `policy?: "never"`), and the rest of the map stays open; update the hand restatement in `pkg/experiment/conformance_test.go`.
-- [ ] Tests:
+- [x] `pkg/experiment`: a typed `CachePolicy` parsed from `with.cache` (pure; one parser for Validate and the executor; `isImmutableLeaf` re-expressed over it); `Validate` refuses malformed values. Pure `UncachedSteps(steps) map[string]bool` (closure over `needs`, O(steps+edges)).
+- [x] `cmd/metis/caching.go`: `newCachingExecutor` takes the steps (alongside seed), computes the set once; `Execute` branches first: uncached → print `step X (never-cache)`, run inner, return. Only glue in the IO shell (ARCH-PURE).
+- [x] Vocabulary: `construct/vocabulary/experiment.cue` `#Step.with` gains `cache?: #CachePolicy` (closed: `leaf?: "immutable"`, `policy?: "never"`), and the rest of the map stays open; update the hand restatement in `pkg/experiment/conformance_test.go`.
+- [x] Tests:
   - Validate table: each refusal above plus valid forms.
   - `UncachedSteps`: chain, diamond, unrelated sibling branch.
   - Sequence test through the real decorator (`runSound`/`traceFakeExec` template, `cache: true`, same config and seed). up=`policy: never`, down=deterministic: three runs with the nonce fixed (unchanged output), then a changed nonce. Both up and down execute on every run, and neither leaves an index entry. A cacheable root above `up` still hits.
   - Existing soundness tests unchanged: `UpstreamOutputChangeDoesNotRekeyDownstream` stays true for cacheable upstreams.
-- [ ] Atlas: the `pkg/cache` entry in `atlas/index.md` and `atlas/experiment.md` document the rule, the rejected alternative, and that determinism is never inferred from a missing reads.json.
+- [x] Atlas: the `pkg/cache` entry in `atlas/index.md` and `atlas/experiment.md` document the rule, the rejected alternative, and that determinism is never inferred from a missing reads.json.
 
 **ARCH notes.**
 - PURE: the parser, the closure and Validate are pure; the executor adds one branch.
@@ -69,3 +69,4 @@ Add a step-level never-cache policy at the existing StepExecutor/cache boundary.
 
 2026-10-23: Filed unclaimed for the operator-approved ariadne#577 re-plan. Seams: cmd/metis/caching.go cachingExecutor.Execute/kpre; pkg/experiment.Step and construct/vocabulary/experiment.cue. No implementation or production experiment changed.
 2026-10-23 (metis:1): The slot carried uncommitted local-gates leftovers from slot setup that blocked the fast-forward to main 0350013: merge-check.yml and .gitignore modified (an older seed), .gitattributes and local-gates-guard.yml untracked (identical to main). The hub (ops:0) approved discarding them. By the time I ran the backup, the tree was already clean at origin/main 0350013, so I discarded nothing. The scratchpad backup holds only main's two untracked files; the older modified seed was never captured, and main's versions replace it.
+2026-10-23 (metis:1): The hub approved the plan; implemented it on the quick flow. `pkg/experiment/cachepolicy.go`: ParseCachePolicy and UncachedSteps. UncachedSteps is a memoized DFS. It fails closed on a malformed policy (Validate refuses that first anyway) and terminates on cycles. The executor checks first for uncached steps, and `isImmutableLeaf` now goes through the same parser (ARCH-DRY). The CUE `#CachePolicy` gets a drift guard (`TestCachePolicyConformsToCUE`) that runs the Go table's cases through `cue vet`; the leaf + never contradiction is Go-only. Mutation check: with the executor branch disabled, the new sequence test fails with "score-0" served for a changed candidate. Environment note: `TestCache_ToyPipelineHitsOnRerun` builds a uv venv and needs pypi network access, so it fails under the default sandbox.
