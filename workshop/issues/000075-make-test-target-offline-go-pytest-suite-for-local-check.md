@@ -1,12 +1,12 @@
 ---
 id: 000075
-status: working
+status: codecomplete
 deps: []
 github_issue:
 created: 2026-10-23
 updated: 2026-10-23
 estimate_hours:
-card_mirror: '5adab9b3f5c5eaca4dc8c7e90d6f398f8faa431e' # card fields mirrored from issue-cards; edit via sdlc
+card_mirror: '48702cf79f636dfb49a98f75d5f62b5ca474975e' # card fields mirrored from issue-cards; edit via sdlc
 started: 2026-10-23T17:24:43-07:00
 claimant:
     operator: Xian Xu
@@ -15,6 +15,7 @@ claimant:
     workspace: metis:1
     worktree: /Users/xianxu/workspace/worktree/metis-slot1/metis
     repository: github.com/xianxu/metis
+actual_hours: 0.37
 ---
 
 # make test target: offline Go + pytest suite for local-check
