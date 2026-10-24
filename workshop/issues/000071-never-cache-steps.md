@@ -1,13 +1,21 @@
 ---
 id: 000071
-status: open
+status: working
 deps: []
 github_issue:
 created: 2026-10-23
 updated: 2026-10-23
 estimate_hours:
 collaboration-mode: collaboration
-card_mirror: '8cd175d5700698d1d275bb0b4064a8603806adc7' # card fields mirrored from issue-cards; edit via sdlc
+card_mirror: 'c37f29809c390541ae7ea3e6ae1968bc815da3c0' # card fields mirrored from issue-cards; edit via sdlc
+started: 2026-10-23T17:13:44-07:00
+claimant:
+    operator: Xian Xu
+    machine: 4716879978a7b90f6b583da1716fd0e9
+    machine_name: Xian’s MacBook Pro
+    workspace: metis:1
+    worktree: /Users/xianxu/workspace/worktree/metis-slot1/metis
+    repository: github.com/xianxu/metis
 ---
 
 # Step-level never-cache policy with safe downstream invalidation
@@ -34,3 +42,4 @@ Add a step-level never-cache policy at the existing StepExecutor/cache boundary.
 ## Log
 
 2026-10-23: Filed unclaimed for the operator-approved ariadne#577 re-plan. Seams: cmd/metis/caching.go cachingExecutor.Execute/kpre; pkg/experiment.Step and construct/vocabulary/experiment.cue. No implementation or production experiment changed.
+2026-10-23 (metis:1): The slot carried uncommitted local-gates leftovers from slot setup that blocked the fast-forward to main 0350013: merge-check.yml and .gitignore modified (an older seed), .gitattributes and local-gates-guard.yml untracked (identical to main). The hub (ops:0) approved discarding them. By the time I ran the backup, the tree was already clean at origin/main 0350013, so I discarded nothing. The scratchpad backup holds only main's two untracked files; the older modified seed was never captured, and main's versions replace it.
