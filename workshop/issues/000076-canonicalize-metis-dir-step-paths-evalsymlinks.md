@@ -40,3 +40,4 @@ Canonicalize the experiment dir at the runner boundary with `filepath.EvalSymlin
 ## Log
 
 2026-10-23 (metis:1): Implemented in runResolvedExperimentAdmitted: Abs, then EvalSymlinks on expDir (error if unresolvable), with runDir joined under it. TestRun_StepEnvPathsArePhysical runs the real execStep (test/env-dump) through a symlinked experiment dir and asserts physical EXP_DIR, RUN_DIR and STEP_DIR. Mutation: with the resolve disabled, all 3 asserts fail. go test ./cmd/metis ./pkg/... is green. The recorded suite waits for #75 (make test) to land.
+2026-10-23 (metis:1): Concurrent claims in this slot: #71, #75, #76 and #72 (in planning) are open at once while #75 waits on the operator CI pin (metis#70). Active-time attribution across them is approximate until ariadne#580 lands.
