@@ -41,6 +41,14 @@ Support repeat-shaped experiment results through Metis's existing record and led
 
 Durable plan: `workshop/plans/000073-repeated-run-ledger-plan.md` (single review boundary, Tasks 1 to 7). Design decisions 1 to 9 there were approved by the TL (see Log).
 
+- [ ] Task 1: writeFileAtomic (extracted); run.json and record.json written atomically
+- [ ] Task 2: pkg/ledger Repeat/Extra, extended key, conflict refusal, unknown columns preserved
+- [ ] Task 3: repeat aggregation (mean, se and n per metric; total and failed counts)
+- [ ] Task 4: --repeat label, record field plus CUE, exclusive run-dir claim, sweep refusal
+- [ ] Task 5: rowFromRecord, locked publishRows, single-run rows, metis ledger publish
+- [ ] Task 6: e2e repeats, conflicts, interrupted publication, parallel writers, legacy unchanged
+- [ ] Task 7: atlas
+
 ## Log
 
 2026-10-23: Filed unclaimed for the ariadne#577 re-plan. Seams: cmd/metis/run.go, sweep.go, ledger.go and pkg/ledger dedupKey. No implementation changed.
