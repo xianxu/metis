@@ -37,7 +37,32 @@ Add a step-level never-cache policy at the existing StepExecutor/cache boundary.
 
 ## Plan
 
-- [ ]
+**Rule (chosen): conservative propagation.** A step is *uncached* when its own `with: {cache: {policy: never}}` is set **or any transitive `needs` ancestor is uncached**. An uncached step skips lookup and store entirely (no index entry, no CAS put, no `kpres`/`transitiveD` write); it always runs `inner.Execute`. Everything outside that closure keeps today's input-addressed hit/miss and transitive-D invalidation, unchanged.
+
+*Rejected: binding descendants to realized upstream artifacts* (fold `record.OutputHash` + metrics into the uncached step's `kpres`). It is sound only if the declared artifacts capture everything a descendant reads. A couch-bench session's candidate likely lives outside the run dir (a worktree/ref), metric-only outputs are not in `OutputHash`, and metis cannot verify completeness (absent reads.json proves nothing). For nondeterministic producers the outputs differ on almost every repeat anyway, so the reuse it would buy is near zero. Propagation is sound without that assumption; the cost is that a deterministic scorer under a session reruns each repeat, which repeats need regardless.
+
+**Policy surface:** stays in the existing `with.cache` sub-map, next to `leaf: immutable` (one home for cache policy, ARCH-DRY). Allowed: `leaf: immutable`, `policy: never`. Refused at `experiment.Validate` (which `Runner.Run` and `ValidateShape` already call before any execution): `cache` not a map, an unknown key, an unknown value, or `leaf` + `policy: never` together. This also ends today's silent "malformed leaf means not a leaf". Metis stays domain-free: a human-grade step uses the same `policy: never`.
+
+- [ ] `pkg/experiment`: a typed `CachePolicy` parsed from `with.cache` (pure; one parser for Validate and the executor; `isImmutableLeaf` re-expressed over it); `Validate` refuses malformed values. Pure `UncachedSteps(steps) map[string]bool` (closure over `needs`, O(steps+edges)).
+- [ ] `cmd/metis/caching.go`: `newCachingExecutor` takes the steps (alongside seed), computes the set once; `Execute` branches first: uncached → print `step X (never-cache)`, run inner, return. Only glue in the IO shell (ARCH-PURE).
+- [ ] Vocabulary: `construct/vocabulary/experiment.cue` `#Step.with` gains `cache?: #CachePolicy` (closed: `leaf?: "immutable"`, `policy?: "never"`), and the rest of the map stays open; update the hand restatement in `pkg/experiment/conformance_test.go`.
+- [ ] Tests:
+  - Validate table: each refusal above plus valid forms.
+  - `UncachedSteps`: chain, diamond, unrelated sibling branch.
+  - Sequence test through the real decorator (`runSound`/`traceFakeExec` template, `cache: true`, same config and seed). up=`policy: never`, down=deterministic: three runs with the nonce fixed (unchanged output), then a changed nonce. Both up and down execute on every run, and neither leaves an index entry. A cacheable root above `up` still hits.
+  - Existing soundness tests unchanged: `UpstreamOutputChangeDoesNotRekeyDownstream` stays true for cacheable upstreams.
+- [ ] Atlas: the `pkg/cache` entry in `atlas/index.md` and `atlas/experiment.md` document the rule, the rejected alternative, and that determinism is never inferred from a missing reads.json.
+
+**ARCH notes.**
+- PURE: the parser, the closure and Validate are pure; the executor adds one branch.
+- EVOLVE: the experiment format change is additive. The cache index format is unchanged. An older metis would ignore `policy: never` and cache the step; couch-bench pins its metis version, so there is no version bump.
+- FUNERAL: creates nothing durable; uncached steps write no cache entries.
+- ORDER: no new cross-event state; the set is computed once per point executor and is read-only.
+- SECURE: the experiment file is author input, parsed into a typed value at Validate.
+- CONSTRAINTS: O(steps+edges) once per point, no hot path.
+- MOCK: N/A, no external dependency.
+
+**Size:** about 60 added code lines; quick flow, no Mx.
 
 ## Log
 
