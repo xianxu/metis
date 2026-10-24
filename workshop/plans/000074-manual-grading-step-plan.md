@@ -139,3 +139,24 @@ Covered: every request, submission and interruption path. **Not covered:** authe
     - an upstream byte changed refuses as a mismatch;
     - nothing pending refuses.
   - Atlas.
+
+## Revisions
+
+### 2026-10-23, plan-quality round 1 (metis:1)
+
+Reason: three Important findings and three Minor ones. Deltas supersede the matching text above. Design-changing deltas (marked TL) wait for the TL's approval.
+
+- **PQ-1: bookkeeping is never output.** `grade-request.json`, `grade-state.json` and `submission.json` join #72's single `reservedStepFiles` set (ARCH-DRY), so they never enter the output hash. `grade.json` is the only grade artifact. `manualExecutor` re-collects the step result (`collectResult`) **after** finalization, so `grade.json` and the grade metrics are included. The presenter's own collect at exit is not the step's final result.
+- **PQ-2 (TL, replaces decision 6's race rule): `submission.json` is the sole linearization point.** Every way a pending wait can end goes through one exclusive create of `submission.json`:
+  - `metis grade submit` creates it holding the submission.
+  - On wait_timeout or cancel, the runner creates it holding a **tombstone** `{abandoned: true, reason}`.
+  - The first creator wins:
+    - a submitter whose create succeeded was accepted, and the runner finalizes with that grade even if its deadline fired a moment later;
+    - a submitter whose create fails finds either an identical submission (idempotent), a different one (conflicting) or a tombstone (stale).
+  This removes "write abandoned first, then re-check" and its window, where a grade reported as accepted was then dropped. `grade-state.json` becomes a derived view written after the winner is known. Sequence test: the runner's poll misses, the submitter creates, the runner's deadline then fires, and the grade is finalized and never dropped.
+- **PQ-3 (TL): run-dir lease.** Every runner process holds an exclusive `flock` on `<run-dir>/.lease` for its lifetime: the original run from claim time (#73), and any resume. The kernel releases it when the process dies, so ownership is a single resource with no observation of liveness. `metis run --resume` takes the lease non-blocking. If it is held, it refuses with "run in progress (another metis owns runs/…)". So two resumes, or a resume while the original is alive, can never both finalize. `.lease` is reserved and empty.
+- **Minor: wait measured from pending entry.** `wait_seconds` runs from the presenter's exit (pending entry) to the winning submission, so it never overlaps `runtime_seconds`. `requested_at` stays in the request for binding only.
+- **Minor (TL): operating envelope.** A pending wait holds its run's runControl admission slot for minutes to days. To keep that bounded, manual steps are **refused in experiment-shape (sweep) runs** at ValidateShape: per-fold grading is meaningless, and it would park admission slots. In single runs, the only holder is the run itself. Parallel repeats (#73) are separate processes, each with its own slot.
+- **Minor: test strategy lines (replaces the prose in Tasks 5 and 9).**
+  - Runner wait: sequences of submit, timeout, cancel and process death against a fake presenter with an injected clock and poll seam, asserting that exactly one terminal winner exists and that no grade is invented or dropped.
+  - Resume: a table over (lease held, experiment changed, identity mismatch, nothing pending, submission while down).
