@@ -47,3 +47,4 @@ Durable plan: `workshop/plans/000072-step-timeout-live-log-plan.md` (full flow, 
 
 2026-10-23: Filed unclaimed for ariadne#577. Primary seam: cmd/metis/exec.go execStep.Execute, with forkexec.go and runcontrol.go lifecycle integration. No code changed.
 2026-10-23 (metis:1): Concurrent claims in this slot: #71, #75, #76 and #72 are open at once while #75 waits on the operator CI pin (metis#70). Active-time attribution across them is approximate until ariadne#580 lands.
+2026-10-23 (metis:1): The TL (ops:0) approved the plan with decision 2 as written: the timeout counts from launch, not step entry, with a cancellable leaf-budget acquire. All other decisions stand as written. Code starts after #75 lands (its suite needs make test).
