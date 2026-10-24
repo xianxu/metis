@@ -48,3 +48,4 @@ Durable plan: `workshop/plans/000074-manual-grading-step-plan.md` (full flow). D
 2026-10-23: Filed unclaimed from authenticated ops:0 addition f28bfafd-75e4-4f81-993c-acf79910fa1a for ariadne#577. Coordinate with the never-cache, timeout/live-log and repeat-ledger issues. No new grading scale is imposed here; the consumer declares its coarse scale.
 2026-10-23 (metis:1): Concurrent claims in this slot: #71 to #76 are open at once while #75 waits on the operator CI pin (metis#70). Active-time attribution across them is approximate until ariadne#580 lands.
 2026-10-23 (metis:1): The TL (ops:0) approved the plan as written. Grader trust stays with couch-bench. Code starts after #71, #72 and #73.
+2026-10-23 (metis:1): The TL (ops:0) approved Revisions A, B and C: submission.json as the single linearization point with a tombstone abandon, the run-dir flock lease, and manual steps refused in sweeps.
