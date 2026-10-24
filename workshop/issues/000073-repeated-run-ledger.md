@@ -16,6 +16,7 @@ claimant:
     workspace: metis:1
     worktree: /Users/xianxu/workspace/worktree/metis-slot1/metis
     repository: github.com/xianxu/metis
+flow: {kind: quick, provenance: inferred, spec: "caffd774", done: "d796f8c4"}
 ---
 
 # Repeat-shaped run records and ledger rows without CV folds
