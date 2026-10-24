@@ -1,6 +1,6 @@
 ---
 id: 000075
-status: working
+status: codecomplete
 created: 2026-10-23
 updated: 2026-10-23
 estimate_hours:
@@ -13,6 +13,14 @@ claimant:
     workspace: metis:1
     worktree: /Users/xianxu/workspace/worktree/metis-slot1/metis
     repository: github.com/xianxu/metis
+actual_hours: 0.37
+tracker:
+    version: 1
+    completion:
+        token: close-8f04ca6ff1ce
+        repository: github.com/xianxu/metis
+        reviewed_head: aad6f5c5d310ca2dd05dc246bd7a26359d039ee9
+        evidence_commit: 51bd2c350204b61f2052933ee14d6a99f4350266
 ---
 
 # make test target: offline Go + pytest suite for local-check
