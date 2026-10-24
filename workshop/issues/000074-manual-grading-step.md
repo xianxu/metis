@@ -5,9 +5,9 @@ deps: [metis#71, metis#72, metis#73]
 github_issue:
 created: 2026-10-23
 updated: 2026-10-23
-estimate_hours:
+estimate_hours: 2.93
 collaboration-mode: collaboration
-card_mirror: '0862d9a7b7271903efe32c9acf202d8582de7b24' # card fields mirrored from issue-cards; edit via sdlc
+card_mirror: '9ba1d8c9a088ebeb7d9cb06c3d0719ebf975540a' # card fields mirrored from issue-cards; edit via sdlc
 started: 2026-10-23T19:53:25-07:00
 claimant:
     operator: Xian Xu
@@ -16,6 +16,7 @@ claimant:
     workspace: metis:1
     worktree: /Users/xianxu/workspace/worktree/metis-slot1/metis
     repository: github.com/xianxu/metis
+flow: {kind: full, provenance: inferred}
 ---
 
 # Manual grading step with attributable result and separate human wait
@@ -42,6 +43,44 @@ Durable plan: `workshop/plans/000074-manual-grading-step-plan.md` (full flow). D
 
 - [ ] M1 — request, submit, wait, evidence
 - [ ] M2 — resume and reconciliation
+
+## Estimate
+
+```estimate
+model: estimate-logic-v3.1
+familiarity: 1.0
+item: smaller-go-module      design=0.05 impl=0.16
+item: greenfield-go-module   design=0.1 impl=0.28
+item: greenfield-go-module   design=0.1 impl=0.32
+item: smaller-go-module      design=0.05 impl=0.2
+item: smaller-go-module      design=0.0 impl=0.2
+item: smaller-go-module      design=0.05 impl=0.16
+item: smaller-go-module      design=0.05 impl=0.16
+item: greenfield-go-module   design=0.1 impl=0.28
+item: smaller-go-module      design=0.0 impl=0.2
+item: atlas-docs             design=0.05 impl=0.06
+item: milestone-review       design=0.0 impl=0.14
+item: milestone-review       design=0.0 impl=0.14
+design-buffer: 0.15
+total: 2.93
+```
+
+Items, in order:
+1. ManualPolicy plus implied uncached.
+2. pkg/grade: types, identities, ValidateSubmission.
+3. manualExecutor: request, presenter, wait, tombstone, evidence, re-collect.
+4. `metis grade submit`.
+5. M1 sequence tests.
+6. execution.json plus the run-dir lease.
+7. resumePlan.
+8. `metis run --resume`.
+9. Resume tests.
+10. Atlas.
+11. Two milestone reviews.
+
+Design hours are near zero after TL approval and 2 plan-quality rounds. Impl is 40% of the v2 ranges.
+
+*Produced via `brain/data/life/42shots/velocity/estimate-logic-v3.1.md` against `baseline-v3.1.md`. Method A only.*
 
 ## Log
 
