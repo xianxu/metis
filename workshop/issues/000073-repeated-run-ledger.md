@@ -38,9 +38,10 @@ Support repeat-shaped experiment results through Metis's existing record and led
 
 ## Plan
 
-Durable plan: `workshop/plans/000073-repeated-run-ledger-plan.md` (single review boundary, Tasks 1 to 7). Design decisions 1 to 9 there wait for TL approval.
+Durable plan: `workshop/plans/000073-repeated-run-ledger-plan.md` (single review boundary, Tasks 1 to 7). Design decisions 1 to 9 there were approved by the TL (see Log).
 
 ## Log
 
 2026-10-23: Filed unclaimed for the ariadne#577 re-plan. Seams: cmd/metis/run.go, sweep.go, ledger.go and pkg/ledger dedupKey. No implementation changed.
 2026-10-23 (metis:1): Concurrent claims in this slot: #71, #75, #76, #72 and #73 are open at once while #75 waits on the operator CI pin (metis#70). Active-time attribution across them is approximate until ariadne#580 lands.
+2026-10-23 (metis:1): The TL (ops:0) approved the plan as written, including the old-metis rewrite limit, since couch-bench pins metis. Code starts after #71.
