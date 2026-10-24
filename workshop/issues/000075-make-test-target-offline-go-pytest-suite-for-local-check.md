@@ -40,6 +40,8 @@ Add a `test` target to the metis Makefile that runs the full suite: `go test ./.
 
 ## Log
 
+
+- 2026-10-23: closed — Recorded sdlc-local/suite passed on aad6f5c (local-check --pre-close chose suite: go test ./... all ok via the per-run SDLC_DEP_SUBSTRATE modfile, pytest 137 passed, offline). BR-1 fixed (private mktemp dir, trap cleanup, verified removed); quoting and Revisions minors fixed.; review verdict: SHIP
 2026-10-23 (metis:1): In a fresh clone with no .venv and the network denied (default sandbox, no allowed domains), `make test` passed: go test ./... ok, then pytest 137 passed with the venv built offline from the uv cache.
 2026-10-23 (metis:1): The first recorded suite on 8e8b3c96 failed in Go setup: the local-check checkout (/Volumes/TestScratch/local-checks/sdlc-local-*) has no sibling ../ariadne for go.mod's replace. Fix: when ../ariadne is absent and sdlc exports SDLC_DEP_SUBSTRATE, test with -modfile pointing at a throwaway go.mod copy whose replace targets that path. Rejected a temp go.work: it matches `use` against the cwd, so a symlinked cwd (/tmp vs /private/tmp) breaks it. Verified in a clone without ../ariadne, network denied: Go all ok, pytest 137 passed.
 
