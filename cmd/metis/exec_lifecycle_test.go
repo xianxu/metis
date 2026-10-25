@@ -191,6 +191,11 @@ func TestExecStep_EscapedGrandchildIsCleanupUnconfirmed(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			e, runDir := lifecycleExec(t), t.TempDir()
+			if c.name == "exit 0" {
+				// the step waits for a python3 grandchild to start, which under suite load can
+				// itself pass 300ms; a wide bound keeps "runtime excludes the drain wait" decisive
+				e.joinBound = 3 * time.Second
+			}
 			killOrphan(t, runDir)
 			if c.gate {
 				if err := syscall.Mkfifo(filepath.Join(runDir, "gate"), 0o600); err != nil {
@@ -211,8 +216,12 @@ func TestExecStep_EscapedGrandchildIsCleanupUnconfirmed(t *testing.T) {
 				t.Errorf("outcome = %+v, want cleanup-unconfirmed", o)
 			}
 			// runtime stops at the exit, not after the join wait (which here runs to its bound)
-			if c.name == "exit 0" && (o.RuntimeSeconds == nil || *o.RuntimeSeconds >= e.joinBound.Seconds()) {
-				t.Errorf("runtime = %v, want < joinBound %v: the drain wait is not compute", o.RuntimeSeconds, e.joinBound)
+			if c.name == "exit 0" {
+				if o.RuntimeSeconds == nil {
+					t.Errorf("runtime missing, want < joinBound %v", e.joinBound)
+				} else if *o.RuntimeSeconds >= e.joinBound.Seconds() {
+					t.Errorf("runtime = %vs, want < joinBound %v: the drain wait is not compute", *o.RuntimeSeconds, e.joinBound)
+				}
 			}
 		})
 	}
