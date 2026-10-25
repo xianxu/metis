@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/xianxu/metis/internal/fsx"
 	"github.com/xianxu/metis/internal/repo"
 	"github.com/xianxu/metis/pkg/cas"
 	"github.com/xianxu/metis/pkg/experiment"
@@ -325,7 +326,7 @@ func writeRunJSON(runDir string, run experiment.Run) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(runDir, "run.json"), append(b, '\n'), 0o644)
+	return fsx.WriteFileAtomic(filepath.Join(runDir, "run.json"), append(b, '\n'), 0o644) // metis#73: never torn
 }
 
 // orBackground is the nil-safe run context: option structs built by tests leave ctx unset.

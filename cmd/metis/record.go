@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/xianxu/metis/internal/fsx"
 	"github.com/xianxu/metis/pkg/cas"
 	"github.com/xianxu/metis/pkg/experiment"
 	"github.com/xianxu/metis/pkg/record"
@@ -156,7 +157,7 @@ func writeRecordJSON(runDir string, rec record.RunRecord) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(runDir, "record.json"), append(b, '\n'), 0o644)
+	return fsx.WriteFileAtomic(filepath.Join(runDir, "record.json"), append(b, '\n'), 0o644) // metis#73: a record that exists is whole
 }
 
 // (recordSummary/formatKnobs/formatMetrics were the `## Runs` knob→score renderers —
