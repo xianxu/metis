@@ -73,7 +73,7 @@ consumer-authored pin, whose absence is what fails CI today (PR #51).
       pin (short, uppercase, missing newline) to the validator and see it refuse.
 - [x] Not manifest-managed: `construct/base.manifest` has no `.sdlc` entry; run
       `weave refresh` and confirm the pin survives byte-identical.
-- [ ] Open the PR; real CI is the cold-checkout acceptance (the regenerated
+- [x] Open the PR; real CI is the cold-checkout acceptance (the regenerated
       vocabulary and sidecars, with no authored-replacement refusal). The
       `local-gates-guard` check is expected to fail until the operator verifies
       and applies `local-gates-verified`. Report the PR, compiler identity and CI
