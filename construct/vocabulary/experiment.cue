@@ -16,7 +16,20 @@ package experiment
 	id:   string          // unique within the experiment
 	uses: string          // "<layer>/<steptype>", e.g. "metis/cv-split"
 	needs?: [...string]   // ids of steps this one depends on (DAG edges)
-	with?: {[string]: _}  // free config map; typed per step-type in M3
+	with?: {
+		cache?: #CachePolicy // the one typed key: cache policy (metis#2 leaf, metis#71 never)
+		[string]: _          // otherwise a free config map; typed per step-type in M3
+	}
+}
+
+// #CachePolicy — a step's cache directive. Closed: an unknown key or value refuses.
+// `leaf: immutable` caches a pinned external fetch on K_pre alone; `policy: never` marks
+// a nondeterministic step (an agent session, a human grade) that never looks up or
+// stores, and makes every descendant uncached too. The two together are a contradiction
+// that only Go Validate (pkg/experiment ParseCachePolicy) rejects.
+#CachePolicy: {
+	leaf?:   "immutable"
+	policy?: "never"
 }
 
 #Run: {

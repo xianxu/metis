@@ -260,7 +260,7 @@ func runResolvedExperimentAdmitted(exp experiment.Experiment, o runOpts, runID s
 			return experiment.Run{}, err
 		}
 		store := cas.NewFSStore(filepath.Join(cacheDir, "cas"), 0, cas.Clock(now))
-		exec = newCachingExecutor(exec, store, cacheDir, exp.Seed, out)
+		exec = newCachingExecutor(exec, store, cacheDir, exp, out)
 	}
 	exec = activityExecutor{inner: exec, now: now, emit: o.activity}
 	runner := experiment.Runner{Exec: exec, Now: now}

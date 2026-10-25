@@ -6,6 +6,11 @@ reproducible unit of ML work (the **experiment**) and, as they land, the step-ru
 and the Dataset/Split/step-type data plane. "Platform-independent" test: *would this be
 identical on a non-Kaggle platform?* — if yes, it lives here.
 
+- **Full suite** (`make test`, metis#75): `go test ./...` plus `pytest tests`, offline
+  (`UV_OFFLINE=1`; `make test-deps` warms the uv cache). It is what
+  `sdlc local-check run --name suite` records. In a local-check checkout without a sibling
+  `../ariadne`, it tests against a temporary `go.mod` copy whose `replace` points at sdlc's
+  `SDLC_DEP_SUBSTRATE`.
 - [experiment datatype](experiment.md) — the reproducible pipeline noun: the CUE schema
   (`#Experiment`/`#Step`/`#Status`/`#Run`), the `xx-datatype` authoring prototype, the
   `vocabulary validate-instance` structural validator, the enforcement merge-check (M1), the
@@ -233,6 +238,15 @@ identical on a non-Kaggle platform?* — if yes, it lives here.
   provenance path (`buildRecord`) is separate and still OUTPUT-addressed — post-#24 the two deliberately
   diverge (input-addressed key vs output-addressed provenance). The **leaf policy**
   (`with: {cache: {leaf: immutable}}`) HITs on the K_pre match alone (pinned external fetch).
+  **Never-cache (metis#71):** `with: {cache: {policy: never}}` declares a nondeterministic step
+  (an agent session, a human grade). It never looks up or stores, and **every transitive
+  descendant is uncached too** (`experiment.UncachedSteps`), because an input-addressed
+  downstream key cannot tell two realized outputs apart, so a stale score could stand in for a
+  new candidate. Binding descendants to realized artifact hashes was rejected: it is sound only
+  if the declared artifacts capture everything read, which metis cannot verify. Determinism is
+  never inferred from a missing reads.json; the policy is declared. `experiment.ParseCachePolicy`
+  is the one parser for `with.cache` (CUE `#CachePolicy`); Validate refuses a non-map, an
+  unknown key or value, or leaf + never.
   **The decided trade-off (metis#24, recorded):** input-addressing GIVES UP early-cutoff (a code
   edit yielding byte-identical upstream output still re-keys downstream) — deliberately cheap in
   ML, where training outputs are rarely byte-reproducible so early-cutoff almost never fires;
@@ -252,6 +266,18 @@ identical on a non-Kaggle platform?* — if yes, it lives here.
   interface: `MemStore` is the in-memory fake for #2's tests, S3 slots in later (out of v1). No
   cache-keying/provenance/durable-retention here (→ #2/#3/#8). [metis#9]
 - [workflow/](workflow) — inherited ariadne workflow docs (symlink into the substrate).
+- **CI compiler pin** — `.sdlc/weave-compiler-ref` (authored, not weave-managed) names the exact
+  ariadne commit the seeded `merge-check.yml` builds weave from before bootstrap; a missing or
+  malformed pin, or a build whose provenance mismatches, fails CI with no fallback. Bump it only to
+  a ref ariadne lists in its `.sdlc/weave-compiler-refs`; it is local-gates configuration, so each
+  bump is its own operator-verified PR. See
+  [compiler compatibility](workflow/ci-merge-check.md#compiler-compatibility-459). [metis#70]
+- **CI tool PATH hook** — compile builds layer tools (`vocabulary`) into `../ariadne/bin` and only
+  prints the directory, so `scripts/ci-setup.sh` (the seeded post-compile hook) appends
+  `../ariadne/bin` and `bin` to `GITHUB_PATH`. Temporary: delete it with this line when ariadne#627
+  makes the seeded workflow do it. The experiment merge-checks source
+  `scripts/merge-checks.d/_vocab.bash` (non-executable, so not run as a check) and exit 2 naming a
+  missing tool, never a schema verdict (`tests/test_merge_checks.py`). [metis#70]
 
 **Roadmap (metis#1 — all milestones shipped):** M1 (experiment datatype), M2 (Go step-runner:
 `cmd/metis run` + pure `pkg/experiment` `Parse`/`Validate`/`TopoSort`, semantics enforced on

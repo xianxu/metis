@@ -19,7 +19,7 @@
 # EXPERIMENT_VALIDATE_INCLUDE_TESTDATA=1 to scan them too.
 set -euo pipefail
 
-VOCAB="${VOCAB:-vocabulary}"           # on PATH during `make weave`; else ../ariadne/bin/vocabulary
+. "$(dirname "$0")/_vocab.bash"
 base="${1:-${MERGE_CHECK_BASE:-origin/main}}"
 headref="${2:-HEAD}"
 

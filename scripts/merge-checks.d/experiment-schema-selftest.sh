@@ -9,7 +9,7 @@
 # testdata/. This is the automated backstop behind M1's "enforcement" claim.
 set -euo pipefail
 
-VOCAB="${VOCAB:-vocabulary}"
+. "$(dirname "$0")/_vocab.bash"
 cd "$(git rev-parse --show-toplevel)"
 valid=testdata/experiment/valid-baseline.md
 invalid=testdata/experiment/invalid-bad-status.md
