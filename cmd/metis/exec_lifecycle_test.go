@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -165,8 +166,7 @@ func TestExecStep_IgnoredTERMEscalatesToKILL(t *testing.T) {
 	}
 }
 
-func TestExecStep_EscapedGrandchildIsCleanupUnconfirmed(t *testing.T) {
-	e, runDir := lifecycleExec(t), t.TempDir()
+func killOrphan(t *testing.T, runDir string) {
 	t.Cleanup(func() {
 		if b, err := os.ReadFile(filepath.Join(runDir, "orphan.pid")); err == nil {
 			if pid, err := strconv.Atoi(strings.TrimSpace(string(b))); err == nil {
@@ -174,12 +174,90 @@ func TestExecStep_EscapedGrandchildIsCleanupUnconfirmed(t *testing.T) {
 			}
 		}
 	})
-	_, err := e.Execute(context.Background(), experiment.Step{ID: "s", Uses: "test/escaper"}, runDir)
-	if err == nil || !strings.Contains(err.Error(), "cleanup unconfirmed") {
-		t.Fatalf("err = %v, want cleanup unconfirmed (a descendant still holds the log pipe)", err)
+}
+
+// An escaped descendant holding the log pipe means the join cannot be confirmed, whatever else
+// happened: a clean exit, a failure, or a timeout (close review BR-1: Go reports ErrWaitDelay
+// only after a successful exit, so the drain is tracked on metis's own pipe).
+func TestExecStep_EscapedGrandchildIsCleanupUnconfirmed(t *testing.T) {
+	for _, c := range []struct {
+		name, exitCode string
+		gate           bool
+		step           experiment.Step
+	}{
+		{"exit 0", "", false, experiment.Step{ID: "s", Uses: "test/escaper"}},
+		{"exit 1", "1", false, experiment.Step{ID: "s", Uses: "test/escaper"}},
+		{"timeout", "", true, withTimeout("s", "test/escaper", "300ms")},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			e, runDir := lifecycleExec(t), t.TempDir()
+			killOrphan(t, runDir)
+			if c.gate {
+				if err := syscall.Mkfifo(filepath.Join(runDir, "gate"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if c.exitCode != "" {
+				if err := os.WriteFile(filepath.Join(runDir, "exit-code"), []byte(c.exitCode), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			_, err := e.Execute(context.Background(), c.step, runDir)
+			if err == nil || !strings.Contains(err.Error(), "cleanup unconfirmed") {
+				t.Fatalf("err = %v, want cleanup unconfirmed (a descendant still holds the log pipe)", err)
+			}
+			if o := readOutcome(t, filepath.Join(runDir, "s")); o.Outcome != outcomeCleanupUnconfirmed {
+				t.Errorf("outcome = %+v, want cleanup-unconfirmed", o)
+			}
+		})
 	}
-	if o := readOutcome(t, filepath.Join(runDir, "s")); o.Outcome != outcomeCleanupUnconfirmed {
-		t.Errorf("outcome = %+v, want cleanup-unconfirmed even though the child exited 0", o)
+}
+
+// A step that cannot even start still records its ending through the one classifier.
+func TestExecStep_StartFailureRecordsOutcome(t *testing.T) {
+	e, runDir := lifecycleExec(t), t.TempDir()
+	steps := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(steps, "test"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(steps, "test", "not-executable"), []byte("#!/bin/sh\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	e.stepPath = []string{steps}
+	_, err := e.Execute(context.Background(), experiment.Step{ID: "s", Uses: "test/not-executable"}, runDir)
+	if err == nil || !strings.Contains(err.Error(), "start") {
+		t.Fatalf("err = %v, want a start failure", err)
+	}
+	if o := readOutcome(t, filepath.Join(runDir, "s")); o.Outcome != outcomeFailed || o.Started != nil {
+		t.Errorf("outcome = %+v, want failed with no launch time", o)
+	}
+}
+
+// An unreadable pending-resources.json is not evidence of "none": the step is not a success.
+func TestExecStep_UnreadablePendingResourcesRefuseSuccess(t *testing.T) {
+	e, runDir := lifecycleExec(t), t.TempDir()
+	_, err := e.Execute(context.Background(), experiment.Step{ID: "s", Uses: "test/pending-unreadable"}, runDir)
+	if err == nil || !strings.Contains(err.Error(), "resources unretired") {
+		t.Fatalf("err = %v, want resources unretired", err)
+	}
+	if o := readOutcome(t, filepath.Join(runDir, "s")); o.Outcome != outcomeResourcesUnretired {
+		t.Errorf("outcome = %+v", o)
+	}
+}
+
+// runtime_seconds is compute time, launch to exit: termination (grace, join) is not counted.
+func TestExecStep_RuntimeExcludesTermination(t *testing.T) {
+	e, runDir := lifecycleExec(t), t.TempDir()
+	e.grace = 400 * time.Millisecond
+	if _, err := e.Execute(context.Background(), withTimeout("s", "test/term-ignorer", "200ms"), runDir); err == nil {
+		t.Fatal("want a timeout")
+	}
+	o := readOutcome(t, filepath.Join(runDir, "s"))
+	if o.RuntimeSeconds == nil || *o.RuntimeSeconds < 0.55 {
+		t.Fatalf("runtime = %v; the child ran until KILLed, after the timeout plus grace", o.RuntimeSeconds)
+	}
+	if o.Ended == nil || math.Abs(o.Ended.Sub(*o.Started).Seconds()-*o.RuntimeSeconds) > 0.01 {
+		t.Errorf("ended must be the exit time: %+v", o)
 	}
 }
 

@@ -30,7 +30,8 @@ const (
 // stepEnding is everything the launch paths observed about one step's end. Pure data.
 type stepEnding struct {
 	event        endEvent
-	launched     bool   // false: cancelled while waiting for a slot or before fork
+	launched     bool   // false: cancelled while waiting for a slot, or the launch itself failed
+	launchErr    string // why a non-cancelled step never launched (log create, exec start)
 	exitCode     int    // valid when the child exited (-1 when killed by a signal)
 	signal       string // the last termination signal metis sent ("TERM" | "KILL" | "")
 	joined       bool   // the child and its output pipe were confirmed finished
@@ -88,6 +89,9 @@ func classifyOutcome(e stepEnding) (Outcome, error) {
 	case e.event == endCancelled:
 		o.Outcome = outcomeCancelled
 		return o, fmt.Errorf("cancelled, terminated with %s%s", e.signal, tail)
+	case !e.launched:
+		o.Outcome = outcomeFailed
+		return o, fmt.Errorf("start: %s", e.launchErr)
 	case e.exitCode != 0:
 		o.Outcome = outcomeFailed
 		return o, fmt.Errorf("exit status %d%s", e.exitCode, tail)

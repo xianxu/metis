@@ -111,7 +111,9 @@ broken-graph surfaces layergraph's actionable error rather than degrading silent
   there is no default. A step runs as its own process group. On its timeout, or on SIGINT/SIGTERM
   to metis (`main`'s signal context; a second signal exits hard), the group gets TERM, then KILL
   after a 10s grace, then a 5s bounded join. A step queued for a budget slot when the run is
-  cancelled never launches (`leafBudget.acquire(ctx, …)`).
+  cancelled never launches (`leafBudget.acquire(ctx, …)`). **Until #72 M2 lands, only the legacy
+  launch path honors this:** a step routed through the forkserver ignores the timeout and writes
+  no `step.log` or `outcome.json`.
 - **Live log and outcome (metis#72):** child stdout+stderr stream into `step.log` as they arrive
   (`boundedLog`: capped at 64 MiB with one truncation marker, the rest drained so the child never
   blocks; a 64 KiB tail feeds the failure message). Every executed step writes `outcome.json`
@@ -119,7 +121,13 @@ broken-graph surfaces layergraph's actionable error rather than degrading silent
   signal, start/end, `runtime_seconds`, `log_truncated`, pending resources), decided in one place,
   `classifyOutcome` (precedence: cleanup-unconfirmed > resources-unretired > timed-out/cancelled/
   failed > ok). Only `ok` is success; nothing else is retried or published. The first terminal
-  event wins: an exit landing during termination never overrides a timeout or a cancel.
+  event wins: an exit landing during termination never overrides a timeout or a cancel. The join
+  is evidence: metis owns the output pipe, so it is confirmed only when the process exited and
+  the pipe drained within the bound; a descendant that left the group and still holds it means
+  `cleanup-unconfirmed`, whatever else happened. `runtime_seconds` is launch to exit, so the
+  termination wait is not compute. Residue: `step.log` adds at most 64 MiB per executed step, and
+  it, `outcome.json` and `pending-resources.json` go with their run dir; nothing removes run dirs
+  automatically, so disk use per run is bounded by steps × the cap and cleared by removing runs.
 - **In:** `with.json` — the step's `with` config, written into the step dir by the runner.
 - **Out:** an optional `metrics.json` (flat `{name: number}`, merged into `Run.metrics`) plus
   any **artifact files** the step writes into its dir. The top-level names in

@@ -15,10 +15,10 @@ func TestClassifyOutcome_Table(t *testing.T) {
 			pending: []byte(pending), started: t0, ended: t0.Add(90 * time.Second), tail: []byte("last words")}
 	}
 	cases := []struct {
-		name    string
-		in      stepEnding
-		want    string
-		errHas  string // "" = nil error
+		name   string
+		in     stepEnding
+		want   string
+		errHas string // "" = nil error
 	}{
 		{"exit 0", ran(endExited, 0, "", true, ""), outcomeOK, ""},
 		{"exit nonzero", ran(endExited, 3, "", true, ""), outcomeFailed, "exit status 3"},
@@ -26,6 +26,7 @@ func TestClassifyOutcome_Table(t *testing.T) {
 		{"deadline KILL", ran(endDeadline, -1, "KILL", true, ""), outcomeTimedOut, "KILL"},
 		{"cancelled running", ran(endCancelled, -1, "TERM", true, ""), outcomeCancelled, "cancelled"},
 		{"cancelled before launch", stepEnding{event: endCancelled}, outcomeCancelled, "before launch"},
+		{"launch failed", stepEnding{event: endExited, launchErr: "permission denied"}, outcomeFailed, "start: permission denied"},
 		{"join unconfirmed beats exit 0", ran(endExited, 0, "", false, ""), outcomeCleanupUnconfirmed, "cleanup unconfirmed"},
 		{"join unconfirmed beats pending", ran(endDeadline, -1, "KILL", false, `["actor-1"]`), outcomeCleanupUnconfirmed, "cleanup unconfirmed"},
 		{"pending beats exit 0", ran(endExited, 0, "", true, `["actor-1"]`), outcomeResourcesUnretired, `["actor-1"]`},
