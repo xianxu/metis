@@ -105,6 +105,8 @@ The thorough plan gives a +15% design buffer, and impl is 40% of the v2 ranges.
 
 2026-10-25 (metis:1): issue close review FIX-THEN-SHIP, two advisories fixed. BR-18: a watcher that failed to start skipped the escalation (gated on watcher.is_alive), leaving a TERM-ignoring child running; the gate is gone, the watcher start is a seam (_start_watcher), and test_watcher_start_failure_still_ends_the_child pins it (restoring the gate fails it). The legacy path signals -pid after Wait reaped the leader: safe by POSIX while any member lives; that precondition is now stated at awaitDrain and terminate, and the lesson is scoped (an owner that controls reaping signals only an unreaped leader's group; one that cannot states the POSIX precondition).
 
+2026-10-25 (metis:1): sdlc merge's suite on 404aa3ef failed test_watcher_start_failure_still_ends_the_child under machine load (the stubborn child still ran 5s after the waiter returned). Root cause in the test fixture, not the server: _fork_quiet_child set the child's group only in the child, so the waiter's TERM and KILL (0.2s apart) both missed with ESRCH while the forked child was not yet scheduled, and it then formed its group and looped. The server already sets the group in both parent and child. The fixture now does too, and the test probes the late reaper's work with kill(pid, 0) instead of a racing second waitpid (which had also produced an unhandled ECHILD in _late_reap). Targeted: tests/test_forkserver.py 21 passed; the test 10/10. Lesson added.
+
 ## Revisions
 
 - 2026-10-23 (metis:1), reason: plan-quality round 1. Delta:

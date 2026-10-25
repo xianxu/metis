@@ -438,6 +438,13 @@ def _fork_quiet_child(behavior: str) -> tuple[int, int]:
                 time.sleep(0.05)
         finally:
             os._exit(1)
+    # As the server does (metis#72): set the group in the parent too, so a signal sent before the
+    # child is scheduled still reaches it. Without this a loaded machine lets TERM and KILL both
+    # miss (ESRCH), and the child then makes its group and loops on forever.
+    try:
+        os.setpgid(pid, pid)
+    except OSError:
+        pass
     os.close(w)
     return pid, r
 
@@ -540,11 +547,10 @@ def test_watcher_start_failure_still_ends_the_child(monkeypatch):
         resp = json.loads(out.getvalue())
         assert resp["joined"] is False and "injected waiter failure" in resp["error"], resp
         deadline = time.monotonic() + 5
-        while True:  # KILLed by the escalation; reaped by the late reaper
-            try:
-                if os.waitpid(pid, os.WNOHANG)[0]:
-                    break
-            except ChildProcessError:
+        while True:  # KILLed by the escalation; reaped by the late reaper (the one reaper: the
+            try:     # test only probes, since a second waitpid would race it)
+                os.kill(pid, 0)
+            except ProcessLookupError:
                 break
             assert time.monotonic() < deadline, "the stubborn child is still running"
             time.sleep(0.02)

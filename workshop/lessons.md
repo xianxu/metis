@@ -94,6 +94,11 @@ work. Keep numerical and incident detail in the issue or experiment record.
   the child's stdout and stderr away from the runner, and kills it in `finally`. A child left
   holding the runner's stderr hangs the whole run; a mutation that breaks process-group code
   leaks its fixtures (metis#72, twice).
+- A test fixture that makes its child a group leader sets the group in the parent too
+  (`setpgid(pid, pid)` after the fork), as production code does: otherwise a signal sent before
+  the child is scheduled misses with ESRCH, and on a loaded machine TERM and KILL both miss. A
+  test that checks a reaper's work probes with `kill(pid, 0)`, never a second `waitpid` that
+  races the reaper (metis#72, failed the merge-time suite under load).
 
 ## Working rule
 
