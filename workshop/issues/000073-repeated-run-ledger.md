@@ -41,13 +41,13 @@ Support repeat-shaped experiment results through Metis's existing record and led
 
 Durable plan: `workshop/plans/000073-repeated-run-ledger-plan.md` (single review boundary, Tasks 1 to 7). Design decisions 1 to 9 there were approved by the TL (see Log).
 
-- [ ] Task 1: writeFileAtomic (extracted); run.json and record.json written atomically
-- [ ] Task 2: pkg/ledger Repeat/Extra, extended key, conflict refusal, unknown columns preserved
-- [ ] Task 3: repeat aggregation (mean, se and n per metric; total and failed counts)
-- [ ] Task 4: --repeat label, record field plus CUE, exclusive run-dir claim, sweep refusal
-- [ ] Task 5: rowFromRecord, locked publishRows, single-run rows, metis ledger publish
-- [ ] Task 6: e2e repeats, conflicts, interrupted publication, parallel writers, legacy unchanged
-- [ ] Task 7: atlas
+- [x] Task 1: writeFileAtomic (extracted); run.json and record.json written atomically
+- [x] Task 2: pkg/ledger Repeat/Extra, extended key, conflict refusal, unknown columns preserved
+- [x] Task 3: repeat aggregation (mean, se and n per metric; total and failed counts)
+- [x] Task 4: --repeat label, record field plus CUE, exclusive run-dir claim, sweep refusal
+- [x] Task 5: rowFromRecord, locked publishRows, single-run rows, metis ledger publish
+- [x] Task 6: e2e repeats, conflicts, interrupted publication, parallel writers, legacy unchanged
+- [x] Task 7: atlas
 
 ## Estimate
 
@@ -86,3 +86,9 @@ Design hours are near zero because the TL approved the plan, and it cleared 2 pl
 2026-10-23 (metis:1): Concurrent claims in this slot: #71, #75, #76, #72 and #73 are open at once while #75 waits on the operator CI pin (metis#70). Active-time attribution across them is approximate until ariadne#580 lands.
 2026-10-23 (metis:1): The TL (ops:0) approved the plan as written, including the old-metis rewrite limit, since couch-bench pins metis. Code starts after #71.
 2026-10-23 (metis:1): change-code passed on the pinned full flow. Plan-quality: round 1 raised 3 Important findings (the aggregate-row key collision, plain-row rerun semantics, and the undefined final record); all were fixed in the plan Revisions, and round 2 was clean. Estimate 1.74h; estimate-quality INFO, which suggests the realistic total is 2.0 to 2.3h (items 4 to 6 light). Recorded as accepted. Code waits for #71.
+2026-10-25 (metis:1): implementation, Tasks 1 to 7, after #71 and #72 landed (main merged at the start). Concurrent claims note still applies (#73 and #74 open in this slot; ariadne#580 attribution). Notes against the plan:
+- Append keeps its first-wins skip for sweep and plain rows; the plain-row replace (PQ-2) is a separate `Ledger.Publish`, so the replace is explicit at the one call site that wants it and AggregateView/Filter/sweeps cannot replace by accident. Append now returns an error (repeat conflicts only).
+- `metis ledger publish` takes `<experiment.md> <run-dir>` rather than `<run-dir>` alone: a run dir does not name its experiment file (the record holds only the experiment id), and the ledger sits beside the .md. It refuses a dir that is not under that experiment's runs/. Both refusal hints print the full command.
+- rowFromRecord uses the record's point address as the row identity. An untracked experiment (no git) has no shape blob hash, so its run dir is timestamped while its point address is still minted; rowRunID then misses its dir, which the fingerprint view already treats as "no record". The e2e tests use a tracked experiment.
+- A failed run's row carries no metrics (decision 5), even when earlier steps measured some; AggregateView ignores failed members' values anyway.
+Verification (targeted): pkg/ledger (legacy byte-identical round-trip property, unknown columns, Append/Publish kinds table, repeat family and n-counts property, fold groups unchanged), internal/fsx (rename-crash keeps the old file), pkg/record CUE conformance with repeat, cmd/metis package (new repeat_e2e_test: two repeats, label reuse, code edit splits families, interrupted publication and recovery, conflict refusal, plain row replace and failed row, refusals before effects, replay warning, 16 parallel publishers and a claim race) all pass.

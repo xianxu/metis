@@ -148,6 +148,37 @@ broken-graph surfaces layergraph's actionable error rather than degrading silent
   immutable input; the human top-N view is `metis ledger show`). A run rejected at validation time
   writes nothing. M2 ships a process-level fake step (`testdata/steps/test/echo`) exercising this
   contract end-to-end; real `metis/*` step-types arrive in M3.
+- **Repeats and single-run rows (metis#73):** `metis run --repeat LABEL exp.md` records one
+  execution as a distinct **sample**, for workloads whose steps are nondeterministic
+  (`policy: never`, e.g. couch-bench). The label is a slug and an execution coordinate, not
+  configuration.
+  - **Run dir:** `runs/<point_addr>.r-<label>/`, claimed by an exclusive `mkdir` before any step
+    runs. A used label therefore refuses, whether the earlier run is concurrent or finished.
+  - **Record and row:** the record carries `repeat`, and the ledger row adds a ragged `repeat`
+    column; the label is part of the row key only when set.
+  - **Plain runs** (no `--repeat`) now publish a row too. That row mirrors its overwritable run
+    dir, so a rerun replaces it.
+  - **Rows are immutable samples:** an exact re-publish is a no-op, and conflicting data
+    refuses. Sweep rows stay first-wins.
+  - **Publication order:**
+    1. claim
+    2. execute
+    3. `run.json`
+    4. `record.json`, written once and atomically after the in-memory code backfill, so a
+       record that exists is final
+    5. the row, last
+  - **Ledger writes** go through one writer (`publishRows`): an exclusive flock on
+    `<ledger>.lock`, then an atomic rewrite (`internal/fsx.WriteFileAtomic`, the one temp+rename
+    helper shared with the CAS and the step cache).
+  - **Recovery:** if a crash leaves a final record without its row, `metis ledger publish
+    exp.md runs/<id>` re-derives the row from the record (`rowFromRecord`). It refuses an
+    interrupted execution, meaning a missing or unparseable record.
+  - **Reading:** `AggregateView` reduces repeat rows to one family per (code_fingerprint,
+    point_addr), marked `repeat=*`. Every metric gets mean, `.se` and `.n`, plus
+    `repeats.total` and `repeats.failed`. Failed repeats count but add no values, and nothing
+    is filled in. A repeat is never a fold.
+  - **Compatibility:** columns this version does not know are kept (`Row.Extra`) and written
+    back. Legacy ledgers round-trip byte-identically.
 
 ## Surface (M3) — the Python data plane
 
