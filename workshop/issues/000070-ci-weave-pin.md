@@ -1,13 +1,13 @@
 ---
 id: 000070
-status: working
+status: codecomplete
 deps: [ariadne#459]
 github_issue:
 created: 2026-10-19
 updated: 2026-10-25
 estimate_hours:
 collaboration-mode: collaboration
-card_mirror: '1c4cdb37fad1ad261c07f231280f83837eff93c9' # card fields mirrored from issue-cards; edit via sdlc
+card_mirror: '9c01b4f0ae35d11e4162f6a81f622c07f7db870c' # card fields mirrored from issue-cards; edit via sdlc
 started: 2026-10-25T04:16:09-07:00
 claimant:
     operator: Xian Xu
@@ -17,6 +17,7 @@ claimant:
     worktree: /Users/xianxu/workspace/worktree/metis-slot1/metis
     repository: github.com/xianxu/metis
 flow: {kind: quick, provenance: inferred, spec: "a651e122", done: "a4d38aa0"}
+actual_hours: 0.06
 ---
 
 # CI: build weave from a pinned ariadne commit
