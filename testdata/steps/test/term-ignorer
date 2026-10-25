@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# test/term-ignorer — metis#72: ignores TERM (inherited by its children), so only the KILL
+# escalation ends its process group.
+trap '' TERM
+touch "$METIS_STEP_DIR/ready"
+while true; do sleep 0.05; done

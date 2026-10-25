@@ -16,7 +16,28 @@ package experiment
 	id:   string          // unique within the experiment
 	uses: string          // "<layer>/<steptype>", e.g. "metis/cv-split"
 	needs?: [...string]   // ids of steps this one depends on (DAG edges)
-	with?: {[string]: _}  // free config map; typed per step-type in M3
+	with?: {
+		cache?: #CachePolicy // typed key: cache policy (metis#2 leaf, metis#71 never)
+		exec?:  #ExecPolicy  // typed key: execution policy (metis#72 timeout)
+		[string]: _          // otherwise a free config map; typed per step-type in M3
+	}
+}
+
+// #CachePolicy — a step's cache directive. Closed: an unknown key or value refuses.
+// `leaf: immutable` caches a pinned external fetch on K_pre alone; `policy: never` marks
+// a nondeterministic step (an agent session, a human grade) that never looks up or
+// stores, and makes every descendant uncached too. The two together are a contradiction
+// that only Go Validate (pkg/experiment ParseCachePolicy) rejects.
+#CachePolicy: {
+	leaf?:   "immutable"
+	policy?: "never"
+}
+
+// #ExecPolicy — a step's execution directive. Closed: an unknown key refuses. `timeout` is a
+// Go duration ("90m", "1h30m") bounding the child's runtime from launch; there is no default.
+// Parsing and positivity are checked only by Go Validate (pkg/experiment ParseExecPolicy).
+#ExecPolicy: {
+	timeout?: string
 }
 
 #Run: {

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -62,6 +63,7 @@ func ensureCacheGitignore(cacheDir string) error {
 // runOpts are the inputs to one `metis run`. now/git/out are injected so the e2e
 // test gets a deterministic clock, a fake git probe, and can discard progress output.
 type runOpts struct {
+	ctx      context.Context // metis#72: run cancellation (SIGINT/SIGTERM); nil = Background
 	expPath  string
 	runID    string
 	stepPath []string
@@ -240,15 +242,13 @@ func runResolvedExperimentAdmitted(exp experiment.Experiment, o runOpts, runID s
 	// Absolutize at the runner boundary: execStep injects runDir/stepDir/expDir into
 	// the child's env, and the child's cwd IS the step dir — a relative path would
 	// resolve $METIS_STEP_DIR/with.json under itself. Absolute paths are correct
-	// from any cwd, so `metis run pipelines/foo.md` (a relative arg) works.
-	runDir, err := filepath.Abs(filepath.Join(baseDir, "runs", runID))
+	// from any cwd, so `metis run pipelines/foo.md` (a relative arg) works. Physical, too
+	// (metis#76, physicalPath); stepEnv re-asserts that for every path a child receives.
+	expDir, err := physicalPath(baseDir)
 	if err != nil {
-		return experiment.Run{}, err
+		return experiment.Run{}, fmt.Errorf("resolve experiment dir: %w", err)
 	}
-	expDir, err := filepath.Abs(baseDir)
-	if err != nil {
-		return experiment.Run{}, err
-	}
+	runDir := filepath.Join(expDir, "runs", runID)
 
 	var exec experiment.StepExecutor = execStep{stepPath: o.stepPath, expDir: expDir, seed: exp.Seed, readRoot: o.readRoot, out: out, budget: o.leafBudget, priority: o.priority, pool: o.forkPool, pins: o.leafPins}
 	if o.exec != nil {
@@ -260,12 +260,12 @@ func runResolvedExperimentAdmitted(exp experiment.Experiment, o runOpts, runID s
 			return experiment.Run{}, err
 		}
 		store := cas.NewFSStore(filepath.Join(cacheDir, "cas"), 0, cas.Clock(now))
-		exec = newCachingExecutor(exec, store, cacheDir, exp.Seed, out)
+		exec = newCachingExecutor(exec, store, cacheDir, exp, out)
 	}
 	exec = activityExecutor{inner: exec, now: now, emit: o.activity}
 	runner := experiment.Runner{Exec: exec, Now: now}
 	fmt.Fprintf(out, "metis: run %s of experiment %q\n", runID, exp.ID)
-	run, steps, runErr := runner.Run(exp, runID, runDir)
+	run, steps, runErr := runner.Run(orBackground(o.ctx), exp, runID, runDir)
 
 	// Execution-time enforcement: Runner.Run validates the experiment BEFORE any
 	// step executes, so a semantically-invalid experiment (dangling needs, bad
@@ -326,4 +326,12 @@ func writeRunJSON(runDir string, run experiment.Run) error {
 		return err
 	}
 	return os.WriteFile(filepath.Join(runDir, "run.json"), append(b, '\n'), 0o644)
+}
+
+// orBackground is the nil-safe run context: option structs built by tests leave ctx unset.
+func orBackground(ctx context.Context) context.Context {
+	if ctx == nil {
+		return context.Background()
+	}
+	return ctx
 }

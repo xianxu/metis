@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"os"
 	"path/filepath"
@@ -538,7 +539,7 @@ func TestSelect_CohortFlag(t *testing.T) {
 	r, w, _ := os.Pipe()
 	orig := os.Stdout
 	os.Stdout = w
-	err := run([]string{"select", shapePath, "--cohort"})
+	err := run(context.Background(), []string{"select", shapePath, "--cohort"})
 	_ = w.Close()
 	os.Stdout = orig
 	var buf bytes.Buffer

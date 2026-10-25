@@ -20,6 +20,7 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/csv"
 	"encoding/hex"
@@ -47,6 +48,7 @@ type blendMember struct {
 }
 
 type blendOpts struct {
+	ctx        context.Context // metis#72: cancels the submission step; nil = Background
 	shapePath  string
 	runs       []string
 	weights    []float64 // raw (pre-normalization); nil = equal
@@ -55,7 +57,7 @@ type blendOpts struct {
 	out        io.Writer
 }
 
-func cmdBlend(args []string) error {
+func cmdBlend(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("blend", flag.ContinueOnError)
 	runsFlag := fs.String("runs", "", "comma-separated PROMOTED run ids to blend (each needs probabilities.csv — re-promote pre-#60 runs)")
 	weightsFlag := fs.String("weights", "", "comma-separated member weights (default equal; normalized; must be positive)")
@@ -70,7 +72,7 @@ func cmdBlend(args []string) error {
 	if *runsFlag == "" {
 		return fmt.Errorf("blend: --runs is required (comma-separated promoted run ids)")
 	}
-	o := blendOpts{shapePath: shapePath, runs: strings.Split(*runsFlag, ","), allowMixed: *allowMixed, out: os.Stdout}
+	o := blendOpts{ctx: ctx, shapePath: shapePath, runs: strings.Split(*runsFlag, ","), allowMixed: *allowMixed, out: os.Stdout}
 	if *weightsFlag != "" {
 		for _, w := range strings.Split(*weightsFlag, ",") {
 			f, err := strconv.ParseFloat(strings.TrimSpace(w), 64)
@@ -202,7 +204,7 @@ func runBlend(o blendOpts) (string, error) {
 		sp = stepPath(o.shapePath)
 	}
 	es := execStep{stepPath: sp, expDir: expDir, seed: sh.Seed, out: o.out}
-	if _, err := es.Execute(submissionStep, blendRunDir); err != nil {
+	if _, err := es.Execute(orBackground(o.ctx), submissionStep, blendRunDir); err != nil {
 		return "", fmt.Errorf("blend: submission step: %w", err)
 	}
 

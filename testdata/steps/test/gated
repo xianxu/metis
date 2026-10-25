@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# test/gated — metis#72 readiness-controlled fixture. Prints a line, marks itself started, then
+# blocks until the test writes to the FIFO $METIS_RUN_DIR/gate (no sleep-timed readiness), prints
+# a second line and exits with the code in $METIS_RUN_DIR/exit-code (default 0). A test that never
+# opens the gate leaves it blocked in open(2), where TERM ends it.
+set -euo pipefail
+echo "before-gate"
+touch "$METIS_STEP_DIR/ready"
+read -r _ < "$METIS_RUN_DIR/gate"
+echo "after-gate"
+code=0
+[ -f "$METIS_RUN_DIR/exit-code" ] && code=$(cat "$METIS_RUN_DIR/exit-code")
+exit "$code"

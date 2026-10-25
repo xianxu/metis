@@ -30,7 +30,10 @@ reconstruction, training, and experiment tracking under one entrypoint.
 `metis run [--run <id>] [--cache] <experiment.md>` reads + validates an experiment, executes
 its steps in dependency order as **subprocesses** (files + subprocess, never FFI), and records
 a Run. `--cache` (default on) enables the metis#2 validating-trace cache (see `atlas/index.md`
-`pkg/cache`). Split across a pure core and a thin IO layer:
+`pkg/cache`); a step with `with: {cache: {policy: never}}` and its descendants always run
+(metis#71). `with.cache` is now a closed vocabulary (`leaf: immutable`, `policy: never`):
+`Validate` refuses any other key or value, where it used to pass silently, so a consumer
+experiment carrying another `with.cache` entry now fails to load. Split across a pure core and a thin IO layer:
 
 - **Pure core — `pkg/experiment/`** (no IO; unit-tested directly):
   - `Experiment` / `Step` / `Run` — Go structs mirroring the CUE `#Experiment`/`#Step`/`#Run`
@@ -95,10 +98,49 @@ broken-graph surfaces layergraph's actionable error rather than degrading silent
   `METIS_STEP_ID`, plus (M3) `METIS_EXP_DIR` (the experiment dir, absolute — the stable
   anchor for experiment-relative inputs, since the run dir is ephemeral) and `METIS_SEED`
   (the experiment's seed, so steps are reproducible without duplicating it into every `with`).
+  Every path var (`METIS_STEP_DIR`, `METIS_RUN_DIR`, `METIS_EXP_DIR`, `METIS_READ_ROOT`) is physical:
+  `execStep.stepEnv`, the one builder both executors share, resolves symlinks via `physicalPath`
+  (deepest existing ancestor, so a not-yet-created dir works) for every caller, run, blend and the
+  sealed sweep alike, so exp-relative reads and the read root share one form (metis#76).
+  `METIS_PENDING_RESOURCES` (metis#72) names `<stepDir>/pending-resources.json`: a step that
+  starts independently managed resources (Couch actors) lists them there and removes the file
+  once they are retired. metis never kills them; it only refuses to call the step a success.
+  Precondition: such a resource must leave the step's process group *and* detach from its stdio
+  (e.g. `setsid` with stdin from `/dev/null` and output to its own file). One that keeps the step's
+  stdout or stderr open makes the join unconfirmable (`cleanup-unconfirmed` on every run), and once
+  metis stops reading that pipe its next write gets EPIPE/SIGPIPE.
+- **Execution policy (metis#72):** `with: {exec: {timeout: "90m"}}`, a closed sub-map beside
+  `with.cache`, parsed by `experiment.ParseExecPolicy` and refused by `Validate` before any step
+  runs. The timeout bounds the child's runtime from launch (a leaf-budget wait is not counted);
+  there is no default. A step runs as its own process group. On its timeout, or on SIGINT/SIGTERM
+  to metis (`main`'s signal context; a second signal exits hard), the group gets TERM, then KILL
+  after a 10s grace, then a 5s bounded join. A step queued for a budget slot when the run is
+  cancelled never launches (`leafBudget.acquire(ctx, …)`). Both launch paths honor all of this:
+  the legacy subprocess (`runLegacy`) and the warm forkserver (`runForked`, see its entry below),
+  in `cmd/metis/steplifecycle.go`.
+- **Live log and outcome (metis#72):** child stdout+stderr stream into `step.log` as they arrive
+  (`boundedLog`: capped at 64 MiB with one truncation marker, the rest drained so the child never
+  blocks; a 64 KiB tail feeds the failure message). Every executed step writes `outcome.json`
+  (`ok | failed | timed-out | cancelled | cleanup-unconfirmed | resources-unretired`, exit code,
+  signal, start/end, `runtime_seconds`, `log_truncated`, pending resources), decided in one place,
+  `classifyOutcome` (precedence: cleanup-unconfirmed > resources-unretired > timed-out/cancelled/
+  failed > ok). Only `ok` is success; nothing else is retried or published. The first terminal
+  event wins: an exit landing during termination never overrides a timeout or a cancel. The join
+  is evidence: metis owns the output pipe, so it is confirmed only when the process exited and
+  the pipe drained within the bound. After a normal exit, a descendant still in the step's own
+  process group that holds the pipe is stopped (TERM, grace, KILL) and the join then confirmed; a
+  descendant that left the group and still holds it means `cleanup-unconfirmed`, whatever else
+  happened (on the forkserver path the server applies the same rules and answers `joined`).
+  `runtime_seconds` is
+  launch to exit, so the termination wait is not compute. Residue: `step.log` adds at most 64 MiB per executed step, and
+  it, `outcome.json` and `pending-resources.json` go with their run dir; nothing removes run dirs
+  automatically, so disk use per run is bounded by steps × the cap and cleared by removing runs.
 - **In:** `with.json` — the step's `with` config, written into the step dir by the runner.
 - **Out:** an optional `metrics.json` (flat `{name: number}`, merged into `Run.metrics`) plus
-  any **artifact files** the step writes into its dir. `with.json` and `metrics.json` are the
-  reserved contract channels and are NOT counted as artifacts; every other file is recorded in
+  any **artifact files** the step writes into its dir. The top-level names in
+  `reservedStepFiles` (`with.json`, `metrics.json`, `reads.json`, `step.log`, `outcome.json`,
+  `pending-resources.json`) are contract or bookkeeping channels and are NOT counted as artifacts
+  (nor hashed into the output); every other file is recorded in
   `Run.artifacts` as a `runs/<id>/`-relative (step-qualified) path. A non-zero exit fails the
   step and halts the run.
 - **Ledger:** `runs/<run-id>/run.json` (the `#Run` record — the record of truth) + `record.json`
@@ -379,6 +421,26 @@ wrapped by **thin step-executables** honoring the contract above. Hermetic via *
   wrappers and failed/dead servers fall back to the legacy subprocess LOUDLY, once per uses-type/
   root. `metis run --forkserver=false` is the escape hatch. Step authoring is UNCHANGED (a step is
   still a wrapper file; discovery/resolve untouched).
+  **Lifecycle (metis#72):** each forked child leads its own process group, and its output streams
+  live into `step.log` (capped; Go sends the cap and marker) while the server keeps the tail for
+  the response. The server is the child's **only reaper**: it detects the exit without reaping
+  (`waitid(WNOWAIT)`, or kqueue `NOTE_EXIT` on macOS), runs the post-exit join (drain within
+  `join_bound`, else TERM/grace/KILL what is left of the group, then the bound again) and reaps
+  under the protocol lock while dropping the child from its table. Go never signals a forkserver
+  pid: on a timeout or cancel it sends `{"cancel": id, "signal": "TERM"|"KILL"}`, and the server
+  signals only an unreaped child's group, so a recycled pid is never hit. The response carries
+  `launched` (false: refused before fork, e.g. `step.log` would not open), `exit_known`,
+  `joined` (true only on EOF of the child's pipe), `log_truncated`, `log_error` (the first sink
+  error; output keeps flowing) and `runtime` (fork to exit, absent when the exit was not
+  observed). Every waiter exit path, an unexpected error included, ends and reaps its child and
+  answers. The ready line declares `protocol: 2`; Go refuses an older server there, before any
+  dispatch, so the step falls back to legacy rather than lose its log and cancel. Times in
+  `outcome.json` come only from observed events: an unobserved exit records no end, runtime or
+  exit code. `runForked` shares the budget, policy,
+  `classifyOutcome` and `outcome.json` with the legacy path; once a request is dispatched it never
+  falls back (a timeout, cancel, lost server or unanswered cancel is a step error, and the last two
+  are `cleanup-unconfirmed` with the root marked broken). The ready wait is context-bounded: a run
+  cancelled before dispatch is `cancelled`, never a legacy re-run.
 - **Step entrypoints — `metis/steps/{cv_split,train,predict,outer_split}.py`:** thin `io → pure core → io`.
   - `cv-split`: load Dataset (`with.dataset`, exp-relative) → `cv_folds` → `folds.json` + `{k,n}`.
   - `train`: load Dataset + upstream `folds.json` → `cv_score` + fit-on-all → `model.pkl` + `{cv_score}`.

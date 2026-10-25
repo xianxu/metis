@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# test/pending-unreadable — metis#72: leaves METIS_PENDING_RESOURCES unreadable (a directory), so
+# metis cannot tell whether resources are still live and must not call the step a success.
+mkdir "$METIS_PENDING_RESOURCES"

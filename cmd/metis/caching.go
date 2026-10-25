@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -68,6 +69,7 @@ type cachingExecutor struct {
 	indexDir string
 	seed     int
 	out      io.Writer
+	uncached map[string]bool // metis#71: never-cache steps + their descendants — bypass entirely
 
 	kpres       map[string]cache.Hash       // step-id → K_pre (input identity), for downstream keys
 	transitiveD map[string][]record.CodeRef // step-id → transitive read-set closure snapshot
@@ -76,19 +78,27 @@ type cachingExecutor struct {
 // newCachingExecutor: D paths are now repo-qualified (metis#11) — each ref carries its own
 // repo root, so there's no single project-root to thread here; store + validate hash each
 // ref in its own repo.
-func newCachingExecutor(inner experiment.StepExecutor, store cas.Store, cacheDir string, seed int, out io.Writer) *cachingExecutor {
+func newCachingExecutor(inner experiment.StepExecutor, store cas.Store, cacheDir string, exp experiment.Experiment, out io.Writer) *cachingExecutor {
 	return &cachingExecutor{
 		inner:       inner,
 		store:       store,
 		indexDir:    filepath.Join(cacheDir, "index"),
-		seed:        seed,
+		seed:        exp.Seed,
 		out:         out,
+		uncached:    experiment.UncachedSteps(exp),
 		kpres:       map[string]cache.Hash{},
 		transitiveD: map[string][]record.CodeRef{},
 	}
 }
 
-func (c *cachingExecutor) Execute(step experiment.Step, runDir string) (experiment.StepResult, error) {
+func (c *cachingExecutor) Execute(ctx context.Context, step experiment.Step, runDir string) (experiment.StepResult, error) {
+	// metis#71: an uncached step neither looks up nor stores, and records no K_pre or
+	// closure — every consumer of those is itself uncached (UncachedSteps is
+	// descendant-closed), so nothing downstream can key on this step's input identity.
+	if c.uncached[step.ID] {
+		fmt.Fprintf(c.out, "· step %s (never-cache)\n", step.ID)
+		return c.inner.Execute(ctx, step, runDir)
+	}
 	kpre, err := c.kpre(step)
 	if err != nil {
 		return experiment.StepResult{}, err
@@ -126,7 +136,7 @@ func (c *cachingExecutor) Execute(step experiment.Step, runDir string) (experime
 
 	// MISS (or a recoverable materialize failure) — run, then record D + fold the
 	// transitive-D snapshot + store the output + write the index entry.
-	res, err := c.inner.Execute(step, runDir)
+	res, err := c.inner.Execute(ctx, step, runDir)
 	if err != nil {
 		return res, err
 	}
@@ -372,9 +382,6 @@ func (c *cachingExecutor) writeEntry(e cache.Entry) error {
 // don't re-observe), the v1 external-fetch policy (metis#2's leaf policy). A conscious
 // soundness bet the author makes for an impure fetch whose source is frozen/versioned.
 func isImmutableLeaf(step experiment.Step) bool {
-	c, ok := step.With["cache"].(map[string]any)
-	if !ok {
-		return false
-	}
-	return c["leaf"] == "immutable"
+	p, err := experiment.ParseCachePolicy(step)
+	return err == nil && p.ImmutableLeaf
 }
