@@ -1,6 +1,8 @@
 package experiment
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"reflect"
 	"testing"
@@ -16,7 +18,7 @@ type fakeExecutor struct {
 	failOn  string
 }
 
-func (f *fakeExecutor) Execute(step Step, runDir string) (StepResult, error) {
+func (f *fakeExecutor) Execute(ctx context.Context, step Step, runDir string) (StepResult, error) {
 	f.calls = append(f.calls, step.ID)
 	if step.ID == f.failOn {
 		return StepResult{}, fmt.Errorf("boom in %s", step.ID)
@@ -41,7 +43,7 @@ func TestRunner_Run_OrderAndAssembly(t *testing.T) {
 	clock := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
 	r := Runner{Exec: fake, Now: fixedClock(clock)}
 
-	run, _, err := r.Run(exp, "run-001", "/runs/run-001")
+	run, _, err := r.Run(context.Background(), exp, "run-001", "/runs/run-001")
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -79,7 +81,7 @@ func TestRunner_Run_ReturnsPerStepResults(t *testing.T) {
 	}}
 	r := Runner{Exec: fake, Now: fixedClock(time.Unix(0, 0).UTC())}
 
-	_, steps, err := r.Run(exp, "run-001", "/runs/run-001")
+	_, steps, err := r.Run(context.Background(), exp, "run-001", "/runs/run-001")
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -111,7 +113,7 @@ func TestRunner_Run_StepFailure(t *testing.T) {
 	fake := &fakeExecutor{failOn: "a", results: map[string]StepResult{}}
 	r := Runner{Exec: fake, Now: fixedClock(time.Unix(0, 0).UTC())}
 
-	run, _, err := r.Run(exp, "run-x", "d")
+	run, _, err := r.Run(context.Background(), exp, "run-x", "d")
 	if err == nil {
 		t.Fatal("Run: want error from failing step, got nil")
 	}
@@ -120,5 +122,38 @@ func TestRunner_Run_StepFailure(t *testing.T) {
 	}
 	if !reflect.DeepEqual(fake.calls, []string{"a"}) {
 		t.Errorf("calls = %v; pipeline should stop after the failing step", fake.calls)
+	}
+}
+
+// cancelAfter cancels the run while its named step executes (a signal mid-step).
+type cancelAfter struct {
+	fakeExecutor
+	step   string
+	cancel context.CancelFunc
+}
+
+func (c *cancelAfter) Execute(ctx context.Context, step Step, runDir string) (StepResult, error) {
+	res, err := c.fakeExecutor.Execute(ctx, step, runDir)
+	if step.ID == c.step {
+		c.cancel()
+	}
+	return res, err
+}
+
+// metis#72: once the run is cancelled no further step starts, even with an executor that
+// ignores ctx; the Run is recorded failed with the cancellation named.
+func TestRunner_Run_CancelledStartsNoFurtherStep(t *testing.T) {
+	exp := Experiment{Header: Header{ID: "e", Seed: 1}, Steps: []Step{
+		{ID: "a", Uses: "t/x"}, {ID: "b", Uses: "t/x", Needs: []string{"a"}}, {ID: "c", Uses: "t/x", Needs: []string{"b"}},
+	}}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ex := &cancelAfter{step: "a", cancel: cancel}
+	run, steps, err := Runner{Exec: ex, Now: fixedClock(time.Unix(0, 0).UTC())}.Run(ctx, exp, "r", "/runs/r")
+	if !reflect.DeepEqual(ex.calls, []string{"a"}) {
+		t.Fatalf("executed %v after cancellation; want only [a]", ex.calls)
+	}
+	if err == nil || !errors.Is(err, context.Canceled) || run.Status != "failed" || len(steps) != 1 {
+		t.Fatalf("got status %q, %d steps, err %v; want failed, 1 step, a cancellation error", run.Status, len(steps), err)
 	}
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -29,7 +30,7 @@ type traceFakeExec struct {
 	calls    *[]string         // MISS trace: the inner exec ran (a HIT skips it)
 }
 
-func (f traceFakeExec) Execute(step experiment.Step, runDir string) (experiment.StepResult, error) {
+func (f traceFakeExec) Execute(ctx context.Context, step experiment.Step, runDir string) (experiment.StepResult, error) {
 	if f.calls != nil {
 		*f.calls = append(*f.calls, step.ID)
 	}

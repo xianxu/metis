@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"reflect"
 	"testing"
@@ -15,7 +16,7 @@ type activityFakeExec struct {
 	calls  int
 }
 
-func (f *activityFakeExec) Execute(step experiment.Step, runDir string) (experiment.StepResult, error) {
+func (f *activityFakeExec) Execute(ctx context.Context, step experiment.Step, runDir string) (experiment.StepResult, error) {
 	f.calls++
 	return f.result, f.err
 }
@@ -33,7 +34,7 @@ func TestActivityExecutorEmitsOneStepSuccessAfterSuccessfulInnerExecution(t *tes
 		inner: inner,
 		now:   func() time.Time { return at },
 		emit:  func(ev activityEvent) { events = append(events, ev) },
-	}.Execute(experiment.Step{ID: "train"}, "/tmp/run")
+	}.Execute(context.Background(), experiment.Step{ID: "train"}, "/tmp/run")
 
 	if err != nil {
 		t.Fatalf("Execute returned error: %v", err)
@@ -61,7 +62,7 @@ func TestActivityExecutorEmitsNothingOnInnerErrorAndPreservesFailure(t *testing.
 		inner: inner,
 		now:   func() time.Time { return time.Date(2026, 7, 17, 10, 0, 0, 0, time.UTC) },
 		emit:  func(ev activityEvent) { events = append(events, ev) },
-	}.Execute(experiment.Step{ID: "train"}, "/tmp/run")
+	}.Execute(context.Background(), experiment.Step{ID: "train"}, "/tmp/run")
 
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("Execute error = %v; want %v", err, wantErr)

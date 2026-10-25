@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -72,7 +73,7 @@ func (e execStep) stepEnv(step experiment.Step, stepDir, runDir string) (map[str
 	return m, nil
 }
 
-func (e execStep) Execute(step experiment.Step, runDir string) (experiment.StepResult, error) {
+func (e execStep) Execute(ctx context.Context, step experiment.Step, runDir string) (experiment.StepResult, error) {
 	exe, err := e.resolve(step.Uses)
 	if err != nil {
 		return experiment.StepResult{}, err

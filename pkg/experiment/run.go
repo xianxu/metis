@@ -1,6 +1,7 @@
 package experiment
 
 import (
+	"context"
 	"fmt"
 	"time"
 )
@@ -27,8 +28,9 @@ type StepRun struct {
 // Runner.Run is exercised with NO subprocess. This is the ARCH-PURE line: the
 // wiring below is pure/thin; all step IO sits behind this interface.
 type StepExecutor interface {
-	// Execute runs one step against the given run directory and returns its result.
-	Execute(step Step, runDir string) (StepResult, error)
+	// Execute runs one step against the given run directory and returns its result. ctx
+	// cancels the run (metis#72): an implementation must not start a step once it is done.
+	Execute(ctx context.Context, step Step, runDir string) (StepResult, error)
 }
 
 // Clock returns the current time. Injected so Run's timestamps are deterministic
@@ -52,7 +54,9 @@ type Runner struct {
 // merge discards. runDir is where step artifacts land (runs/<id>/). It stops at the
 // first step error, returning a "failed" Run, the StepRuns completed so far, and
 // the error.
-func (r Runner) Run(exp Experiment, runID, runDir string) (Run, []StepRun, error) {
+//
+// ctx cancels the run (metis#72): no further step starts once it is done.
+func (r Runner) Run(ctx context.Context, exp Experiment, runID, runDir string) (Run, []StepRun, error) {
 	now := r.Now
 	if now == nil {
 		now = time.Now
@@ -79,7 +83,12 @@ func (r Runner) Run(exp Experiment, runID, runDir string) (Run, []StepRun, error
 	}
 	var steps []StepRun
 	for _, step := range order {
-		res, err := r.Exec.Execute(step, runDir)
+		if err := ctx.Err(); err != nil {
+			run.Status = "failed"
+			run.Finished = stamp()
+			return run, steps, fmt.Errorf("step %q: cancelled before start: %w", step.ID, err)
+		}
+		res, err := r.Exec.Execute(ctx, step, runDir)
 		if err != nil {
 			run.Status = "failed"
 			run.Finished = stamp()

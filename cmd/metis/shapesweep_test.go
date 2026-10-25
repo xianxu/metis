@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -32,7 +33,7 @@ type foldFakeExec struct {
 	noComplexity bool // metis#19: omit the complexity metric (simulate a model class that doesn't report it)
 }
 
-func (f foldFakeExec) Execute(step experiment.Step, runDir string) (experiment.StepResult, error) {
+func (f foldFakeExec) Execute(ctx context.Context, step experiment.Step, runDir string) (experiment.StepResult, error) {
 	if f.calls != nil {
 		*f.calls = append(*f.calls, step.ID)
 	}

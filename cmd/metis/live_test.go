@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,12 +21,12 @@ type budgetFakeExec struct {
 	in     foldFakeExec
 }
 
-func (b budgetFakeExec) Execute(step experiment.Step, runDir string) (experiment.StepResult, error) {
+func (b budgetFakeExec) Execute(ctx context.Context, step experiment.Step, runDir string) (experiment.StepResult, error) {
 	if b.budget != nil {
 		b.budget.acquire(0)
 		defer b.budget.release()
 	}
-	return b.in.Execute(step, runDir)
+	return b.in.Execute(ctx, step, runDir)
 }
 
 // TestLive_ByteIdenticalToDefault is the metis#66/#67 determinism gate: the default prioritySem

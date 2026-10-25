@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"runtime"
 	"strings"
@@ -23,7 +24,7 @@ type stopOnFoldExec struct {
 	once   sync.Once
 }
 
-func (e *stopOnFoldExec) Execute(step experiment.Step, runDir string) (experiment.StepResult, error) {
+func (e *stopOnFoldExec) Execute(ctx context.Context, step experiment.Step, runDir string) (experiment.StepResult, error) {
 	if strings.Contains(fmt.Sprint(step.With["dataset"]), e.marker) {
 		e.once.Do(func() {
 			close(e.fire) // fire Q
@@ -32,7 +33,7 @@ func (e *stopOnFoldExec) Execute(step experiment.Step, runDir string) (experimen
 			}
 		})
 	}
-	return e.in.Execute(step, runDir)
+	return e.in.Execute(ctx, step, runDir)
 }
 
 // TestLive_QFinalizesHonestPartial is the metis#66 M1 graceful-stop gate: a Q while a nested

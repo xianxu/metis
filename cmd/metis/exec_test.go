@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -63,7 +64,7 @@ func TestExecStep_SemaphoreSerializesRealSubprocess(t *testing.T) {
 			wg.Add(1)
 			go func(i int) {
 				defer wg.Done()
-				_, _ = e.Execute(experiment.Step{ID: fmt.Sprintf("s%d", i), Uses: "test/sleeper"},
+				_, _ = e.Execute(context.Background(), experiment.Step{ID: fmt.Sprintf("s%d", i), Uses: "test/sleeper"},
 					filepath.Join(expDir, fmt.Sprintf("run-%d", i)))
 			}(i)
 		}
@@ -93,7 +94,7 @@ func TestExecStep_InjectsEnv(t *testing.T) {
 		out:      io.Discard,
 	}
 
-	_, err := e.Execute(experiment.Step{ID: "e", Uses: "test/env-dump"}, runDir)
+	_, err := e.Execute(context.Background(), experiment.Step{ID: "e", Uses: "test/env-dump"}, runDir)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -127,7 +128,7 @@ func TestExecStep_ReadRootInjectedOnlyWhenSet(t *testing.T) {
 	set := base
 	set.readRoot = "/data/analysis_0"
 	runDir := t.TempDir()
-	if _, err := set.Execute(experiment.Step{ID: "e", Uses: "test/env-dump"}, runDir); err != nil {
+	if _, err := set.Execute(context.Background(), experiment.Step{ID: "e", Uses: "test/env-dump"}, runDir); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
 	if got := readEnvDump(t, runDir); !strings.Contains(got, "READ_ROOT=/data/analysis_0") {
@@ -136,7 +137,7 @@ func TestExecStep_ReadRootInjectedOnlyWhenSet(t *testing.T) {
 
 	// (b) readRoot empty → var absent (env-dump reports <unset>), so single is unconfined.
 	runDir2 := t.TempDir()
-	if _, err := base.Execute(experiment.Step{ID: "e", Uses: "test/env-dump"}, runDir2); err != nil {
+	if _, err := base.Execute(context.Background(), experiment.Step{ID: "e", Uses: "test/env-dump"}, runDir2); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
 	if got := readEnvDump(t, runDir2); !strings.Contains(got, "READ_ROOT=<unset>") {
@@ -173,7 +174,7 @@ func TestExecStep_ConfinesRealUvStep_OutOfRootRead(t *testing.T) {
 	// dataset read is outside its analysis root → confinement fires through the real chain.
 	confined := execStep{stepPath: stepPath, expDir: expDir, seed: 42,
 		readRoot: filepath.Join(expDir, "analysis_0"), out: io.Discard}
-	_, err := confined.Execute(split, filepath.Join(ws, "run-a"))
+	_, err := confined.Execute(context.Background(), split, filepath.Join(ws, "run-a"))
 	if err == nil {
 		t.Fatal("confinement did NOT fire: a real sealed-sweep read outside its analysis root must be caught")
 	}
@@ -185,7 +186,7 @@ func TestExecStep_ConfinesRealUvStep_OutOfRootRead(t *testing.T) {
 	// succeeds — the confinement is SCOPED to the root, not a blanket failure.
 	within := execStep{stepPath: stepPath, expDir: expDir, seed: 42,
 		readRoot: filepath.Join(ws, "dataset"), out: io.Discard}
-	if _, err := within.Execute(split, filepath.Join(ws, "run-b")); err != nil {
+	if _, err := within.Execute(context.Background(), split, filepath.Join(ws, "run-b")); err != nil {
 		t.Fatalf("within-root read must succeed (confinement over-fired): %v", err)
 	}
 }
@@ -243,7 +244,7 @@ func TestExecStep_InjectsBlasPins(t *testing.T) {
 		out:      io.Discard,
 		pins:     []string{"OMP_NUM_THREADS=1", "MKL_NUM_THREADS=1"},
 	}
-	if _, err := e.Execute(experiment.Step{ID: "e", Uses: "test/env-dump"}, runDir); err != nil {
+	if _, err := e.Execute(context.Background(), experiment.Step{ID: "e", Uses: "test/env-dump"}, runDir); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
 	b, err := os.ReadFile(filepath.Join(runDir, "e", "env.txt"))
@@ -314,7 +315,7 @@ func TestExecStep_StepEnvPathsArePhysical(t *testing.T) {
 	}
 	es := execStep{stepPath: []string{filepath.Join(root, "testdata", "steps")}, expDir: link, seed: 1,
 		readRoot: filepath.Join(link, "runs", "pre", "analysis_0"), out: io.Discard}
-	if _, err := es.Execute(experiment.Step{ID: "e", Uses: "test/env-dump"}, filepath.Join(link, "runs", "r")); err != nil {
+	if _, err := es.Execute(context.Background(), experiment.Step{ID: "e", Uses: "test/env-dump"}, filepath.Join(link, "runs", "r")); err != nil {
 		t.Fatal(err)
 	}
 	phys := func(p string) string {
@@ -368,7 +369,7 @@ func TestExecStep_ConfinementAgreesAcrossPathForms(t *testing.T) {
 		With: map[string]any{"dataset": "../dataset/toy", "k": 3, "stratify": true}}
 	es := execStep{stepPath: []string{filepath.Join(root, "steps")}, expDir: physExp, seed: 42,
 		readRoot: filepath.Join(link, "dataset"), out: io.Discard}
-	if _, err := es.Execute(split, filepath.Join(ws, "run")); err != nil {
+	if _, err := es.Execute(context.Background(), split, filepath.Join(ws, "run")); err != nil {
 		t.Fatalf("within-root read refused across path forms: %v", err)
 	}
 }

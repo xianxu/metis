@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -90,13 +91,13 @@ func newCachingExecutor(inner experiment.StepExecutor, store cas.Store, cacheDir
 	}
 }
 
-func (c *cachingExecutor) Execute(step experiment.Step, runDir string) (experiment.StepResult, error) {
+func (c *cachingExecutor) Execute(ctx context.Context, step experiment.Step, runDir string) (experiment.StepResult, error) {
 	// metis#71: an uncached step neither looks up nor stores, and records no K_pre or
 	// closure — every consumer of those is itself uncached (UncachedSteps is
 	// descendant-closed), so nothing downstream can key on this step's input identity.
 	if c.uncached[step.ID] {
 		fmt.Fprintf(c.out, "· step %s (never-cache)\n", step.ID)
-		return c.inner.Execute(step, runDir)
+		return c.inner.Execute(ctx, step, runDir)
 	}
 	kpre, err := c.kpre(step)
 	if err != nil {
@@ -135,7 +136,7 @@ func (c *cachingExecutor) Execute(step experiment.Step, runDir string) (experime
 
 	// MISS (or a recoverable materialize failure) — run, then record D + fold the
 	// transitive-D snapshot + store the output + write the index entry.
-	res, err := c.inner.Execute(step, runDir)
+	res, err := c.inner.Execute(ctx, step, runDir)
 	if err != nil {
 		return res, err
 	}

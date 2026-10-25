@@ -5,6 +5,7 @@ package main
 // loud legacy fallback for non-conforming wrappers.
 
 import (
+	"context"
 	"io"
 	"os"
 	"os/exec"
@@ -178,7 +179,7 @@ func TestExecute_NonConformingWrapperUsesLegacyLoudly(t *testing.T) {
 		out: &out, pool: newServerPool(&out, nil)}
 	defer e.pool.shutdown()
 	runDir := filepath.Join(ws, "runs", "r1")
-	res, err := e.Execute(experiment.Step{ID: "sh", Uses: "test/shellstep"}, runDir)
+	res, err := e.Execute(context.Background(), experiment.Step{ID: "sh", Uses: "test/shellstep"}, runDir)
 	if err != nil {
 		t.Fatalf("legacy fallback must still run the step: %v", err)
 	}
@@ -189,7 +190,7 @@ func TestExecute_NonConformingWrapperUsesLegacyLoudly(t *testing.T) {
 		t.Errorf("fallback must be LOUD, got:\n%s", out.String())
 	}
 	// second execution: no second notice
-	if _, err := e.Execute(experiment.Step{ID: "sh2", Uses: "test/shellstep"}, runDir); err != nil {
+	if _, err := e.Execute(context.Background(), experiment.Step{ID: "sh2", Uses: "test/shellstep"}, runDir); err != nil {
 		t.Fatal(err)
 	}
 	if n := strings.Count(out.String(), "doesn't match"); n != 1 {

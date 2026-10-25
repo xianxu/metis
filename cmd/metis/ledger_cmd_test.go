@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"os"
@@ -165,7 +166,7 @@ func TestLedgerFingerprints_CLI(t *testing.T) {
 	r, w, _ := os.Pipe()
 	orig := os.Stdout
 	os.Stdout = w
-	err := run([]string{"ledger", "fingerprints", shapePath})
+	err := run(context.Background(), []string{"ledger", "fingerprints", shapePath})
 	_ = w.Close()
 	os.Stdout = orig
 	var buf bytes.Buffer
@@ -186,7 +187,7 @@ func TestLedgerFingerprints_CLI(t *testing.T) {
 		t.Errorf("cohorts must order newest-last (legacy first):\n%s", out)
 	}
 	// Unknown args must not be silently swallowed.
-	if err := run([]string{"ledger", "fingerprints", shapePath, "--bogus"}); err == nil {
+	if err := run(context.Background(), []string{"ledger", "fingerprints", shapePath, "--bogus"}); err == nil {
 		t.Error("unexpected flag must error, not be ignored")
 	}
 }

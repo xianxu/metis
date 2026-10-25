@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
@@ -25,7 +26,7 @@ import (
 //
 // `--promote` reconstructs the chosen config from the ledger and ships it on ALL data
 // (`runs/best-{family}-{hash}/submission.csv`), printing the run id for `kaggle submit`.
-func cmdSelect(args []string) error {
+func cmdSelect(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("select", flag.ContinueOnError)
 	best := fs.Bool("best", false, "print/promote the single ship recommendation (family by honest outer estimate, config by inner CV)")
 	perClass := fs.Bool("best-per-model-class", false, "print/promote one winner per model family (the metis#22 ensembling seam)")
@@ -50,12 +51,14 @@ func cmdSelect(args []string) error {
 		*best = true // default view = the single ship recommendation
 	}
 	return runSelect(selectOpts{
+		ctx:       ctx,
 		shapePath: shapePath, best: *best, perClass: *perClass, promote: *promote, point: *point,
 		fingerprint: *fingerprint, noFPCheck: *noFPCheck, stepPath: stepPath(shapePath), out: os.Stdout,
 	})
 }
 
 type selectOpts struct {
+	ctx         context.Context // metis#72: cancels a --promote run; nil = Background
 	shapePath   string
 	best        bool
 	perClass    bool
@@ -367,7 +370,7 @@ func promoteSelected(o selectOpts, sh experiment.Shape, led ledger.Ledger, picks
 		runID := "best-" + familyTag(p.family) + "-" + short(addr)
 		// no leafPins: a promoted ship is a SERIAL single all-data fit — multi-threaded
 		// BLAS is wanted here, and one leaf can't oversubscribe (#48's conscious exclusion)
-		ro := runOpts{expPath: o.shapePath, runID: runID, stepPath: o.stepPath, cache: true, git: o.git, exec: o.exec, out: o.out}
+		ro := runOpts{ctx: o.ctx, expPath: o.shapePath, runID: runID, stepPath: o.stepPath, cache: true, git: o.git, exec: o.exec, out: o.out}
 		if _, err := runResolvedExperiment(exp, ro, runID, now, o.out); err != nil {
 			return fmt.Errorf("select --promote %s (%s): %w", famLabel(p.family), runID, err)
 		}
@@ -546,7 +549,7 @@ func runPointSelect(o selectOpts, sh experiment.Shape, led ledger.Ledger, metric
 	runID := "point-" + familyTag(fam) + "-" + short(addr)
 	// no leafPins: a promoted ship is a SERIAL single all-data fit — multi-threaded
 	// BLAS is wanted here, and one leaf can't oversubscribe (#48's conscious exclusion)
-	ro := runOpts{expPath: o.shapePath, runID: runID, stepPath: o.stepPath, cache: true, git: o.git, exec: o.exec, out: o.out}
+	ro := runOpts{ctx: o.ctx, expPath: o.shapePath, runID: runID, stepPath: o.stepPath, cache: true, git: o.git, exec: o.exec, out: o.out}
 	if _, err := runResolvedExperiment(exp, ro, runID, now, o.out); err != nil {
 		return fmt.Errorf("select --point --promote (%s): %w", runID, err)
 	}

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"sync"
@@ -541,7 +542,7 @@ func TestCmdRun_NoTUIFlagParses(t *testing.T) {
 	ws := t.TempDir()
 	expPath := writeShapeFile(t, ws, foldShapeCVMD("[a]"))
 	// The real entrypoint with the documented order; --dry-run avoids running steps.
-	if err := run([]string{"run", "--no-tui", "--dry-run", expPath}); err != nil {
+	if err := run(context.Background(), []string{"run", "--no-tui", "--dry-run", expPath}); err != nil {
 		t.Fatalf("--no-tui must parse: %v", err)
 	}
 }
