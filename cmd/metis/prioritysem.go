@@ -9,15 +9,17 @@ package main
 
 import (
 	"container/heap"
+	"context"
 	"sync"
 )
 
 // leafBudget is acquired around every real subprocess spawn and released after it exits.
 // priority is the outer-fold index (lower = higher priority); the flat / preamble path
 // passes 0. A nil leafBudget means unbounded (the serial / cache-only path) — callers
-// nil-check, as they did the pre-#66 `chan struct{}`.
+// nil-check, as they did the pre-#66 `chan struct{}`. acquire returns ctx's error, holding
+// no slot, when the run is cancelled while it waits (metis#72): a queued step never launches.
 type leafBudget interface {
-	acquire(priority int)
+	acquire(ctx context.Context, priority int) error
 	release()
 	gauge() (busy, capacity int)
 }
@@ -30,8 +32,15 @@ type chanSem struct{ ch chan struct{} }
 
 func newChanSem(capacity int) *chanSem { return &chanSem{ch: make(chan struct{}, capacity)} }
 
-func (s *chanSem) acquire(int) { s.ch <- struct{}{} }
-func (s *chanSem) release()    { <-s.ch }
+func (s *chanSem) acquire(ctx context.Context, _ int) error {
+	select {
+	case s.ch <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+func (s *chanSem) release() { <-s.ch }
 func (s *chanSem) gauge() (int, int) { return len(s.ch), cap(s.ch) }
 
 // prioritySem grants a freed slot to the LOWEST-priority (= lowest outer-fold index)
@@ -53,6 +62,9 @@ type prioritySem struct {
 	inflight int        // slots currently held (granted, not yet released)
 	seq      uint64     // monotone arrival counter → FIFO tiebreak within a priority
 	waiters  psWaiterHeap
+	// onCancelObserved, when set (tests only), runs after a waiter observes cancellation and
+	// before it takes the lock — the window where a release may hand it the slot.
+	onCancelObserved func()
 }
 
 func newPrioritySem(capacity int) *prioritySem { return &prioritySem{capacity: capacity} }
@@ -73,20 +85,46 @@ func selectLeafBudget(maxParallel int, globalFanout bool) leafBudget {
 	return newPrioritySem(maxParallel)
 }
 
-func (s *prioritySem) acquire(priority int) {
+func (s *prioritySem) acquire(ctx context.Context, priority int) error {
 	s.mu.Lock()
 	// Fast path: a slot is free AND no one is waiting → take it. By the invariant, a
 	// non-empty heap implies inflight == capacity, so this can't jump a queued waiter.
 	if s.inflight < s.capacity && len(s.waiters) == 0 {
 		s.inflight++
 		s.mu.Unlock()
-		return
+		return nil
 	}
 	w := &psWaiter{priority: priority, seq: s.seq, ready: make(chan struct{})}
 	s.seq++
 	heap.Push(&s.waiters, w)
 	s.mu.Unlock()
-	<-w.ready // Release transferred a slot to us (inflight already accounts for it)
+	select {
+	case <-w.ready: // Release transferred a slot to us (inflight already accounts for it)
+		return nil
+	case <-ctx.Done():
+	}
+	// metis#72: cancelled while queued. Still in the heap → leave it, holding nothing. Already
+	// popped → a release raced in and transferred a slot to us: pass it on (to the next waiter,
+	// or back to the pool) so the slot count is conserved.
+	if s.onCancelObserved != nil {
+		s.onCancelObserved()
+	}
+	s.mu.Lock()
+	if w.index >= 0 {
+		heap.Remove(&s.waiters, w.index)
+		s.mu.Unlock()
+		return ctx.Err()
+	}
+	s.mu.Unlock()
+	s.release()
+	return ctx.Err()
+}
+
+// waiterCount is the queue length (tests).
+func (s *prioritySem) waiterCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.waiters)
 }
 
 func (s *prioritySem) release() {
@@ -115,10 +153,11 @@ type psWaiter struct {
 	priority int
 	seq      uint64
 	ready    chan struct{}
+	index    int // heap position; -1 once popped (granted) or removed (metis#72 cancel)
 }
 
 // psWaiterHeap is a min-heap by (priority, seq) — the lowest outer fold, earliest arrival
-// first. Only Push/Pop are used (no Fix/Remove), so no back-index bookkeeping is needed.
+// first. Each waiter tracks its index so a cancelled one can be removed (metis#72).
 type psWaiterHeap []*psWaiter
 
 func (h psWaiterHeap) Len() int { return len(h) }
@@ -128,12 +167,20 @@ func (h psWaiterHeap) Less(i, j int) bool {
 	}
 	return h[i].seq < h[j].seq
 }
-func (h psWaiterHeap) Swap(i, j int) { h[i], h[j] = h[j], h[i] }
-func (h *psWaiterHeap) Push(x any)   { *h = append(*h, x.(*psWaiter)) }
+func (h psWaiterHeap) Swap(i, j int) {
+	h[i], h[j] = h[j], h[i]
+	h[i].index, h[j].index = i, j
+}
+func (h *psWaiterHeap) Push(x any) {
+	w := x.(*psWaiter)
+	w.index = len(*h)
+	*h = append(*h, w)
+}
 func (h *psWaiterHeap) Pop() any {
 	old := *h
 	n := len(old)
 	w := old[n-1]
+	w.index = -1
 	old[n-1] = nil
 	*h = old[:n-1]
 	return w

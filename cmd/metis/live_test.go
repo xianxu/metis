@@ -23,7 +23,7 @@ type budgetFakeExec struct {
 
 func (b budgetFakeExec) Execute(ctx context.Context, step experiment.Step, runDir string) (experiment.StepResult, error) {
 	if b.budget != nil {
-		b.budget.acquire(0)
+		b.budget.acquire(context.Background(), 0)
 		defer b.budget.release()
 	}
 	return b.in.Execute(ctx, step, runDir)

@@ -108,7 +108,9 @@ func (e execStep) Execute(ctx context.Context, step experiment.Step, runDir stri
 	if e.pool != nil {
 		if spec, forkable := parseWrapper(exe); forkable {
 			if e.budget != nil {
-				e.budget.acquire(e.priority)
+				if err := e.budget.acquire(ctx, e.priority); err != nil {
+					return experiment.StepResult{}, fmt.Errorf("cancelled before launch: %w", err)
+				}
 			}
 			resp, ok, ferr := e.pool.execute(spec, stepDir, env)
 			if e.budget != nil {
@@ -156,7 +158,9 @@ func (e execStep) Execute(ctx context.Context, step experiment.Step, runDir stri
 	// metis#66: acquire at this leaf's outer-fold priority — the prioritySem grants fold 0
 	// first (chanSem ignores it → global fan-out).
 	if e.budget != nil {
-		e.budget.acquire(e.priority)
+		if err := e.budget.acquire(ctx, e.priority); err != nil {
+			return experiment.StepResult{}, fmt.Errorf("cancelled before launch: %w", err)
+		}
 	}
 	combined, cmdErr := cmd.CombinedOutput()
 	if e.budget != nil {
