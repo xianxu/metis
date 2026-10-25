@@ -415,6 +415,146 @@ rounds:
       recipe: small-diff-review
       isolation: checkout
       blocked: true
+    - reviewer_runs:
+        - version: 1
+          intent:
+            disposable_root: true
+            id: 37a641fc-cef9-4328-b6f2-073bd647ec3b
+            repository: github.com/xianxu/metis
+            issue_id: "000070"
+            recipe: small-diff-review
+            round: 4
+            attempt: 1
+            agent: claude
+            root: /Volumes/TestScratch/review-checkouts/f738a43c21729ddf
+            reviewed_head: ff82b9576af2eb6b4d9b13eab8307ff752b9dfba
+            slot: metis:1
+            requested_at: "2026-10-25T11:40:28.550544Z"
+          phase: finished
+          pid: 57001
+          started_at: "2026-10-25T11:40:28.696017Z"
+          finished_at: "2026-10-25T11:41:36.600077Z"
+          session_id: c304e9bc-752f-4173-98b7-282c759f5c36
+          outcome: returned
+      actual_inputs:
+        version: 4
+        method: active-time-v3-branch-v1
+        repository: github.com/xianxu/metis
+        code_head: ff82b9576af2eb6b4d9b13eab8307ff752b9dfba
+        tracker_head: 303fb79c2695ed91822dcb74540fe1524a50928c
+        branch_point: 4cb2c455fd62430e4ab25fdddeb940236c30f74d
+        since: "2026-10-25T04:16:09-07:00"
+        until: "2026-10-25T04:39:36-07:00"
+        brain_root: /Users/xianxu/workspace/brain
+        gap_minutes: 15
+        commit_weight: 1
+        include_assistant: true
+        engagements:
+            - start: "2026-10-25T04:16:09-07:00"
+              end: "2026-10-25T04:39:36-07:00"
+              began: "2026-10-25T04:16:09-07:00"
+              roots:
+                - /Users/xianxu/workspace/worktree/metis-slot1/metis
+        sources:
+            - harness: claude
+              id: 621e2c42-a080-4dc1-9165-83040e197e38
+              slot: metis:1
+              cwd: /Users/xianxu/workspace/worktree/metis-slot1/metis
+              digest: 955b34ae8811e4099990ab76c29b46f1a703f148cb784db2b110fed90941ecd3
+              started: "2026-10-24T00:13:14.303Z"
+              spawned: false
+              bytes: 6147678
+              windows:
+                - start: "2026-10-25T11:16:32Z"
+                  end: "2026-10-25T04:39:36-07:00"
+              dispatch_windows:
+                - start: "2026-10-25T04:16:09-07:00"
+                  end: "2026-10-25T04:39:36-07:00"
+        cuts:
+            - dispatched: "2026-10-25T04:21:06-07:00"
+              finalized: "2026-10-25T04:21:56-07:00"
+              finalizing: true
+            - dispatched: "2026-10-25T04:34:22-07:00"
+              finalized: "2026-10-25T04:35:07-07:00"
+              finalizing: false
+            - dispatched: "2026-10-25T04:36:47-07:00"
+              finalized: "2026-10-25T04:39:10-07:00"
+              finalizing: false
+        branches:
+            - root: /Users/xianxu/workspace/worktree/metis-slot1/metis
+              path: /Users/xianxu/workspace/metis/.git/worktrees/metis/logs/HEAD
+              head: ff82b9576af2eb6b4d9b13eab8307ff752b9dfba
+              branch: 000070-ci-weave-pin
+              digest: 24a8dc7c0d92e6dcfa9c9d51168dbc5255253d0e4cac21523eeab847aa8ec88c
+              bytes: 13121
+              intervals:
+                - source: claude/0869d57a-be29-46b9-99c9-b00decfa590d
+                  start: "2026-10-25T04:16:09-07:00"
+                  end: "2026-10-25T11:16:32Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source: claude/0869d57a-be29-46b9-99c9-b00decfa590d
+                  start: "2026-10-25T11:16:32Z"
+                  end: "2026-10-25T04:39:36-07:00"
+                  kind: branch
+                - source: claude/551b999c-0156-4396-815b-ab3e30b9f070
+                  start: "2026-10-25T04:16:09-07:00"
+                  end: "2026-10-25T11:16:32Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source: claude/551b999c-0156-4396-815b-ab3e30b9f070
+                  start: "2026-10-25T11:16:32Z"
+                  end: "2026-10-25T04:39:36-07:00"
+                  kind: branch
+                - source_index: 0
+                  start: "2026-10-25T04:16:09-07:00"
+                  end: "2026-10-25T11:16:32Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source_index: 0
+                  start: "2026-10-25T11:16:32Z"
+                  end: "2026-10-25T04:39:36-07:00"
+                  kind: branch
+                - source: claude/e26c5e7a-df9a-4671-86ec-e5ceff7a6ac1
+                  start: "2026-10-25T04:16:09-07:00"
+                  end: "2026-10-25T11:16:32Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source: claude/e26c5e7a-df9a-4671-86ec-e5ceff7a6ac1
+                  start: "2026-10-25T11:16:32Z"
+                  end: "2026-10-25T04:39:36-07:00"
+                  kind: branch
+                - source: claude/f2d4b646-eda5-4c47-8d97-ddd84ac73472
+                  start: "2026-10-25T04:16:09-07:00"
+                  end: "2026-10-25T11:16:32Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source: claude/f2d4b646-eda5-4c47-8d97-ddd84ac73472
+                  start: "2026-10-25T11:16:32Z"
+                  end: "2026-10-25T04:39:36-07:00"
+                  kind: branch
+      "n": 4
+      timestamp: "2026-10-25T04:41:40-07:00"
+      dispatched: "2026-10-25T04:40:28-07:00"
+      agent: claude
+      reviewer: claude (anthropic; author anthropic)
+      dispose:
+        - id: BR-3
+          disposition: addressed
+          note: Done-when lines 55-62 now carry Revision 1 (https clone, local ../ariadne never clones) and Revision 2 (ci-setup.sh GITHUB_PATH until ariadne#627; both checks exit 2, pinned by tests/test_merge_checks.py).
+          round: 4
+        - id: BR-4
+          disposition: addressed
+          note: atlas/index.md adds a "CI tool PATH hook" entry covering ci-setup.sh, its ariadne#627 removal, _vocab.bash being non-executable, and the exit-2 refusal; this matches scripts/ci-setup.sh and _vocab.bash.
+          round: 4
+        - id: BR-5
+          disposition: addressed
+          note: Log clause (5) now names hub receipts 15c3d811, 78b7ef4d, a6af3ffd, 69dc2ddf; clause (4) stays pending and owned by the operator.
+          round: 4
+      recipe: small-diff-review
+      isolation: checkout
+      reviewed: ff82b9576af2eb6b4d9b13eab8307ff752b9dfba
+      blocked: false
 ---
 
 # Gate ledger — metis#70 (boundary-review)
@@ -456,8 +596,14 @@ later rounds disposed of them. Generated — edit the gate, not this file.
 - **BR-5** [Minor] `done-when-evidence-partial` (kind: defect) Hub report (Done-when clause 5) is ticked in the Plan but has no Log evidence
   2nd in family. Rule: every Done-when clause needs a Log line naming its evidence (run ID, message, SHA) or saying explicitly that it is pending and who owns it. Instances: clause 5 hub report (no evidence); clause 4 operator label (correctly logged as pending); clause 3 now covered per BR-1.
 
+## Round 4 — 2026-10-25T04:41:40-07:00 (claude) — passed
+
+### Disposed
+
+- BR-3 — addressed — Done-when lines 55-62 now carry Revision 1 (https clone, local ../ariadne never clones) and Revision 2 (ci-setup.sh GITHUB_PATH until ariadne#627; both checks exit 2, pinned by tests/test_merge_checks.py).
+- BR-4 — addressed — atlas/index.md adds a "CI tool PATH hook" entry covering ci-setup.sh, its ariadne#627 removal, _vocab.bash being non-executable, and the exit-2 refusal; this matches scripts/ci-setup.sh and _vocab.bash.
+- BR-5 — addressed — Log clause (5) now names hub receipts 15c3d811, 78b7ef4d, a6af3ffd, 69dc2ddf; clause (4) stays pending and owned by the operator.
+
 ## Open findings
 
-- **BR-3** [Important] `scope-changed-after-close` (kind: defect) Done-when not updated for the two hub-approved scope revisions
-- **BR-4** [Important] `atlas-missing-new-surface` (kind: defect) atlas update appears missing for the scripts/ci-setup.sh CI hook and vocabulary guard
-- **BR-5** [Minor] `done-when-evidence-partial` (kind: defect) Hub report (Done-when clause 5) is ticked in the Plan but has no Log evidence
+(none — every finding has been disposed)

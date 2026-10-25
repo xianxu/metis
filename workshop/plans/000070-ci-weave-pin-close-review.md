@@ -248,3 +248,81 @@ findings:
 ```
 
 <!-- sdlc-review-usage [{"version":1,"intent":{"disposable_root":true,"id":"bc42968f-393f-4a0c-8485-c4cf6853c694","repository":"github.com/xianxu/metis","issue_id":"000070","recipe":"small-diff-review","round":3,"attempt":1,"agent":"claude","root":"/Volumes/TestScratch/review-checkouts/0c71a2a145c281d4","reviewed_head":"4c7ce7e5c53c45ed0ac5666a1fb81470a1f4b65f","slot":"metis:1","requested_at":"2026-10-25T11:36:47.060401Z"},"phase":"finished","pid":28778,"started_at":"2026-10-25T11:36:47.261083Z","finished_at":"2026-10-25T11:39:06.250149Z","session_id":"34376b90-cfdf-492d-8c22-c00929d3ccb7","outcome":"returned"}] -->
+
+---
+
+## Re-review — 2026-10-25T04:41:40-07:00 (SHIP)
+
+| field | value |
+|-------|-------|
+| issue | 70 — CI: build weave from a pinned ariadne commit |
+| repo | metis |
+| issue file | workshop/issues/000070-ci-weave-pin.md |
+| boundary | whole-issue close |
+| milestone | — |
+| window | 4cb2c455fd62430e4ab25fdddeb940236c30f74d..ff82b9576af2eb6b4d9b13eab8307ff752b9dfba |
+| command | sdlc close --issue 70 |
+| reviewer | claude (anthropic; author anthropic) |
+| isolation | checkout |
+| timestamp | 2026-10-25T04:41:40-07:00 |
+| verdict | SHIP |
+
+## Review
+
+Still reviewing: the prior findings look fixed. Next I'm checking that the merge-check runner skips files that aren't executable, and running the new tests.
+
+```verdict
+verdict: SHIP
+confidence: high
+```
+
+All three open findings from earlier rounds are fixed, and I found nothing new. The window adds:
+- the authored compiler pin `.sdlc/weave-compiler-ref`;
+- an https URL in `construct/deps` so CI can clone the substrate;
+- a temporary post-compile hook, `scripts/ci-setup.sh`;
+- a shared guard, `_vocab.bash`, that stops both experiment merge-checks from passing off a missing `vocabulary` tool as a schema rejection.
+
+In the disposable checkout, the new tests pass (3 passed). I then put the two check scripts back to their base versions, and both missing-tool cases failed (2 failed). So the regression test only passes with the fix in place. I confirmed that the substrate's `run-merge-checks.sh:37` only runs files that are both regular and executable, so the mode-644 `_vocab.bash` is sourced by the checks but never run as a check itself. I also confirmed that the seeded `merge-check.yml:166-167` calls `scripts/ci-setup.sh` only if it is executable. That matters because the hook is meant to be deleted once ariadne#627 lands, and the workflow keeps working after it is gone.
+
+**1. Strengths**
+- `scripts/merge-checks.d/_vocab.bash:4-8`: one shared guard is sourced by both checks, so the "missing tool is not a verdict" rule lives in one place (ARCH-DRY).
+- `tests/test_merge_checks.py:16-33`: one parametrized test covers both checks, with three assertions: exit code 2, the error names the tool, and the output never says "rejected". It also checks that the helper file is not executable (`:36-40`), which is what keeps the runner from treating it as a check.
+- `scripts/ci-setup.sh:9-11`: it refuses to run outside GitHub Actions (`GITHUB_PATH:?`) and fails if a tool directory is missing, rather than adding a path that doesn't exist.
+- `workshop/issues/000070-ci-weave-pin.md:169-183`: the Log gives evidence for each Done-when clause, including both revision clauses.
+
+**2. Critical findings:** none.
+
+**3. Important findings:** none.
+
+**4. Minor findings:** none raised. One note: `experiment-validate.sh` now checks for `vocabulary` before computing which files changed. Before this change, a range with no experiment files passed even when the tool was missing; now it exits 2. The Revision 2 Done-when clause says both checks must exit 2 when the tool is missing, so this matches the agreed contract.
+
+**5. Test coverage notes**
+- The missing-tool refusal has a regression test, and I confirmed it fails when the guard is reverted.
+- The malformed-pin, fetch/build-failure and PATH-precedence tests live upstream, as the Plan states.
+- `ci-setup.sh` has no local test. Its behaviour is shown by CI runs 40189012386 and 40189166668, which is acceptable for a hook that is due to be deleted.
+
+**6. Architectural notes**
+- ARCH-DRY: pass. The guard is extracted into one helper.
+- ARCH-PURE: pass. The changes are thin shell glue with no business logic mixed into IO.
+- ARCH-PURPOSE: pass. The pin is in place, real CI accepted it, and the extra fixes that turned up while getting CI green (the https clone and putting the layer tools on PATH) were recorded as hub-approved revisions with matching Done-when clauses. The hook's removal is tied to ariadne#627, which is a separate upstream change.
+- ARCH-EVOLVE: pass. The new pin file is authored and not managed by weave. The `construct/deps` line keeps its format and only the URL value changes.
+
+**7. Plan revision recommendations:** none. The Plan, Revisions and Done-when sections match the code.
+
+```findings
+dispose:
+  - id: BR-3
+    disposition: addressed
+    note: |
+      Done-when lines 55-62 now carry Revision 1 (https clone, local ../ariadne never clones) and Revision 2 (ci-setup.sh GITHUB_PATH until ariadne#627; both checks exit 2, pinned by tests/test_merge_checks.py).
+  - id: BR-4
+    disposition: addressed
+    note: |
+      atlas/index.md adds a "CI tool PATH hook" entry covering ci-setup.sh, its ariadne#627 removal, _vocab.bash being non-executable, and the exit-2 refusal; this matches scripts/ci-setup.sh and _vocab.bash.
+  - id: BR-5
+    disposition: addressed
+    note: |
+      Log clause (5) now names hub receipts 15c3d811, 78b7ef4d, a6af3ffd, 69dc2ddf; clause (4) stays pending and owned by the operator.
+```
+
+<!-- sdlc-review-usage [{"version":1,"intent":{"disposable_root":true,"id":"37a641fc-cef9-4328-b6f2-073bd647ec3b","repository":"github.com/xianxu/metis","issue_id":"000070","recipe":"small-diff-review","round":4,"attempt":1,"agent":"claude","root":"/Volumes/TestScratch/review-checkouts/f738a43c21729ddf","reviewed_head":"ff82b9576af2eb6b4d9b13eab8307ff752b9dfba","slot":"metis:1","requested_at":"2026-10-25T11:40:28.550544Z"},"phase":"finished","pid":57001,"started_at":"2026-10-25T11:40:28.696017Z","finished_at":"2026-10-25T11:41:36.600077Z","session_id":"c304e9bc-752f-4173-98b7-282c759f5c36","outcome":"returned"}] -->

@@ -110,6 +110,8 @@ other repositories' pins.
 ## Log
 
 
+
+- 2026-10-25: closed — pin 63d6bfd86509d97649e10d7a5dd1e9a06db17d21 validated and built with matching vcs.revision, vcs.modified=false; PR #52 merge-check green (runs 40189012386, 40189166668) through cold bootstrap and compile after two hub-approved revisions (https deps; ci-setup PATH hook plus experiment checks exit 2 on a missing vocabulary, pinned by tests/test_merge_checks.py: 3 pass, guard revert fails). Done-when now covers both revisions; per-clause evidence in the Log. local-gates-guard red awaiting the operator label.; review verdict: SHIP
 - 2026-10-25: closed — pin authored at the Spec SHA; workflow validator accepts it and refuses 5 malformed shapes; pinned weave builds with vcs.revision=63d6bfd86509d97649e10d7a5dd1e9a06db17d21 and vcs.modified=false; no manifest names .sdlc; pin byte-identical across weave compile. no-plan-check: the one open item is opening the PR and its real CI run, which follow close (local-gates-guard red until the operator labels).; review verdict: SHIP
 Filed under explicit hub authorization from this repository's primary :0
 checkout, unclaimed, depending on ariadne#459. Source class A; inventory:
