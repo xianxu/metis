@@ -41,3 +41,19 @@ Canonicalize the experiment dir at the runner boundary with `filepath.EvalSymlin
 
 2026-10-23 (metis:1): Implemented in runResolvedExperimentAdmitted: Abs, then EvalSymlinks on expDir (error if unresolvable), with runDir joined under it. TestRun_StepEnvPathsArePhysical runs the real execStep (test/env-dump) through a symlinked experiment dir and asserts physical EXP_DIR, RUN_DIR and STEP_DIR. Mutation: with the resolve disabled, all 3 asserts fail. go test ./cmd/metis ./pkg/... is green. The recorded suite waits for #75 (make test) to land.
 2026-10-23 (metis:1): Concurrent claims in this slot: #71, #75, #76 and #72 (in planning) are open at once while #75 waits on the operator CI pin (metis#70). Active-time attribution across them is approximate until ariadne#580 lands.
+
+2026-10-25 metis:1: close review round 1 REWORK, family
+child-env-paths-canonical-form. BR-1 (Critical): run.go made METIS_EXP_DIR
+physical while the sealed sweep's readRoot (sweep.go, filepath.Abs) stayed
+logical, so under a symlinked dir every within-root read tripped confinement.
+BR-2: blend.go built Abs-only paths. BR-3: a symlinked runs/ was not resolved.
+Fixed the class at the one place child paths meet: `execStep.stepEnv` (shared by
+the legacy and forkserver executors, reached by run, blend and the sweep) now
+resolves all four path vars through the new `physicalPath` (deepest existing
+ancestor, so not-yet-created dirs work); run.go uses the same helper. Tests:
+TestExecStep_StepEnvPathsArePhysical (symlinked exp dir, symlinked runs/,
+not-yet-created read root; all four vars physical) and
+TestExecStep_ConfinementAgreesAcrossPathForms (real uv cv-split, physical exp
+dir and logical read root: within-root read succeeds). Both failed before the
+fix. Several claims are open at once in this slot (ariadne#580 fixes
+attribution).

@@ -53,6 +53,14 @@ work. Keep numerical and incident detail in the issue or experiment record.
 - A command's helper is not self-contained until its callers, CLI flags, and
   integration fixtures no longer rely on it. Delete the full production chain.
 
+- Canonicalize a path where paths meet, not at one producer (metis#76). Two paths
+  that are compared (an exp-relative read against a read root) must share one
+  form; fixing only the runner made the experiment dir physical while the sealed
+  sweep's root stayed logical, and every within-root read tripped confinement.
+  The one builder every caller passes through (`execStep.stepEnv`) owns it.
+- A check that hides a tool's stderr must refuse a missing tool before judging
+  (metis#70): command-not-found once read as "valid fixture rejected".
+
 ## Testing and CLI
 
 - Test through the CLI entry point for path, environment, and serialization

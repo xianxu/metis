@@ -296,3 +296,79 @@ func TestRun_StepEnvPathsArePhysical(t *testing.T) {
 		}
 	}
 }
+
+// metis#76 (close review BR-1..3): the physical-path guarantee holds for every METIS_* path
+// execStep hands a child, whoever built the inputs (run, blend, the sealed sweep's readRoot):
+// a symlinked experiment dir, a runs/ that is itself a symlink, and a readRoot that does not
+// exist yet all reach the child physical.
+func TestExecStep_StepEnvPathsArePhysical(t *testing.T) {
+	root := repoRoot(t)
+	real := t.TempDir()
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	runsReal := t.TempDir()
+	if err := os.Symlink(runsReal, filepath.Join(real, "runs")); err != nil {
+		t.Fatal(err)
+	}
+	es := execStep{stepPath: []string{filepath.Join(root, "testdata", "steps")}, expDir: link, seed: 1,
+		readRoot: filepath.Join(link, "runs", "pre", "analysis_0"), out: io.Discard}
+	if _, err := es.Execute(experiment.Step{ID: "e", Uses: "test/env-dump"}, filepath.Join(link, "runs", "r")); err != nil {
+		t.Fatal(err)
+	}
+	phys := func(p string) string {
+		t.Helper()
+		r, err := filepath.EvalSymlinks(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	physExp, physRuns := phys(real), phys(runsReal)
+	b, err := os.ReadFile(filepath.Join(physRuns, "r", "e", "env.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"EXP_DIR=" + physExp,
+		"RUN_DIR=" + filepath.Join(physRuns, "r"),
+		"STEP_DIR=" + filepath.Join(physRuns, "r", "e"),
+		"READ_ROOT=" + filepath.Join(physRuns, "pre", "analysis_0"),
+	} {
+		if !strings.Contains(string(b), want+"\n") {
+			t.Errorf("env.txt missing %q (physical path); got:\n%s", want, b)
+		}
+	}
+}
+
+// metis#76 BR-1: the sealed sweep builds readRoot with filepath.Abs (logical) while the runner
+// resolves the experiment dir (physical). The child resolves the base dataset against
+// METIS_EXP_DIR and checks it against METIS_READ_ROOT, so the two forms must agree or every
+// legitimate within-root read under a symlinked dir trips confinement.
+func TestExecStep_ConfinementAgreesAcrossPathForms(t *testing.T) {
+	if _, err := exec.LookPath("uv"); err != nil {
+		t.Skip("uv not on PATH; skipping the real-step confinement test")
+	}
+	root := repoRoot(t)
+	ws := t.TempDir()
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(ws, link); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(ws, "experiment"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	copyDir(t, filepath.Join(root, "testdata", "dataset", "toy"), filepath.Join(ws, "dataset", "toy"))
+	physExp, err := filepath.EvalSymlinks(filepath.Join(ws, "experiment"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	split := experiment.Step{ID: "split", Uses: "metis/cv-split",
+		With: map[string]any{"dataset": "../dataset/toy", "k": 3, "stratify": true}}
+	es := execStep{stepPath: []string{filepath.Join(root, "steps")}, expDir: physExp, seed: 42,
+		readRoot: filepath.Join(link, "dataset"), out: io.Discard}
+	if _, err := es.Execute(split, filepath.Join(ws, "run")); err != nil {
+		t.Fatalf("within-root read refused across path forms: %v", err)
+	}
+}

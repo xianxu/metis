@@ -95,7 +95,10 @@ broken-graph surfaces layergraph's actionable error rather than degrading silent
   `METIS_STEP_ID`, plus (M3) `METIS_EXP_DIR` (the experiment dir, absolute — the stable
   anchor for experiment-relative inputs, since the run dir is ephemeral) and `METIS_SEED`
   (the experiment's seed, so steps are reproducible without duplicating it into every `with`).
-  The three dir paths are physical (symlinks resolved at the runner boundary, metis#76).
+  Every path var (`METIS_STEP_DIR`, `METIS_RUN_DIR`, `METIS_EXP_DIR`, `METIS_READ_ROOT`) is physical:
+  `execStep.stepEnv`, the one builder both executors share, resolves symlinks via `physicalPath`
+  (deepest existing ancestor, so a not-yet-created dir works) for every caller, run, blend and the
+  sealed sweep alike, so exp-relative reads and the read root share one form (metis#76).
 - **In:** `with.json` — the step's `with` config, written into the step dir by the runner.
 - **Out:** an optional `metrics.json` (flat `{name: number}`, merged into `Run.metrics`) plus
   any **artifact files** the step writes into its dir. `with.json` and `metrics.json` are the
