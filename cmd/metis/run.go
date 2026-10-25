@@ -227,12 +227,18 @@ func runSingleExperiment(exp experiment.Experiment, o runOpts, now func() time.T
 		if _, err := experiment.ParseRepeatLabel(o.repeat); err != nil {
 			return experiment.Run{}, fmt.Errorf("%s: %w", o.expPath, err)
 		}
-		// The claim is only single-use if the dir name is the point's content address: an
-		// untracked experiment falls back to a timestamped dir, which never collides.
-		if _, err := shapeBlobHash(o.expPath); err != nil {
+		// The claim is only single-use if the dir is named from the minted point address, so
+		// the repeat path mints it directly and refuses on failure: singleRunID's timestamp
+		// fallback (an untracked experiment, an unaddressable config) would never collide.
+		sbh, err := shapeBlobHash(o.expPath)
+		if err != nil {
 			return experiment.Run{}, fmt.Errorf("%s: --repeat needs the experiment tracked in git (its content address names the repeat's run dir, which makes a label single-use): %v", o.expPath, err)
 		}
-		runID = repeatRunID(runID, o.repeat)
+		addr, err := pointAddressOf(exp, sbh)
+		if err != nil {
+			return experiment.Run{}, fmt.Errorf("%s: --repeat needs a point address to name the repeat's run dir: %w", o.expPath, err)
+		}
+		runID = repeatRunID(addr, o.repeat)
 		runDir, err := runDirFor(o.expPath, runID)
 		if err != nil {
 			return experiment.Run{}, err

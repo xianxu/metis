@@ -472,3 +472,15 @@ func TestRepeat_ValidationFailureReleasesClaim(t *testing.T) {
 		t.Fatalf("the claim must be released, found %v", dirs)
 	}
 }
+
+// A config that cannot be content-addressed (a non-finite value) has no point address, so a
+// repeat refuses rather than claiming a timestamped dir that would never collide.
+func TestRepeat_RefusesUnaddressableConfig(t *testing.T) {
+	expPath, codeRepo := repeatSetup(t, strings.Replace(repeatExpMD, "with: {k: 1,", "with: {k: .nan,", 1))
+	if _, err := runRepeat(expPath, codeRepo, "1", 1, nil); err == nil || !strings.Contains(err.Error(), "needs a point address") {
+		t.Fatalf("want a point-address refusal, got %v", err)
+	}
+	if dirs := repeatDirs(t, expPath); len(dirs) != 0 {
+		t.Fatalf("nothing may be claimed, found %v", dirs)
+	}
+}

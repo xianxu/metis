@@ -154,6 +154,9 @@ broken-graph surfaces layergraph's actionable error rather than degrading silent
   configuration.
   - **Run dir:** `runs/<point_addr>.r-<label>/`, claimed by an exclusive `mkdir` before any step
     runs. A used label therefore refuses, whether the earlier run is concurrent or finished.
+    The dir is named only from the minted point address, so `--repeat` refuses an experiment
+    without one (untracked in git, or a config that cannot be addressed) instead of falling
+    back to a timestamped dir. A run refused at validation releases its empty claim.
   - **Record and row:** the record carries `repeat`, and the ledger row adds a ragged `repeat`
     column; the label is part of the row key only when set.
   - **Plain runs** (no `--repeat`) now publish a row too. That row mirrors its overwritable run
@@ -174,7 +177,8 @@ broken-graph surfaces layergraph's actionable error rather than degrading silent
     exp.md runs/<id>` re-derives the row from the record (`rowFromRecord`). It refuses an
     interrupted execution, meaning a missing or unparseable record.
   - **Reading:** `AggregateView` reduces repeat rows to one family per (code_fingerprint,
-    point_addr), marked `repeat=*`. Every metric gets mean, `.se` and `.n`, plus
+    point_addr), marked `repeat=*`. Every metric gets mean and `.n`, plus `.se` once at least
+    two repeats reported it (one sample has no measured spread), and the family carries
     `repeats.total` and `repeats.failed`. Failed repeats count but add no values, and nothing
     is filled in. A repeat is never a fold.
   - **Compatibility:** columns this version does not know are kept (`Row.Extra`) and written
