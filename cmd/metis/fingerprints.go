@@ -251,7 +251,7 @@ func loadLedgerRecords(shapePath string, led ledger.Ledger) map[string]record.Ru
 		if _, ok := out[r.PointAddr]; ok {
 			continue
 		}
-		b, err := os.ReadFile(filepath.Join(dir, "runs", r.PointAddr, "record.json"))
+		b, err := os.ReadFile(filepath.Join(dir, "runs", rowRunID(r), "record.json")) // metis#73: a repeat row names its own dir
 		if err != nil {
 			continue
 		}

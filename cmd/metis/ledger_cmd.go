@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -17,16 +18,46 @@ import (
 // ledger sidecar (the CSV stays append-order; sorting is never a storage concern).
 func cmdLedger(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: metis ledger show|fingerprints <shape.md> [flags] (selection moved to `metis select`, metis#32)")
+		return fmt.Errorf("usage: metis ledger show|fingerprints <shape.md> [flags] | metis ledger publish <experiment.md> <run-dir> (selection moved to `metis select`, metis#32)")
 	}
 	switch args[0] {
 	case "show":
 		return cmdLedgerShow(args[1:])
 	case "fingerprints":
 		return cmdLedgerFingerprints(args[1:])
+	case "publish":
+		return cmdLedgerPublish(args[1:], os.Stdout)
 	default:
-		return fmt.Errorf("unknown ledger subcommand %q (want: show | fingerprints)", args[0])
+		return fmt.Errorf("unknown ledger subcommand %q (want: show | fingerprints | publish)", args[0])
 	}
+}
+
+// cmdLedgerPublish handles `metis ledger publish <experiment.md> <run-dir>` (metis#73): the
+// recovery for a run whose record is final but whose ledger row was never written (a crash
+// between the two). It re-derives the row from the record and publishes it: a no-op when the
+// row is already there, a refusal on conflicting data or an interrupted execution.
+func cmdLedgerPublish(args []string, out io.Writer) error {
+	const usage = "usage: metis ledger publish <experiment.md> <run-dir>"
+	if len(args) != 2 || !strings.HasSuffix(args[0], ".md") {
+		return fmt.Errorf("ledger publish: %s", usage)
+	}
+	expPath, runDir := args[0], args[1]
+	want, err := runDirFor(expPath, filepath.Base(runDir))
+	if err != nil {
+		return err
+	}
+	got, err := physicalPath(runDir)
+	if err != nil {
+		return fmt.Errorf("ledger publish: %w", err)
+	}
+	if got != want {
+		return fmt.Errorf("ledger publish: %s is not a run of %s (want a dir under %s)", runDir, expPath, filepath.Dir(want))
+	}
+	if err := publishRunRow(expPath, got); err != nil {
+		return fmt.Errorf("ledger publish: %w", err)
+	}
+	fmt.Fprintf(out, "metis: ledger row for %s is in %s\n", filepath.Base(got), ledgerPath(expPath))
+	return nil
 }
 
 // cmdLedgerFingerprints handles `metis ledger fingerprints <shape.md>` — metis#39's
@@ -145,9 +176,13 @@ func renderLedger(out io.Writer, rows []ledger.Row) {
 		return
 	}
 	metricCols := map[string]bool{}
+	hasRepeat := false // metis#73: a repeat column only when a row carries one (legacy output unchanged)
 	for _, r := range rows {
 		for k := range r.Metrics {
 			metricCols[k] = true
+		}
+		if r.Repeat != "" {
+			hasRepeat = true
 		}
 	}
 	mCols := make([]string, 0, len(metricCols))
@@ -155,9 +190,17 @@ func renderLedger(out io.Writer, rows []ledger.Row) {
 		mCols = append(mCols, k)
 	}
 	sort.Strings(mCols)
-	fmt.Fprintln(out, strings.Join(append([]string{"code", "point", "status", "free_params"}, mCols...), "  "))
+	head := []string{"code", "point", "status"}
+	if hasRepeat {
+		head = append(head, "repeat") // "*" marks a repeat family's aggregate row
+	}
+	fmt.Fprintln(out, strings.Join(append(append(head, "free_params"), mCols...), "  "))
 	for _, r := range rows {
-		parts := []string{short(r.CodeFingerprint), short(r.PointAddr), r.Status, freeParamTuple(r)}
+		parts := []string{short(r.CodeFingerprint), short(r.PointAddr), r.Status}
+		if hasRepeat {
+			parts = append(parts, r.Repeat)
+		}
+		parts = append(parts, freeParamTuple(r))
 		for _, c := range mCols {
 			if v, ok := r.Metrics[c]; ok {
 				parts = append(parts, fmt.Sprintf("%s=%g", c, v))

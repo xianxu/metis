@@ -168,19 +168,20 @@ func captureSweepCode(o runOpts, man sweepManifest) (record.Hash, error) {
 }
 
 // captureSingleRun captures ONE run's code closure + spec to `refs/metis/runs/<runID>`
-// and backfills its record — the metis#14 single-run path (the sweep loop suppresses this
-// via runOpts.inSweep, capturing once per shape-run instead of per point).
-func captureSingleRun(o runOpts, runID string) error {
+// and backfills the in-memory record — the metis#14 single-run path (the sweep loop
+// suppresses this via runOpts.inSweep, capturing once per shape-run instead of per point).
+// metis#73: the caller writes record.json once, after this, so a record that exists is
+// final; on error rec is left unchanged (empty fingerprint, its existing capture status).
+func captureSingleRun(o runOpts, runID string, rec *record.RunRecord) error {
 	runDir := filepath.Join(filepath.Dir(o.expPath), "runs", runID)
 	closureByRepo := closureFromRunDir(runDir)
 	primary := cacheProjectRoot(o.stepPath, filepath.Dir(o.expPath))
 	commit, d, status := captureRunCode(closureByRepo, primary, o.expPath, "refs/metis/runs/"+runID)
 	warnOnUncaptured(o.out, status, "run "+runID)
-	fp, dirty, err := backfillCodeManifest(o.expPath, runID, d, commit, status)
-	if err != nil {
+	if err := applyCodeCapture(rec, d, commit, status); err != nil {
 		return err
 	}
-	printFingerprintLine(o.out, fp, commit, dirty) // metis#39: the flat run states its cohort too
+	printFingerprintLine(o.out, rec.CodeFingerprint, commit, rec.Dirty) // metis#39: the flat run states its cohort too
 	return nil
 }
 
@@ -371,6 +372,24 @@ func backfillCodeManifest(expPath, runID string, d []record.CodeRef, commit, sta
 	if err := json.Unmarshal(b, &rec); err != nil {
 		return "", false, err
 	}
+	if err := applyCodeCapture(&rec, d, commit, status); err != nil {
+		return "", false, err
+	}
+	return rec.CodeFingerprint, rec.Dirty, writeRecordJSON(filepath.Join(filepath.Dir(expPath), "runs", runID), rec)
+}
+
+// applyCodeCapture is the in-memory backfill both paths share (metis#73): every step's
+// CodeManifest gets D, the captured commit and the capture status, and the run gets its
+// code_fingerprint. The realized code identity (metis#27) is minted here, where the run's D
+// closure exists: two runs of the same config with different code get different
+// fingerprints, so the ledger keeps both. (buildRecord runs before D exists, so it can't set
+// this.) A hash error (a non-canonicalizable closure, unreachable for a string manifest) is
+// surfaced, and rec is then left unchanged.
+func applyCodeCapture(rec *record.RunRecord, d []record.CodeRef, commit, status string) error {
+	fp, err := record.CodeFingerprint(d)
+	if err != nil {
+		return err
+	}
 	for i := range rec.Steps {
 		rec.Steps[i].Code.D = d
 		if commit != "" {
@@ -378,17 +397,8 @@ func backfillCodeManifest(expPath, runID string, d []record.CodeRef, commit, sta
 		}
 		rec.Steps[i].Code.CaptureStatus = status
 	}
-	// The realized code identity (metis#27): the ONE post-capture site where the run's D
-	// closure exists + the record is re-written. Two runs of the same config with different
-	// code get different fingerprints → the ledger keeps both. (buildRecord runs before D
-	// exists, so it can't set this.) A hash error (non-canonicalizable closure — unreachable
-	// for a string manifest) is surfaced rather than silently dropped.
-	fp, err := record.CodeFingerprint(d)
-	if err != nil {
-		return "", false, err
-	}
 	rec.CodeFingerprint = fp
-	return fp, rec.Dirty, writeRecordJSON(filepath.Join(filepath.Dir(expPath), "runs", runID), rec)
+	return nil
 }
 
 // isPathDirty reports whether the working-tree blob (workHash) differs from HEAD's

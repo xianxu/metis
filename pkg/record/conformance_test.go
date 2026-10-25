@@ -68,6 +68,7 @@ func TestRunRecordConformsToCUE(t *testing.T) {
 		Started:  "2026-07-01T00:00:00Z",
 		Finished: "2026-07-01T00:00:05Z",
 		Status:   "ok",
+		Repeat:   "1", // metis#73: vet the field, not omitempty-skip it
 	}
 	b, err := json.MarshalIndent(rec, "", "  ")
 	if err != nil {

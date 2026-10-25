@@ -60,6 +60,7 @@ func cmdRun(ctx context.Context, args []string) error {
 	globalFanout := fs.Bool("global-fanout", false, "metis#67: the escape hatch back to the pre-#66 priority-blind global fan-out (all waiting leaves compete equally for the budget). The DEFAULT is fold-ordered scheduling — outer folds finish lowest-index-first (a priority queue over the leaf budget, backfill preserved so no core idles) so the mean±SE tightens fold-by-fold; on a TTY, press q+Enter to finalize an honest partial out<n> estimate early. Byte-identical result either way (scheduling-only, not a speedup); a flat (1-config) shape is unaffected (all leaves are one priority).")
 	autoStop := fs.Bool("auto-stop", false, "metis#66: incumbent-referenced early stop of losing families. Reads the incumbent from the shape's existing ledger (best prior per-family estimate — no --baseline). After each outer fold (n≥2) a family <95%-likely to reach it (one-sided predictive bound on its full-k mean) stops its remaining outer folds — LOSERS ONLY, a would-be winner runs full k — reclaiming the budget for survivors; stopped families are marked `stopped: auto` in the ledger. Schedules outer folds sequentially (clean per-fold decision). No prior run in the ledger → no incumbent → runs the full sweep (loud no-op). A flat (1-config) shape is a no-op (nothing to stop against).")
 	parallel := fs.Int("parallel", defaultParallel(), "metis#31: max concurrent step subprocesses across ALL sweep levels (driver×sweeper×resample share one global cap); <=1 = serial (exact pre-#31 behavior). Default runtime.NumCPU(), overridable by METIS_MAX_PARALLEL. Leaf BLAS is pinned single-thread by default (metis#48; export a *_NUM_THREADS value yourself to override), so n is the ONE parallelism knob. On a COLD cache the first batch's ≤n points may each recompute the shared upstream (a bounded thundering herd).")
+	repeat := fs.String("repeat", "", "metis#73: record this execution as repeat `LABEL` (1 to 32 of [a-z0-9-]) — a distinct sample with its own run dir (<point>.r-LABEL), record and ledger row; a used label refuses. Plain experiments only; metis ledger show --sort METRIC reduces repeats to mean, se and n.")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -88,6 +89,7 @@ func cmdRun(ctx context.Context, args []string) error {
 		maxParallel:  *parallel,
 		globalFanout: *globalFanout, // metis#67: default is fold-ordered; this is the escape hatch
 		autoStop:     *autoStop,
+		repeat:       *repeat,
 	}
 	// metis#66/#67: in board mode a stdin reader turns a `q`/`Q` line into the graceful-finalize
 	// signal (an intentional clean Ctrl-C). Gated on tui alone now that fold-ordered scheduling is

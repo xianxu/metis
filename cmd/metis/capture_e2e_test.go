@@ -180,13 +180,11 @@ func TestCaptureSingleRun_CapturesCodeAndSpec(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeJSON(t, filepath.Join(stepDir, "reads.json"), readSet{Roots: map[string][]string{root: {"model.py"}}})
-	writeJSON(t, filepath.Join(root, "runs", runID, "record.json"), record.RunRecord{
-		RunID: runID, Steps: []record.StepRecord{{StepID: "train"}},
-	})
+	rec := record.RunRecord{RunID: runID, Steps: []record.StepRecord{{StepID: "train"}}}
 
 	var out bytes.Buffer
 	o := runOpts{expPath: expPath, stepPath: []string{filepath.Join(root, "steps")}, out: &out}
-	if err := captureSingleRun(o, runID); err != nil {
+	if err := captureSingleRun(o, runID, &rec); err != nil {
 		t.Fatalf("captureSingleRun: %v", err)
 	}
 
@@ -195,12 +193,7 @@ func TestCaptureSingleRun_CapturesCodeAndSpec(t *testing.T) {
 		t.Errorf("single-run capture must print the cohort line:\n%s", out.String())
 	}
 
-	rb, _ := os.ReadFile(filepath.Join(root, "runs", runID, "record.json"))
-	var rec record.RunRecord
-	if err := json.Unmarshal(rb, &rec); err != nil {
-		t.Fatal(err)
-	}
-	c := rec.Steps[0].Code
+	c := rec.Steps[0].Code // metis#73: backfilled in memory; the caller writes it once
 	if c.CaptureStatus != "captured" {
 		t.Errorf("capture_status = %q; want captured", c.CaptureStatus)
 	}
@@ -249,18 +242,13 @@ func TestCaptureSingleRun_LoudWhenUncaptured(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeJSON(t, filepath.Join(stepDir, "reads.json"), readSet{Roots: map[string][]string{dir: {"code.py"}}})
-	writeJSON(t, filepath.Join(dir, "runs", runID, "record.json"), record.RunRecord{
-		RunID: runID, Steps: []record.StepRecord{{StepID: "train"}},
-	})
+	rec := record.RunRecord{RunID: runID, Steps: []record.StepRecord{{StepID: "train"}}}
 
 	var out bytes.Buffer
 	o := runOpts{expPath: expPath, stepPath: []string{filepath.Join(dir, "steps")}, out: &out}
-	if err := captureSingleRun(o, runID); err != nil {
+	if err := captureSingleRun(o, runID, &rec); err != nil {
 		t.Fatalf("captureSingleRun: %v", err)
 	}
-	rb, _ := os.ReadFile(filepath.Join(dir, "runs", runID, "record.json"))
-	var rec record.RunRecord
-	json.Unmarshal(rb, &rec)
 	if rec.Steps[0].Code.CaptureStatus == "captured" {
 		t.Errorf("a non-git run must not be 'captured'; got %q", rec.Steps[0].Code.CaptureStatus)
 	}

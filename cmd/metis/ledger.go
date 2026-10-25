@@ -7,7 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 
+	"github.com/xianxu/metis/internal/fsx"
 	"github.com/xianxu/metis/pkg/experiment"
 	"github.com/xianxu/metis/pkg/ledger"
 	"github.com/xianxu/metis/pkg/record"
@@ -137,28 +139,119 @@ func writeSweepLedger(shapePath string, man sweepManifest) error {
 	if err != nil {
 		return err
 	}
-	led, err := loadLedger(shapePath)
+	rows := rowsFromManifest(man, records)
+	return publishRows(ledgerPath(shapePath), func(l *ledger.Ledger) error { return l.Append(rows...) })
+}
+
+// publishRows is the one ledger writer (metis#73): load, apply add, encode and atomically
+// replace the CSV, all under an exclusive flock on `<ledger>.lock`. Parallel repeats (and a
+// sweep) publishing into one ledger then serialize instead of losing each other's rows, and a
+// crash mid-rewrite leaves the old ledger intact (the rename never happened). If add fails,
+// the ledger is not written.
+func publishRows(ledgerFile string, add func(*ledger.Ledger) error) error {
+	lock, err := os.OpenFile(ledgerFile+".lock", os.O_CREATE|os.O_RDWR, 0o644)
 	if err != nil {
 		return err
 	}
-	led.Append(rowsFromManifest(man, records)...)
+	defer lock.Close() // closing the descriptor releases the flock
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+		return fmt.Errorf("lock %s: %w", ledgerFile, err)
+	}
+	led, err := loadLedgerFile(ledgerFile)
+	if err != nil {
+		return err
+	}
+	if err := add(&led); err != nil {
+		return err
+	}
 	b, err := ledger.Encode(led)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(ledgerPath(shapePath), b, 0o644)
+	return fsx.WriteFileAtomic(ledgerFile, b, 0o644)
 }
 
 // loadLedger reads the shape's ledger sidecar (absent → empty).
 func loadLedger(shapePath string) (ledger.Ledger, error) {
-	b, err := os.ReadFile(ledgerPath(shapePath))
+	return loadLedgerFile(ledgerPath(shapePath))
+}
+
+func loadLedgerFile(path string) (ledger.Ledger, error) {
+	b, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		return ledger.Ledger{}, nil
 	}
 	if err != nil {
 		return ledger.Ledger{}, err
 	}
-	return ledger.Decode(b)
+	l, err := ledger.Decode(b)
+	if err != nil {
+		return ledger.Ledger{}, fmt.Errorf("%s: %w", path, err)
+	}
+	return l, nil
+}
+
+// rowFromRecord derives one execution's ledger row from its final record (metis#73): the one
+// place a single-run row is made, shared by `metis run` and `metis ledger publish`, so a
+// re-publish derives the identical row. Pure. The point address is the row's intent identity
+// (repeats of one config share it and form a family); a failed run's row carries no metrics,
+// never invented ones.
+func rowFromRecord(rec record.RunRecord) ledger.Row {
+	r := ledger.Row{CodeFingerprint: string(rec.CodeFingerprint), PointAddr: string(rec.PointAddress), Repeat: rec.Repeat, Status: rec.Status}
+	if rec.Status != "failed" {
+		r.Metrics = namespacedMetrics(rec)
+	}
+	return r
+}
+
+// rowRunID is the run dir name a ledger row describes: a sweep or plain row's point address,
+// or a repeat's address plus its label (repeatRunID). An untracked experiment (no git, so no
+// content address) runs under a timestamped dir instead; readers treat a miss as "no record".
+func rowRunID(r ledger.Row) string {
+	if r.Repeat != "" && r.Repeat != ledger.AggregateRepeat {
+		return repeatRunID(r.PointAddr, r.Repeat)
+	}
+	return r.PointAddr
+}
+
+// readFinalRecord reads a run dir's record.json. record.json is written once, atomically,
+// after the run (metis#73), so one that parses is final; a missing or unparseable record is
+// an interrupted execution and refuses.
+func readFinalRecord(runDir string) (record.RunRecord, error) {
+	b, err := os.ReadFile(filepath.Join(runDir, "record.json"))
+	if err != nil {
+		return record.RunRecord{}, fmt.Errorf("interrupted execution: no final record in %s (%v)", runDir, err)
+	}
+	var rec record.RunRecord
+	if err := json.Unmarshal(b, &rec); err != nil || rec.RunID == "" || rec.Status == "" {
+		return record.RunRecord{}, fmt.Errorf("interrupted execution: %s/record.json is not a final record (%v)", runDir, err)
+	}
+	return rec, nil
+}
+
+// publishRunRow publishes a finished single run's row into its experiment's ledger: idempotent
+// for an exact repeat re-publish, replacing for a plain run, refusing on conflicting data.
+func publishRunRow(expPath, runDir string) error {
+	rec, err := readFinalRecord(runDir)
+	if err != nil {
+		return err
+	}
+	row := rowFromRecord(rec)
+	return publishRows(ledgerPath(expPath), func(l *ledger.Ledger) error { return l.Publish(row) })
+}
+
+// rowPublished reports whether the ledger already holds a row for this execution's key.
+func rowPublished(expPath string, row ledger.Row) (bool, error) {
+	led, err := loadLedger(expPath)
+	if err != nil {
+		return false, err
+	}
+	for _, r := range led.Rows {
+		if r.PointAddr == row.PointAddr && r.CodeFingerprint == row.CodeFingerprint && r.Repeat == row.Repeat {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // loadSweepRecords reads each point-run's record.json (per-step metrics + repo SHA).
