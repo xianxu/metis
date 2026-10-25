@@ -12,6 +12,7 @@ import signal
 import subprocess
 import sys
 import textwrap
+import threading
 import time
 from pathlib import Path
 
@@ -414,3 +415,107 @@ def test_pump_stopped_by_wake_is_not_eof(tmp_path):
     finally:
         for fd in (w, wake_r, wake_w):
             os.close(fd)
+
+
+def _fork_quiet_child(behavior: str) -> tuple[int, int]:
+    """Fork a child (stdout and stderr to /dev/null, so its pipe EOF arrives at once) that either
+    exits 3 after a moment ("exits") or ignores TERM and loops ("stubborn"). Returns (pid, r)."""
+    r, w = os.pipe()
+    pid = os.fork()
+    if pid == 0:  # never returns: no pytest code runs in the child
+        try:
+            os.setpgid(0, 0)
+            devnull = os.open(os.devnull, os.O_WRONLY)
+            os.dup2(devnull, 1)
+            os.dup2(devnull, 2)
+            os.close(r)
+            os.close(w)
+            if behavior == "exits":
+                time.sleep(0.2)
+                os._exit(3)
+            signal.signal(signal.SIGTERM, signal.SIG_IGN)
+            while True:
+                time.sleep(0.05)
+        finally:
+            os._exit(1)
+    os.close(w)
+    return pid, r
+
+
+def _run_waiter(fs, pid, r):
+    import io as _io
+
+    lock = threading.Lock()
+    out = _io.StringIO()
+    fs._children[1] = pid
+    t = threading.Thread(target=fs._wait, args=({"id": 1, "grace": 0.2, "join_bound": 0.2}, pid, r,
+                                                fs._Log(None, None, None), lock, out), daemon=True)
+    t.start()
+    return t, lock, out
+
+
+def _check_answered_and_reaped(fs, t, lock, out, pid):
+    time.sleep(0.1)
+    assert lock.acquire(timeout=0.5), "the waiter must never block while holding the lock"
+    lock.release()
+    t.join(timeout=5)
+    assert not t.is_alive(), "the waiter must finish within its bounds"
+    resp = json.loads(out.getvalue())
+    with pytest.raises(ChildProcessError):
+        os.waitpid(pid, os.WNOHANG)  # already reaped by the waiter
+    assert 1 not in fs._children
+    return resp
+
+
+def _cleanup(fs, pid):
+    try:
+        os.kill(pid, signal.SIGKILL)
+        os.waitpid(pid, 0)
+    except (ProcessLookupError, ChildProcessError):
+        pass
+    fs._children.pop(1, None)
+
+
+def _boom(*_a, **_k):
+    raise RuntimeError("injected waiter failure")
+
+
+# The child of these in-process forks makes only raw os calls and exits; it takes no Python lock,
+# so forking from pytest's multi-threaded process is safe here.
+@pytest.mark.filterwarnings("ignore:This process .* is multi-threaded:DeprecationWarning")
+def test_waiter_failure_after_exit_answers_unjoined_and_reaps(monkeypatch):
+    """BR-10: a waiter failure after the child's exit still reaps it and answers, unjoined, with
+    the real exit code (not an invented one)."""
+    from metis import forkserver as fs
+
+    monkeypatch.setattr(fs, "_drain_join", _boom)  # before the fork: a failed patch leaks nothing
+    pid, r = _fork_quiet_child("exits")
+    try:
+        t, lock, out = _run_waiter(fs, pid, r)
+        resp = _check_answered_and_reaped(fs, t, lock, out, pid)
+        assert resp["joined"] is False and "injected waiter failure" in resp["error"], resp
+        assert resp["exit_known"] is True and resp["exit"] == 3, resp
+    finally:
+        _cleanup(fs, pid)
+
+
+# The child of these in-process forks makes only raw os calls and exits; it takes no Python lock,
+# so forking from pytest's multi-threaded process is safe here.
+@pytest.mark.filterwarnings("ignore:This process .* is multi-threaded:DeprecationWarning")
+def test_exit_watcher_failure_falls_back_and_still_reaps(monkeypatch):
+    """BR-10: when exit observation itself fails, a non-blocking reap under the lock takes over:
+    a cancel still ends the child, which is reaped and answered (unjoined, error reported)."""
+    from metis import forkserver as fs
+
+    monkeypatch.setattr(fs, "_wait_exit_noreap", _boom)
+    pid, r = _fork_quiet_child("stubborn")
+    try:
+        t, lock, out = _run_waiter(fs, pid, r)
+        time.sleep(0.2)
+        with lock:
+            fs._signal_group(1, signal.SIGKILL)  # what a cancel request does
+        resp = _check_answered_and_reaped(fs, t, lock, out, pid)
+        assert resp["exit_known"] is True and resp["exit"] == -signal.SIGKILL, resp
+        assert resp["joined"] is False and "injected waiter failure" in resp["error"], resp
+    finally:
+        _cleanup(fs, pid)

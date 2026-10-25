@@ -205,67 +205,118 @@ def _respond(lock: threading.Lock, out, resp: dict) -> None:
         out.flush()
 
 
+def _escalate(req_id, lock: threading.Lock, until: threading.Event, grace: float, bound: float) -> bool:
+    """TERM the child's group, then KILL it after grace, until `until` is set; returns whether it
+    was. The one escalation both waiter paths use. The lock is taken only to signal, never to
+    wait (a cancel or another waiter must not be blocked behind a dying child)."""
+    for sig, wait in ((signal.SIGTERM, grace), (signal.SIGKILL, bound)):
+        if until.is_set():
+            return True
+        with lock:
+            _signal_group(req_id, sig)
+        if until.wait(wait):
+            return True
+    return until.is_set()
+
+
+def _drain_join(req_id, lock: threading.Lock, drained: threading.Event, grace: float, join: float) -> None:
+    """After the child's exit: give its pipe join_bound to drain, else stop what is left of its
+    group (an in-group holder) and give it the bound again. A holder outside the group outlives
+    this, and the caller then answers joined=false."""
+    if not drained.wait(join):
+        _escalate(req_id, lock, drained, grace, join)
+
+
 def _wait(req: dict, pid: int, rfd: int, log: _Log, lock: threading.Lock, out) -> None:
-    """Waiter thread: stream the child's output into its log, observe its exit without reaping,
-    confirm or give up the join within bounds, then reap under the lock and respond. Every exit
-    path, an unexpected error included, stops the child's group if its exit was not observed,
-    reaps it and answers; an error is reported with joined=false, never as a clean ending. IO
-    only: never forks, never touches os.environ."""
+    """Waiter thread: stream the child's output into its log, observe its exit (unreaped) on a
+    watcher thread, confirm or give up the join within bounds, then reap and respond. Every exit
+    path, an unexpected error included, escalates on the OBSERVED EXIT (never on the drain: a
+    child may close its stdout and live on), reaps only an exited child, never waits under the
+    lock, and always answers; an error answers joined=false. IO only: never forks, never touches
+    os.environ."""
     req_id = req["id"]
-    started = time.monotonic()  # the waiter starts right after the fork
     grace = float(req.get("grace", 10.0))
     join = float(req.get("join_bound", 5.0))
+    started = time.monotonic()  # the waiter starts right after the fork
     wake_r, wake_w = os.pipe()
-    result = {"eof": False}
-    done = threading.Event()
+    drained, exited = threading.Event(), threading.Event()
+    box = {"eof": False, "runtime": None, "status": None, "watch_error": ""}
 
     def read() -> None:
         try:
-            result["eof"] = _pump(rfd, log, wake_r)
+            box["eof"] = _pump(rfd, log, wake_r)
         finally:
-            done.set()
+            drained.set()
 
-    def stop_group(sig) -> None:
-        with lock:
-            _signal_group(req_id, sig)
+    def watch() -> None:
+        try:
+            _wait_exit_noreap(pid)
+        except BaseException:
+            # Exit observation without reaping failed: fall back to polling a non-blocking reap,
+            # atomic with the table removal under the lock (still never waiting under it).
+            box["watch_error"] = traceback.format_exc()
+            while True:
+                with lock:
+                    got, status = os.waitpid(pid, os.WNOHANG)
+                    if got:
+                        _children.pop(req_id, None)
+                        box["status"] = status
+                        break
+                time.sleep(0.05)
+        box["runtime"] = time.monotonic() - started  # launch to exit: the join is not compute
+        exited.set()
 
     reader = threading.Thread(target=read, daemon=True)
+    watcher = threading.Thread(target=watch, daemon=True)
     reader.start()
-    runtime = None
+    watcher.start()
     error = ""
     try:
-        _wait_exit_noreap(pid)
-        runtime = time.monotonic() - started  # launch to exit: the join wait is not compute
-        if not done.wait(join):
-            stop_group(signal.SIGTERM)
-            if not done.wait(grace):
-                stop_group(signal.SIGKILL)
-                done.wait(join)
+        exited.wait()
+        _drain_join(req_id, lock, drained, grace, join)
     except BaseException:
         error = traceback.format_exc()
-        if runtime is None:  # the exit was never observed: end the group before reaping
-            stop_group(signal.SIGTERM)
-            if not done.wait(grace):
-                stop_group(signal.SIGKILL)
-    finally:
-        if not done.is_set():
+    resp = {"id": req_id, "launched": True, "exit_known": False, "joined": False,
+            "log_truncated": False, "log_error": "", "output": ""}
+    try:
+        if not exited.is_set():  # the exit was never observed: end the group, on the exit
+            _escalate(req_id, lock, exited, grace, join)
+        if not drained.is_set():
             os.write(wake_w, b"x")  # a holder outside the group keeps the pipe: stop reading
         reader.join()
         for fd in (rfd, wake_r, wake_w):
             os.close(fd)
         log.close()
-        with lock:
-            _children.pop(req_id, None)
-            _, status = os.waitpid(pid, 0)
-    resp = {"id": req_id, "launched": True, "exit_known": True,
-            "exit": os.waitstatus_to_exitcode(status), "output": log.tail.decode("utf-8", "replace"),
-            "joined": result["eof"] and not error, "log_truncated": log.truncated,
-            "log_error": log.error}
-    if runtime is not None:
-        resp["runtime"] = runtime
+        if exited.is_set():  # reaping an exited child returns at once: safe under the lock
+            status = box["status"]
+            if status is None:
+                with lock:
+                    _children.pop(req_id, None)
+                    _, status = os.waitpid(pid, 0)
+            resp["exit_known"], resp["exit"] = True, os.waitstatus_to_exitcode(status)
+            if box["runtime"] is not None:
+                resp["runtime"] = box["runtime"]
+        else:  # it survived KILL: reap it whenever it dies, off the lock; report it unobserved
+            threading.Thread(target=_late_reap, args=(req_id, pid, lock), daemon=True).start()
+        resp["joined"] = box["eof"] and not error
+        resp["output"] = log.tail.decode("utf-8", "replace")
+        resp["log_truncated"], resp["log_error"] = log.truncated, log.error
+    except BaseException:
+        error += traceback.format_exc()
+        resp["joined"] = False
+    error += box["watch_error"]
     if error:
         resp["error"] = error
+        resp["joined"] = False
     _respond(lock, out, resp)
+
+
+def _late_reap(req_id, pid: int, lock: threading.Lock) -> None:
+    """Reap a child that outlived its waiter's bounds, without holding the lock while it lives."""
+    _wait_exit_noreap(pid)
+    with lock:
+        _children.pop(req_id, None)
+        os.waitpid(pid, 0)
 
 
 def serve() -> None:

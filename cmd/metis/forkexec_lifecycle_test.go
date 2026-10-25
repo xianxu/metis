@@ -294,3 +294,37 @@ func TestCheckForkProtocol(t *testing.T) {
 		}
 	}
 }
+
+type failingWriteCloser struct{}
+
+func (failingWriteCloser) Write([]byte) (int, error) { return 0, errors.New("broken pipe") }
+func (failingWriteCloser) Close() error              { return nil }
+
+// BR-12: a request write that fails after the server was ready is a dispatched-and-lost step.
+// Its times come only from what was observed: the dispatch attempt, no exit.
+func TestForkedStep_RequestWriteFailureRecordsOnlyObservedTimes(t *testing.T) {
+	f := newForkFixture(t, map[string]string{"toy_gated": toyGated})
+	srv, err := startForkServer(f.root, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-srv.ready
+	realStdin := srv.stdin
+	t.Cleanup(func() { srv.stdin = realStdin; srv.shutdown() })
+	srv.stdin = failingWriteCloser{} // the reader stays alive; only the write fails
+	f.e.pool.mu.Lock()
+	f.e.pool.servers[f.root] = srv
+	f.e.pool.mu.Unlock()
+	before := time.Now()
+	err = f.run(t, context.Background(), experiment.Step{ID: "s", Uses: "t/x"}, "toy_gated")
+	if err == nil || !errors.Is(err, errDispatchedLost) {
+		t.Fatalf("err = %v, want errDispatchedLost", err)
+	}
+	o := readOutcome(t, filepath.Join(f.runDir, "s"))
+	if o.Outcome != outcomeCleanupUnconfirmed || o.Started == nil || o.Started.Before(before.Add(-time.Second)) {
+		t.Errorf("outcome = %+v, want cleanup-unconfirmed with a recent start", o)
+	}
+	if o.Ended != nil || o.RuntimeSeconds != nil || o.ExitCode != nil {
+		t.Errorf("no exit was observed, so no end, runtime or exit code: %+v", o)
+	}
+}
