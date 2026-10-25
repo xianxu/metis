@@ -16,7 +16,7 @@ claimant:
     workspace: metis:1
     worktree: /Users/xianxu/workspace/worktree/metis-slot1/metis
     repository: github.com/xianxu/metis
-flow: {kind: quick, provenance: inferred, spec: "8893ff21", done: "37783db0"}
+flow: {kind: full, provenance: inferred}
 ---
 
 # Step-level never-cache policy with safe downstream invalidation
@@ -67,6 +67,10 @@ Add a step-level never-cache policy at the existing StepExecutor/cache boundary.
 
 ## Log
 
+
+
+- 2026-10-25: closed — with.cache.policy: never parsed and validated (TestParseCachePolicy, TestValidate_RefusesMalformedCachePolicy, CUE drift guard TestCachePolicyConformsToCUE); UncachedSteps propagates to descendants fail-closed (TestUncachedSteps); cachingExecutor runs a never step and its descendants every repeat while the root still hits (TestCachingExecutor_NeverCacheRunsEveryRepeatWithDescendants; mutation without the guard fails). Recorded suite passed on 83edcb9f490a3af0cce3078f6c2fe284a267a497 (go ./... ok, pytest 140 passed).; review verdict: SHIP
+- 2026-10-25: flow upgraded quick → full — 120 added lines in code files (limit 100)
 2026-10-23: Filed unclaimed for the operator-approved ariadne#577 re-plan. Seams: cmd/metis/caching.go cachingExecutor.Execute/kpre; pkg/experiment.Step and construct/vocabulary/experiment.cue. No implementation or production experiment changed.
 2026-10-23 (metis:1): The slot carried uncommitted local-gates leftovers from slot setup that blocked the fast-forward to main 0350013: merge-check.yml and .gitignore modified (an older seed), .gitattributes and local-gates-guard.yml untracked (identical to main). The hub (ops:0) approved discarding them. By the time I ran the backup, the tree was already clean at origin/main 0350013, so I discarded nothing. The scratchpad backup holds only main's two untracked files; the older modified seed was never captured, and main's versions replace it.
 2026-10-23 (metis:1): The hub approved the plan; implemented it on the quick flow. `pkg/experiment/cachepolicy.go`: ParseCachePolicy and UncachedSteps. UncachedSteps is a memoized DFS. It fails closed on a malformed policy (Validate refuses that first anyway) and terminates on cycles. The executor checks first for uncached steps, and `isImmutableLeaf` now goes through the same parser (ARCH-DRY). The CUE `#CachePolicy` gets a drift guard (`TestCachePolicyConformsToCUE`) that runs the Go table's cases through `cue vet`; the leaf + never contradiction is Go-only. Mutation check: with the executor branch disabled, the new sequence test fails with "score-0" served for a changed candidate. Environment note: `TestCache_ToyPipelineHitsOnRerun` builds a uv venv and needs pypi network access, so it fails under the default sandbox.
