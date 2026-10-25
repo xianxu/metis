@@ -206,10 +206,40 @@ func TestExecStep_EscapedGrandchildIsCleanupUnconfirmed(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), "cleanup unconfirmed") {
 				t.Fatalf("err = %v, want cleanup unconfirmed (a descendant still holds the log pipe)", err)
 			}
-			if o := readOutcome(t, filepath.Join(runDir, "s")); o.Outcome != outcomeCleanupUnconfirmed {
+			o := readOutcome(t, filepath.Join(runDir, "s"))
+			if o.Outcome != outcomeCleanupUnconfirmed {
 				t.Errorf("outcome = %+v, want cleanup-unconfirmed", o)
 			}
+			// runtime stops at the exit, not after the join wait (which here runs to its bound)
+			if c.name == "exit 0" && (o.RuntimeSeconds == nil || *o.RuntimeSeconds >= e.joinBound.Seconds()) {
+				t.Errorf("runtime = %v, want < joinBound %v: the drain wait is not compute", o.RuntimeSeconds, e.joinBound)
+			}
 		})
+	}
+}
+
+// After a normal exit, a descendant still in the step's own process group that holds the pipe
+// is stopped (TERM, then KILL), not left running: metis created that group.
+func TestExecStep_InGroupLingererIsStopped(t *testing.T) {
+	e, runDir := lifecycleExec(t), t.TempDir()
+	if _, err := e.Execute(context.Background(), experiment.Step{ID: "s", Uses: "test/lingerer"}, runDir); err != nil {
+		t.Fatalf("err = %v; an in-group lingerer is metis's to stop, and once stopped the join is confirmed", err)
+	}
+	b, err := os.ReadFile(filepath.Join(runDir, "lingerer.pid"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid, _ := strconv.Atoi(strings.TrimSpace(string(b)))
+	deadline := time.Now().Add(5 * time.Second)
+	for syscall.Kill(pid, 0) == nil {
+		if time.Now().After(deadline) {
+			_ = syscall.Kill(pid, syscall.SIGKILL)
+			t.Fatalf("lingerer %d still running after the step returned", pid)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if o := readOutcome(t, filepath.Join(runDir, "s")); o.Outcome != outcomeOK {
+		t.Errorf("outcome = %+v, want ok", o)
 	}
 }
 

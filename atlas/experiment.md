@@ -105,6 +105,10 @@ broken-graph surfaces layergraph's actionable error rather than degrading silent
   `METIS_PENDING_RESOURCES` (metis#72) names `<stepDir>/pending-resources.json`: a step that
   starts independently managed resources (Couch actors) lists them there and removes the file
   once they are retired. metis never kills them; it only refuses to call the step a success.
+  Precondition: such a resource must leave the step's process group *and* detach from its stdio
+  (e.g. `setsid` with stdin from `/dev/null` and output to its own file). One that keeps the step's
+  stdout or stderr open makes the join unconfirmable (`cleanup-unconfirmed` on every run), and once
+  metis stops reading that pipe its next write gets EPIPE/SIGPIPE.
 - **Execution policy (metis#72):** `with: {exec: {timeout: "90m"}}`, a closed sub-map beside
   `with.cache`, parsed by `experiment.ParseExecPolicy` and refused by `Validate` before any step
   runs. The timeout bounds the child's runtime from launch (a leaf-budget wait is not counted);
@@ -123,9 +127,11 @@ broken-graph surfaces layergraph's actionable error rather than degrading silent
   failed > ok). Only `ok` is success; nothing else is retried or published. The first terminal
   event wins: an exit landing during termination never overrides a timeout or a cancel. The join
   is evidence: metis owns the output pipe, so it is confirmed only when the process exited and
-  the pipe drained within the bound; a descendant that left the group and still holds it means
-  `cleanup-unconfirmed`, whatever else happened. `runtime_seconds` is launch to exit, so the
-  termination wait is not compute. Residue: `step.log` adds at most 64 MiB per executed step, and
+  the pipe drained within the bound. After a normal exit, a descendant still in the step's own
+  process group that holds the pipe is stopped (TERM, grace, KILL) and the join then confirmed; a
+  descendant that left the group and still holds it means `cleanup-unconfirmed`, whatever else
+  happened (legacy path; the forkserver path gets the same rules in M2). `runtime_seconds` is
+  launch to exit, so the termination wait is not compute. Residue: `step.log` adds at most 64 MiB per executed step, and
   it, `outcome.json` and `pending-resources.json` go with their run dir; nothing removes run dirs
   automatically, so disk use per run is bounded by steps × the cap and cleared by removing runs.
 - **In:** `with.json` — the step's `with` config, written into the step dir by the runner.

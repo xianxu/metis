@@ -139,11 +139,7 @@ func (e execStep) runLegacy(ctx context.Context, step experiment.Step, exe, step
 	if procDone {
 		end.ended = x.at // runtime is launch to exit; termination is not compute
 		end.exitCode = cmd.ProcessState.ExitCode()
-		select {
-		case <-drained:
-			end.joined = true
-		case <-time.After(e.joinBoundOr()):
-		}
+		end.joined = e.awaitDrain(cmd.Process.Pid, drained, &end.signal)
 	}
 	pr.Close() // stop the copier if a holder remains; the log is read only after it stops
 	<-drained
@@ -157,6 +153,34 @@ func (e execStep) runLegacy(ctx context.Context, step experiment.Step, exe, step
 		cerr = errors.Join(cerr, ctx.Err())
 	}
 	return cerr
+}
+
+// awaitDrain confirms the join after the process exited: the pipe drains within joinBound, or
+// metis stops what is left of the process group it created (TERM, grace, KILL) and waits the
+// bound again. A holder that left the group (setsid) survives this, and the join stays
+// unconfirmed. sig records any signal sent here.
+func (e execStep) awaitDrain(pid int, drained <-chan struct{}, sig *string) bool {
+	wait := func(d time.Duration) bool {
+		select {
+		case <-drained:
+			return true
+		case <-time.After(d):
+			return false
+		}
+	}
+	if wait(e.joinBoundOr()) {
+		return true
+	}
+	if syscall.Kill(-pid, syscall.SIGTERM) == nil {
+		*sig = "TERM"
+		if wait(e.graceOr()) {
+			return true
+		}
+		if syscall.Kill(-pid, syscall.SIGKILL) == nil {
+			*sig = "KILL"
+		}
+	}
+	return wait(e.joinBoundOr())
 }
 
 // childExit is the Wait result and when it returned (the exit time runtime is measured to).
