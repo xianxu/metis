@@ -198,3 +198,166 @@ func TestSameRow_RoundTripStable(t *testing.T) {
 		t.Fatalf("rows = %d", len(d.Rows))
 	}
 }
+
+func repRow(fp, addr, label, status string, m map[string]float64) Row {
+	return Row{CodeFingerprint: fp, PointAddr: addr, Repeat: label, Status: status, Metrics: m}
+}
+
+func familyOf(t *testing.T, v Ledger, fp, addr string) Row {
+	t.Helper()
+	for _, r := range v.Rows {
+		if r.Repeat == AggregateRepeat && r.CodeFingerprint == fp && r.PointAddr == addr {
+			return r
+		}
+	}
+	t.Fatalf("no repeat family for %s/%s in %+v", fp, addr, v.Rows)
+	return Row{}
+}
+
+// Identical-config repeats reduce to one family row: every metric gets mean, se and n; a
+// metric one repeat lacks has a smaller n (never filled); a failed repeat counts in total
+// and failed but adds no values.
+func TestAggregateView_RepeatFamily(t *testing.T) {
+	var l Ledger
+	for _, r := range []Row{
+		repRow("fp1", "a", "1", "ok", map[string]float64{"train.s": 1, "train.t": 10}),
+		repRow("fp1", "a", "2", "ok", map[string]float64{"train.s": 3}),
+		repRow("fp1", "a", "3", "failed", map[string]float64{"train.s": 100}),
+	} {
+		if err := l.Append(r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	v := AggregateView(l, "train.s")
+	if len(v.Rows) != 1 {
+		t.Fatalf("want one family row, got %+v", v.Rows)
+	}
+	f := familyOf(t, v, "fp1", "a")
+	want := map[string]float64{
+		"train.s": 2, "train.s.se": 1, "train.s.n": 2,
+		"train.t": 10, "train.t.se": 0, "train.t.n": 1,
+		RepeatsTotal: 3, RepeatsFailed: 1,
+	}
+	for k, w := range want {
+		if got, ok := f.Metrics[k]; !ok || math.Abs(got-w) > 1e-12 {
+			t.Errorf("%s = %v (present %v), want %v", k, got, ok, w)
+		}
+	}
+	if len(f.Metrics) != len(want) {
+		t.Errorf("unexpected metrics: %v", f.Metrics)
+	}
+	if f.Status != "ok" || f.Fold != nil {
+		t.Errorf("family status %q fold %v; want ok, no fold", f.Status, f.Fold)
+	}
+}
+
+func TestAggregateView_AllFailedFamilyFailed(t *testing.T) {
+	var l Ledger
+	l.Append(repRow("fp1", "a", "1", "failed", nil), repRow("fp1", "a", "2", "failed", nil))
+	f := familyOf(t, AggregateView(l, "train.s"), "fp1", "a")
+	if f.Status != "failed" || f.Metrics[RepeatsTotal] != 2 || f.Metrics[RepeatsFailed] != 2 {
+		t.Fatalf("family = %+v", f)
+	}
+	if _, ok := f.Metrics["train.s"]; ok {
+		t.Fatal("no value may be invented for an all-failed family")
+	}
+}
+
+// A code change between repeats gives two families; a plain row of the same point is a
+// replay, not a sample, so it passes through beside the family and is not counted.
+func TestAggregateView_FingerprintsSplitAndPlainRowPassesThrough(t *testing.T) {
+	var l Ledger
+	l.Append(
+		Row{CodeFingerprint: "fp1", PointAddr: "a", Status: "ok", Metrics: map[string]float64{"train.s": 9}},
+		repRow("fp1", "a", "1", "ok", map[string]float64{"train.s": 1}),
+		repRow("fp2", "a", "2", "ok", map[string]float64{"train.s": 3}),
+	)
+	v := AggregateView(l, "train.s")
+	if len(v.Rows) != 3 {
+		t.Fatalf("want plain + 2 families, got %+v", v.Rows)
+	}
+	if f := familyOf(t, v, "fp1", "a"); f.Metrics[RepeatsTotal] != 1 || f.Metrics["train.s"] != 1 {
+		t.Errorf("fp1 family = %v", f.Metrics)
+	}
+	if f := familyOf(t, v, "fp2", "a"); f.Metrics[RepeatsTotal] != 1 || f.Metrics["train.s"] != 3 {
+		t.Errorf("fp2 family = %v", f.Metrics)
+	}
+	if v.Rows[0].Repeat != "" || v.Rows[0].Metrics["train.s"] != 9 {
+		t.Errorf("plain row changed: %+v", v.Rows[0])
+	}
+	// The view is idempotent: aggregating it again changes nothing.
+	b1, _ := Encode(v)
+	b2, _ := Encode(AggregateView(v, "train.s"))
+	if !bytes.Equal(b1, b2) {
+		t.Fatalf("not idempotent:\n%s\n%s", b1, b2)
+	}
+}
+
+// Property: for random repeat families, each metric's n equals the number of ok members
+// that reported it, and its mean is the mean of exactly those values.
+func TestAggregateView_RepeatNCountsReportersOnly(t *testing.T) {
+	rng := rand.New(rand.NewSource(7))
+	for trial := 0; trial < 200; trial++ {
+		var l Ledger
+		vals := map[string][]float64{}
+		total, failed := 1+rng.Intn(6), 0
+		for i := 0; i < total; i++ {
+			m := map[string]float64{}
+			st := "ok"
+			if rng.Intn(4) == 0 {
+				st = "failed"
+				failed++
+			}
+			for _, name := range []string{"train.a", "train.b"} {
+				if rng.Intn(3) > 0 {
+					m[name] = float64(rng.Intn(100))
+					if st == "ok" {
+						vals[name] = append(vals[name], m[name])
+					}
+				}
+			}
+			l.Append(repRow("fp", "a", fmt.Sprintf("r%d", i), st, m))
+		}
+		f := familyOf(t, AggregateView(l, "train.a"), "fp", "a")
+		for _, name := range []string{"train.a", "train.b"} {
+			n, has := f.Metrics[name+".n"]
+			if len(vals[name]) == 0 {
+				if has {
+					t.Fatalf("trial %d: %s reported by no ok member but has n=%v", trial, name, n)
+				}
+				continue
+			}
+			mean, _ := meanSE(vals[name])
+			if int(n) != len(vals[name]) || math.Abs(f.Metrics[name]-mean) > 1e-9 {
+				t.Fatalf("trial %d: %s n=%v mean=%v; want %d, %v", trial, name, n, f.Metrics[name], len(vals[name]), mean)
+			}
+		}
+		if int(f.Metrics[RepeatsTotal]) != total || int(f.Metrics[RepeatsFailed]) != failed {
+			t.Fatalf("trial %d: counts %v", trial, f.Metrics)
+		}
+	}
+}
+
+// Fold groups keep their pre-metis#73 reduction: adding repeat rows to a fold ledger leaves
+// the fold aggregate rows byte-identical (objective-only se, any failure fails the group).
+func TestAggregateView_FoldGroupsUnchangedByRepeats(t *testing.T) {
+	var folds Ledger
+	folds.Append(
+		foldRow("fp", "f0", map[string]any{"m": "rf"}, 0, 0.5, "ok"),
+		foldRow("fp", "f1", map[string]any{"m": "rf"}, 1, 0.7, "ok"),
+		foldRow("fp", "g0", map[string]any{"m": "lr"}, 0, 0.4, "failed"),
+	)
+	before, _ := Encode(AggregateView(folds, "train.fold_score"))
+	mixed := Ledger{Rows: append([]Row(nil), folds.Rows...)}
+	mixed.Append(repRow("fp", "r", "1", "ok", map[string]float64{"train.fold_score": 0.9}))
+	var foldOnly Ledger
+	for _, r := range AggregateView(mixed, "train.fold_score").Rows {
+		if r.Repeat == "" {
+			foldOnly.Append(r)
+		}
+	}
+	after, _ := Encode(foldOnly)
+	if !bytes.Equal(before, after) {
+		t.Fatalf("fold aggregates changed:\n%s\n---\n%s", before, after)
+	}
+}

@@ -376,6 +376,12 @@ const (
 	nSuffix  = ".n"
 )
 
+// A repeat family row's member counts (metis#73): all repeats, and the failed ones.
+const (
+	RepeatsTotal  = "repeats.total"
+	RepeatsFailed = "repeats.failed"
+)
+
 // AggregateView reduces the RAW per-fold rows into one per-config row — grouping by
 // (free-params, code-fingerprint) over the fold coordinate. metis#18: the ledger stores the raw
 // fold rows (so metis#19's select re-reduces for free), and this is the read-time reduction
@@ -386,18 +392,46 @@ const (
 // selection input. A group with ANY failed fold is marked failed. Rows with no fold
 // coordinate (Fold==nil — a v1 whole-CV row or an already-aggregated row) pass through
 // unchanged, so the view is idempotent. Grouping + ordering are deterministic (first-seen).
+//
+// metis#73: repeat rows (no fold, a repeat label) form a second grouping, one family per
+// (code-fingerprint, point-address): the same config, seed and code. The family row carries
+// Repeat=AggregateRepeat and, for EVERY metric, the mean, `.se` and `.n` (how many repeats
+// reported it), plus RepeatsTotal and RepeatsFailed. A failed repeat counts but contributes no
+// values, a missing value shrinks only that metric's n (nothing is filled in), and the family
+// is ok when any member is. A repeat is a sample, never a fold: no CV reduction applies.
 func AggregateView(l Ledger, metric string) Ledger {
 	type agg struct {
 		row      Row
 		byMetric map[string][]float64 // every metric key → its fold values
 		failed   bool
+		repeat   bool // a repeat family (metis#73)
+		total    int  // repeat members
+		nFailed  int  // failed repeat members
 	}
 	var order []string
 	groups := map[string]*agg{}
 	var out Ledger
 	for _, r := range l.Rows {
+		if r.Fold == nil && r.Repeat != "" && r.Repeat != AggregateRepeat {
+			key := "repeat|" + r.CodeFingerprint + "|" + r.PointAddr
+			g := groups[key]
+			if g == nil {
+				g = &agg{row: Row{FreeParams: r.FreeParams, CodeFingerprint: r.CodeFingerprint, PointAddr: r.PointAddr, Repeat: AggregateRepeat}, byMetric: map[string][]float64{}, repeat: true}
+				groups[key] = g
+				order = append(order, key)
+			}
+			g.total++
+			if r.Status == "failed" {
+				g.nFailed++
+				continue // counted, but a failed sample contributes no values
+			}
+			for name, v := range r.Metrics {
+				g.byMetric[name] = append(g.byMetric[name], v)
+			}
+			continue
+		}
 		if r.Fold == nil {
-			out.Append(r) // pass a pre-aggregated / v1 row through untouched
+			out.Append(r) // pass a pre-aggregated / v1 / plain row through untouched
 			continue
 		}
 		fpb, _ := json.Marshal(r.FreeParams)  // Go sorts map keys → canonical group key
@@ -427,6 +461,21 @@ func AggregateView(l Ledger, metric string) Ledger {
 	for _, key := range order {
 		g := groups[key]
 		row := g.row
+		if g.repeat {
+			row.Status = "ok"
+			if g.nFailed == g.total {
+				row.Status = "failed"
+			}
+			row.Metrics = map[string]float64{RepeatsTotal: float64(g.total), RepeatsFailed: float64(g.nFailed)}
+			for name, vals := range g.byMetric {
+				mean, se := meanSE(vals)
+				row.Metrics[name] = mean
+				row.Metrics[name+seSuffix] = se
+				row.Metrics[name+nSuffix] = float64(len(vals))
+			}
+			out.Append(row)
+			continue
+		}
 		if g.failed {
 			row.Status = "failed"
 		}
