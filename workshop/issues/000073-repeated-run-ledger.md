@@ -1,13 +1,13 @@
 ---
 id: 000073
-status: working
+status: codecomplete
 deps: [metis#71]
 github_issue:
 created: 2026-10-23
-updated: 2026-10-23
+updated: 2026-10-25
 estimate_hours: 1.74
 collaboration-mode: collaboration
-card_mirror: 'e7fc7b9217ba51c21e80dcbc073ebc4f1c7023e4' # card fields mirrored from issue-cards; edit via sdlc
+card_mirror: '1672a0037e8e247af60945572722e7078cd049e7' # card fields mirrored from issue-cards; edit via sdlc
 started: 2026-10-23T19:48:43-07:00
 claimant:
     operator: Xian Xu
@@ -17,6 +17,7 @@ claimant:
     worktree: /Users/xianxu/workspace/worktree/metis-slot1/metis
     repository: github.com/xianxu/metis
 flow: {kind: full, provenance: operator}
+actual_hours: 0.66
 ---
 
 # Repeat-shaped run records and ledger rows without CV folds
