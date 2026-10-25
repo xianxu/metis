@@ -66,6 +66,15 @@ Add a step-level never-cache policy at the existing StepExecutor/cache boundary.
 
 **Size:** about 60 added code lines; quick flow, no Mx.
 
+## Revisions
+
+- 2026-10-25 (close review advisories) — delivered differently from the Plan:
+  the drift guard is `TestCachePolicyConformsToCUE` in
+  `pkg/experiment/cachepolicy_test.go`, which runs the shared Go case table
+  through `cue vet` against `#Step`, instead of extending the hand restatement in
+  `conformance_test.go`; and `newCachingExecutor` takes the `Experiment` (seed
+  and never-cache set derived inside) rather than steps plus a seed.
+
 ## Log
 
 

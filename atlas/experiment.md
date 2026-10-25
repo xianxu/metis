@@ -31,7 +31,9 @@ reconstruction, training, and experiment tracking under one entrypoint.
 its steps in dependency order as **subprocesses** (files + subprocess, never FFI), and records
 a Run. `--cache` (default on) enables the metis#2 validating-trace cache (see `atlas/index.md`
 `pkg/cache`); a step with `with: {cache: {policy: never}}` and its descendants always run
-(metis#71). Split across a pure core and a thin IO layer:
+(metis#71). `with.cache` is now a closed vocabulary (`leaf: immutable`, `policy: never`):
+`Validate` refuses any other key or value, where it used to pass silently, so a consumer
+experiment carrying another `with.cache` entry now fails to load. Split across a pure core and a thin IO layer:
 
 - **Pure core — `pkg/experiment/`** (no IO; unit-tested directly):
   - `Experiment` / `Step` / `Run` — Go structs mirroring the CUE `#Experiment`/`#Step`/`#Run`
