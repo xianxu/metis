@@ -101,3 +101,118 @@ findings:
 ```
 
 <!-- sdlc-review-usage [{"version":1,"intent":{"disposable_root":true,"id":"5a3d17d4-13a5-44c0-bee1-9d56eb3359e0","repository":"github.com/xianxu/metis","issue_id":"000076","recipe":"milestone-review","round":1,"attempt":1,"agent":"claude","root":"/Volumes/TestScratch/review-checkouts/e614388b52144281","reviewed_head":"22ecea94cb4d54586e2653b0f8b7863d800ca2ac","slot":"metis:1","requested_at":"2026-10-25T15:18:16.784037Z"},"phase":"finished","pid":51812,"started_at":"2026-10-25T15:18:16.947059Z","finished_at":"2026-10-25T15:22:14.086611Z","session_id":"d29e7622-e8c3-4be8-ad65-a7a9bd4516e5","outcome":"returned"}] -->
+
+---
+
+## Re-review — 2026-10-25T08:40:45-07:00 (SHIP)
+
+| field | value |
+|-------|-------|
+| issue | 76 — Canonicalize METIS_*_DIR step paths (EvalSymlinks) |
+| repo | metis |
+| issue file | workshop/issues/000076-canonicalize-metis-dir-step-paths-evalsymlinks.md |
+| boundary | whole-issue close |
+| milestone | — |
+| window | 27995863bb76020f322317132dc2c1df7783e24b..d357a3e0fcae7b3173c5f28a7f136a7696ac6528 |
+| command | sdlc close --issue 76 |
+| reviewer | claude (anthropic; author anthropic) |
+| isolation | checkout |
+| timestamp | 2026-10-25T08:40:45-07:00 |
+| verdict | SHIP |
+
+## Review
+
+Reviewing the diff; now checking trace.py's use of METIS_RUN_DIR for path-form mismatches, then running the tests.
+
+Now running the Go tests, then reverting the fix to confirm the new tests fail without it.
+
+Now the revert check: make `stepEnv` pass paths through unchanged (temporarily) and confirm the tests go red.
+
+All three new tests pass at head; with the fix disabled, the two `execStep` tests fail (as expected, the run-level test stays green because run.go resolves on its own). Now the full suites.
+
+Checking one remaining edge: whether an absolute dataset ref under a symlink could now be refused against the now-physical read root.
+
+```verdict
+verdict: SHIP
+confidence: high
+```
+
+All three prior findings are fixed at the right level. Instead of patching each caller, `execStep.stepEnv` (`cmd/metis/exec.go:54-73`) now resolves symlinks in all four path vars (`METIS_STEP_DIR`, `METIS_RUN_DIR`, `METIS_EXP_DIR`, `METIS_READ_ROOT`) through the new `physicalPath` helper. `stepEnv` is the only place that builds a child's `METIS_*` env (I grepped the Go and Python code to confirm), and both executors use it: the legacy subprocess and the fork-server request. So run, blend and the sealed sweep all hand physical paths to children without each one doing its own conversion.
+
+I checked the fix by breaking it. I changed `stepEnv` to pass paths through unresolved, and both new `execStep` tests failed: four "missing physical path" asserts, and the real `metis/cv-split` read was refused by confinement. Restoring the fix turned them green. `TestRun_StepEnvPathsArePhysical` stays green under that change, which is expected because run.go resolves the dir on its own.
+
+The rest of the suites:
+- **Python:** 140 tests pass.
+- **Go `pkg/...` and `internal/...`:** pass.
+- **`cmd/metis`:** 15 failures at head, none caused by this diff:
+  - 14 are `git init refused … outside the reviewer's directories`, a limit of the review sandbox. Base shows the same 14.
+  - The 15th is the timing test `TestForkServerPerf_LooseBound`, which passed when I re-ran it alone, so it is flaky under load.
+
+Nothing blocks SHIP. Only Minor notes remain.
+
+1. **Strengths**
+   - The class is fixed where the paths meet (`exec.go:54-73`), not at each producer. This is the rule the family `child-env-paths-canonical-form` called for, and the new lessons entry states it.
+   - `physicalPath` (`cmd/metis/physpath.go:15-36`) resolves the deepest existing ancestor. That covers a read root that does not exist yet and a `runs/` that is itself a symlink. It fails loudly on a dangling symlink or a non-ENOENT error, as the Spec's "don't fall back silently" requires.
+   - `TestExecStep_ConfinementAgreesAcrossPathForms` (`exec_test.go:349`) runs the real uv `cv-split` step with a physical exp dir and a logical read root. That reproduces the exact BR-1 failure end to end.
+   - run.go derives `runDir` from the already-resolved `expDir` (`run.go:246-249`), so the record, cache and step env all agree on one path form.
+
+2. **Critical:** none.
+
+3. **Important:** none.
+
+4. **Minor**
+   - `workshop/lessons.md:61-62` adds an unrelated metis#70 lesson ("a check that hides a tool's stderr…"). It is scope piggybacked onto #76.
+   - `physicalPath`'s edge branches have no direct test: the filesystem-root fallback (`physpath.go:31-33`), a non-NotExist `Lstat` error such as ENOTDIR, and a dangling symlink. Only the "deepest ancestor" and "symlinked ancestor" branches are exercised, and only indirectly.
+
+5. **Test coverage notes**
+   - Children see physical paths through a symlinked exp dir, a symlinked `runs/`, and a read root that does not exist yet. The run path, the generic `execStep` path (which blend and the sweep both reach) and the real confinement check are each covered.
+   - The sweep → `readRoot` wiring itself is not tested end to end through `runOuterFold` under a symlink. That is acceptable: every sealed point goes through the same `stepEnv`, which is now tested directly.
+
+6. **Architectural notes**
+   - **ARCH-DRY: pass.** There is one helper, used by run.go and `stepEnv`. Pre-existing code outside the diff, `capture.go:277` and `capture.go:313`, does its own inline `EvalSymlinks` with a silent fallback. It could move to `physicalPath` later, keeping best-effort semantics.
+   - **ARCH-PURE: pass, with a note.** `stepEnv` used to be a pure map builder and now does filesystem IO. That is acceptable because it sits in the IO shell (`Execute`) and is tested against real temp dirs.
+   - **ARCH-PURPOSE: pass.** Shadow-sweep: `stepEnv` is the only producer of child path vars. The child cwd (`cmd.Dir` / fork-server `chdir`) stays logical, but `getcwd` returns the physical path anyway. Python's `exp_path` joins the relative `analysisRef` onto the physical `METIS_EXP_DIR`, which matches the physical `METIS_READ_ROOT`. `trace.py`'s run-dir prefix check now compares like with like, which is a small improvement.
+   - **ARCH-MOCK: pass.** No new external dependency; the change only touches the local filesystem.
+   - **ARCH-CONSTRAINTS: pass.** Four `EvalSymlinks` calls per step cost almost nothing next to a subprocess or fork.
+   - **ARCH-SECURE: pass.** Confinement now compares a single path form. One gap is pre-existing: `within_root` uses `abspath`, so a symlink inside the read root that points outside it is not caught.
+   - **ARCH-ORDER: pass.** Nothing holds state between events; the change is a per-call path transform.
+   - **ARCH-FUNERAL: pass.** Nothing durable is created; only env-var string values change.
+   - **ARCH-EVOLVE: pass.** No persisted format changes. `record.json` and `run.json` contents and the cache keys stay the same; only where `runs/` resolves on disk changes.
+
+7. **Plan revision recommendations**
+   - Add a `## Revisions` entry, or extra checked Plan items, for the round-1 rework. The Plan still lists only "Resolve expDir in runResolvedExperimentAdmitted" and the symlink test. It should also record that `execStep.stepEnv` resolves every child path var through `physicalPath`, which covers blend, the sweep's `readRoot` and a symlinked `runs/`, along with the two new tests.
+
+```findings
+dispose:
+  - id: BR-1
+    disposition: addressed
+    note: |
+      stepEnv now resolves METIS_READ_ROOT via physicalPath (exec.go:54-73); TestExecStep_ConfinementAgreesAcrossPathForms (real uv cv-split) fails with the resolution disabled and passes at head.
+  - id: BR-2
+    disposition: addressed
+    note: |
+      blend calls es.Execute, which goes through stepEnv, so its Abs-only expDir/runDir are made physical there; TestExecStep_StepEnvPathsArePhysical (expDir passed as a symlink) fails without the fix.
+  - id: BR-3
+    disposition: addressed
+    note: |
+      physicalPath resolves the deepest existing ancestor; the test symlinks runs/ and asserts physical RUN_DIR/STEP_DIR/READ_ROOT, red without the fix.
+findings:
+  - id: new
+    severity: Minor
+    kind: defect
+    family: issue-scope-hygiene
+    title: |
+      lessons.md gains an unrelated metis#70 lesson inside the metis#76 commit
+    detail: |
+      workshop/lessons.md:61-62 adds a lesson about a check that hides a tool's stderr (metis#70) in commit d357a3e. Move it to the metis#70 work, or say in the Log why it rides along here.
+  - id: new
+    severity: Minor
+    kind: defect
+    family: helper-edge-branches-tested
+    title: |
+      physicalPath's root-fallback, non-ENOENT Lstat and dangling-symlink branches have no direct test
+    detail: |
+      cmd/metis/physpath.go:22-33. Add a small table test over temp dirs: a fully nonexistent path, a path whose ancestor is a regular file (ENOTDIR gives an error), and a dangling symlink (gives an error), so a later edit cannot quietly start falling back.
+```
+
+<!-- sdlc-review-usage [{"version":1,"intent":{"disposable_root":true,"id":"c0a74e83-49f3-43f3-a8ac-5869f822bc4e","repository":"github.com/xianxu/metis","issue_id":"000076","recipe":"milestone-review","round":2,"attempt":1,"agent":"claude","root":"/Volumes/TestScratch/review-checkouts/34f53ec0f9221ad3","reviewed_head":"d357a3e0fcae7b3173c5f28a7f136a7696ac6528","slot":"metis:1","requested_at":"2026-10-25T15:32:54.975358Z"},"phase":"finished","pid":57030,"started_at":"2026-10-25T15:32:55.09026Z","finished_at":"2026-10-25T15:40:33.650768Z","session_id":"0bcf94c3-fb51-4b1a-9aa9-b1677cd5e3f4","outcome":"returned"}] -->
