@@ -84,6 +84,21 @@ consumer-authored pin, whose absence is what fails CI today (PR #51).
 Out of scope: workflow edits (the seeded template is upstream's), and the
 other repositories' pins.
 
+## Revisions
+
+- 2026-10-25T04:24 (hub-approved; the operator reviews it with the
+  local-gates label) — reason: PR #52's real CI got past the pin build, then
+  bootstrap could not clone the substrate over ssh ("Permission denied
+  (publickey)", run 40188584381). Delta: `construct/deps` clones
+  https://github.com/xianxu/ariadne.git; a local ../ariadne never clones.
+- 2026-10-25T04:27 (hub-approved; same verification) — reason: the next CI
+  run failed experiment-schema-selftest because compile builds vocabulary into
+  ../ariadne/bin without putting it on PATH, and the check hid the
+  command-not-found (run 40188715202). Delta: `scripts/ci-setup.sh` appends the
+  layer tool dirs to GITHUB_PATH (temporary, removed by ariadne#627); both
+  experiment checks source `scripts/merge-checks.d/_vocab.bash` and exit 2
+  naming a missing tool; `tests/test_merge_checks.py` pins that.
+
 ## Log
 
 
@@ -133,3 +148,12 @@ it is missing. Removal trigger for the hook: ariadne#627 (the seeded workflow
 puts weave's tool dirs on PATH itself). Also found, filed by the hub:
 ariadne#628 (40-duplicate-issue-id.sh exits 141, SIGPIPE under pipefail, when
 construct/dev-aliases.sh exists; local only).
+
+2026-10-25 metis:1: real CI acceptance: PR #52 merge-check passed on
+815ebebd6f442ac687aaf62fa787937f92db2add (run 40189012386) and on
+c4d3e44551119057c83280310d7f5050b3316716 (run 40189166668, 1m19s), with the
+cold bootstrap and compile under the pinned compiler; only local-gates-guard is
+red, awaiting the operator label. The fixed-then-ship re-close returned REWORK
+(BR-2: the post-close commits are scope revisions, so a full close is due);
+recorded them under Revisions and added tests/test_merge_checks.py (3 pass;
+reverting the selftest guard fails it).
