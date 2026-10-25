@@ -17,7 +17,8 @@ package experiment
 	uses: string          // "<layer>/<steptype>", e.g. "metis/cv-split"
 	needs?: [...string]   // ids of steps this one depends on (DAG edges)
 	with?: {
-		cache?: #CachePolicy // the one typed key: cache policy (metis#2 leaf, metis#71 never)
+		cache?: #CachePolicy // typed key: cache policy (metis#2 leaf, metis#71 never)
+		exec?:  #ExecPolicy  // typed key: execution policy (metis#72 timeout)
 		[string]: _          // otherwise a free config map; typed per step-type in M3
 	}
 }
@@ -30,6 +31,13 @@ package experiment
 #CachePolicy: {
 	leaf?:   "immutable"
 	policy?: "never"
+}
+
+// #ExecPolicy — a step's execution directive. Closed: an unknown key refuses. `timeout` is a
+// Go duration ("90m", "1h30m") bounding the child's runtime from launch; there is no default.
+// Parsing and positivity are checked only by Go Validate (pkg/experiment ParseExecPolicy).
+#ExecPolicy: {
+	timeout?: string
 }
 
 #Run: {
