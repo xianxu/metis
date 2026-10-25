@@ -11,6 +11,13 @@
 // realized code identity over the run's D closure), and the point-address (intent identity).
 // Append dedup keys on (point_address, code_fingerprint) so same-config-different-code runs are
 // both kept.
+//
+// Repeats (metis#73): a row with a repeat label is one observed sample of an execution
+// (`metis run --repeat L`). Its key adds the label, so repeats of one config stay distinct;
+// it is immutable (an exact re-publish is a no-op, different data under the same key is an
+// error). A plain single-run row (no fold, level or repeat) mirrors its overwritable run dir,
+// so Publish replaces it. Columns this version does not know are kept in Row.Extra and
+// written back, so a rewrite never drops another version's data.
 package ledger
 
 import (
@@ -22,6 +29,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/xianxu/metis/pkg/experiment"
 )
 
 // Row is one ledger entry: the free-param tuple + code-fingerprint + point-address
@@ -55,40 +64,130 @@ type Row struct {
 	// provenance a reader uses to tell a truncated loser from a --sample-limited run. AggregateView
 	// passes it through untouched (NOT treated as failed — a stopped fold's rows are honest).
 	Stopped string
+	// Repeat is the metis#73 execution coordinate: "" (not a repeat), a repeat label, or
+	// AggregateRepeat on an AggregateView row reducing a repeat family. Part of the key when
+	// set; a ragged column.
+	Repeat  string
 	Metrics map[string]float64
 	Status  string // "ok" | "failed"
+	// Extra holds columns this version does not know (written by a newer metis), re-emitted
+	// verbatim on Encode so a load-append-rewrite never drops them (metis#73, ARCH-EVOLVE).
+	Extra map[string]string
 }
+
+// AggregateRepeat marks an AggregateView row that reduces a repeat family. It is not a valid
+// repeat label (labels are slugs), so the aggregate never shares a key with a sample or with
+// the plain row of the same point.
+const AggregateRepeat = "*"
 
 // Ledger is an ordered, append-only set of rows (CSV-backed by the caller).
 type Ledger struct {
 	Rows []Row
-	seen map[string]bool // (point-address, code-fingerprint) pairs already present (dedup)
+	seen map[string]int // row key → its index in Rows (dedup, conflict check, replace)
 }
 
 // dedupKey is the metis#27 composite row identity: the intent (point-address) AND the
 // realized code (fingerprint). NUL-separated (neither half contains NUL — both are hex
 // hashes or a config-group id). Same config + different code → distinct key → both kept.
-func dedupKey(r Row) string { return r.PointAddr + "\x00" + r.CodeFingerprint }
+// metis#73: a repeat row adds its label, so a row without one keys exactly as before.
+func dedupKey(r Row) string {
+	k := r.PointAddr + "\x00" + r.CodeFingerprint
+	if r.Repeat != "" {
+		k += "\x00" + r.Repeat
+	}
+	return k
+}
+
+func (l *Ledger) index() {
+	if l.seen == nil {
+		l.seen = make(map[string]int, len(l.Rows))
+		for i, r := range l.Rows {
+			l.seen[dedupKey(r)] = i
+		}
+	}
+}
 
 // Append adds rows in order, skipping any whose (point-address, code-fingerprint) is
 // already present (append-only + idempotent: re-running the SAME code re-produces the same
 // pairs → no growth; a new code-version's rows carry a new fingerprint → they append,
-// preserving both variations even at the same config).
-func (l *Ledger) Append(rows ...Row) {
-	if l.seen == nil {
-		l.seen = make(map[string]bool, len(l.Rows)+len(rows))
-		for _, r := range l.Rows {
-			l.seen[dedupKey(r)] = true
-		}
-	}
+// preserving both variations even at the same config). A repeat row (metis#73) is an
+// immutable sample: an identical re-append is a no-op, while different data under its key is
+// refused with an error naming the execution (rows before it are kept). Rows without a
+// repeat label never error.
+func (l *Ledger) Append(rows ...Row) error {
+	l.index()
 	for _, r := range rows {
 		k := dedupKey(r)
-		if l.seen[k] {
+		if i, ok := l.seen[k]; ok {
+			if r.Repeat != "" && !SameRow(l.Rows[i], r) {
+				return conflictError(l.Rows[i], r)
+			}
 			continue
 		}
-		l.seen[k] = true
+		l.seen[k] = len(l.Rows)
 		l.Rows = append(l.Rows, r)
 	}
+	return nil
+}
+
+// Publish adds one execution's row (metis#73): a plain single-run row (no fold, level or
+// repeat) REPLACES the row with its key, since it mirrors the run dir a rerun overwrites
+// (latest replay wins); every other row follows Append.
+func (l *Ledger) Publish(r Row) error {
+	if r.Fold != nil || r.Level != "" || r.Repeat != "" {
+		return l.Append(r)
+	}
+	l.index()
+	if i, ok := l.seen[dedupKey(r)]; ok {
+		l.Rows[i] = r
+		return nil
+	}
+	return l.Append(r)
+}
+
+func conflictError(have, got Row) error {
+	return fmt.Errorf("conflicting data for execution %s (code %s, repeat %s): the ledger already holds a different row for it (status %s, metrics %v; new: status %s, metrics %v)",
+		have.PointAddr, have.CodeFingerprint, have.Repeat, have.Status, have.Metrics, got.Status, got.Metrics)
+}
+
+// SameRow reports whether two rows carry the same data: what an idempotent re-publish must
+// match. Free params compare by canonical JSON (a CSV round-trip may turn 300 into 300.0),
+// metrics by value (NaN equals NaN), empty and nil maps alike.
+func SameRow(a, b Row) bool {
+	if a.CodeFingerprint != b.CodeFingerprint || a.PointAddr != b.PointAddr || a.Status != b.Status ||
+		a.Level != b.Level || a.Stopped != b.Stopped || a.Repeat != b.Repeat ||
+		!sameIntPtr(a.Fold, b.Fold) || !sameIntPtr(a.OuterFold, b.OuterFold) {
+		return false
+	}
+	fa, errA := json.Marshal(nonNil(a.FreeParams))
+	fb, errB := json.Marshal(nonNil(b.FreeParams))
+	if errA != nil || errB != nil || !bytes.Equal(fa, fb) {
+		return false
+	}
+	if len(a.Metrics) != len(b.Metrics) || len(a.Extra) != len(b.Extra) {
+		return false
+	}
+	for k, v := range a.Metrics {
+		w, ok := b.Metrics[k]
+		if !ok || (v != w && !(math.IsNaN(v) && math.IsNaN(w))) {
+			return false
+		}
+	}
+	for k, v := range a.Extra {
+		if w, ok := b.Extra[k]; !ok || v != w {
+			return false
+		}
+	}
+	return true
+}
+
+func sameIntPtr(a, b *int) bool { return (a == nil) == (b == nil) && (a == nil || *a == *b) }
+
+func nonNil(m map[string]any) map[string]any {
+	if m == nil {
+		return map[string]any{}
+	}
+	return m
 }
 
 // column prefixes for the CSV header namespace.
@@ -105,8 +204,15 @@ func Encode(l Ledger) ([]byte, error) {
 	fpCols, metricCols := unionColumns(l.Rows)
 	// The `fold`/`level`/`outer_fold`/`stopped` columns are present only when ≥1 row carries them
 	// (a per-fold or nested sweep) — so a v1-shaped ledger stays byte-identical (ragged, ARCH-DRY).
-	hasFold, hasLevel, hasOuterFold, hasStopped := false, false, false, false
+	hasFold, hasLevel, hasOuterFold, hasStopped, hasRepeat := false, false, false, false, false
+	extraSet := map[string]bool{}
 	for _, r := range l.Rows {
+		if r.Repeat != "" {
+			hasRepeat = true
+		}
+		for k := range r.Extra {
+			extraSet[k] = true
+		}
 		if r.Fold != nil {
 			hasFold = true
 		}
@@ -133,7 +239,12 @@ func Encode(l Ledger) ([]byte, error) {
 	if hasStopped {
 		header = append(header, "stopped")
 	}
+	if hasRepeat {
+		header = append(header, "repeat")
+	}
 	header = append(header, metricCols...)
+	extraCols := sortedKeys(extraSet) // unknown columns last, as read (metis#73)
+	header = append(header, extraCols...)
 
 	var buf bytes.Buffer
 	w := csv.NewWriter(&buf)
@@ -166,12 +277,18 @@ func Encode(l Ledger) ([]byte, error) {
 		if hasStopped {
 			rec = append(rec, r.Stopped) // "" for a normal row
 		}
+		if hasRepeat {
+			rec = append(rec, r.Repeat) // "" for a non-repeat row
+		}
 		for _, c := range metricCols {
 			if v, ok := r.Metrics[strings.TrimPrefix(c, metricPrefix)]; ok {
 				rec = append(rec, strconv.FormatFloat(v, 'g', -1, 64))
 			} else {
 				rec = append(rec, "")
 			}
+		}
+		for _, c := range extraCols {
+			rec = append(rec, r.Extra[c])
 		}
 		if err := w.Write(rec); err != nil {
 			return nil, err
@@ -181,7 +298,10 @@ func Encode(l Ledger) ([]byte, error) {
 	return buf.Bytes(), w.Error()
 }
 
-// Decode parses append-order CSV back into a Ledger (blank cells → absent keys).
+// Decode parses append-order CSV back into a Ledger (blank cells → absent keys). Legacy
+// columns parse leniently as before; a repeat cell must be a valid label, and an unknown
+// column lands in Row.Extra. Two conflicting rows for one repeat execution are an error (a
+// contradictory research record is reported, never silently resolved).
 func Decode(b []byte) (Ledger, error) {
 	r := csv.NewReader(bytes.NewReader(b))
 	recs, err := r.ReadAll()
@@ -193,7 +313,7 @@ func Decode(b []byte) (Ledger, error) {
 	}
 	header := recs[0]
 	var l Ledger
-	for _, rec := range recs[1:] {
+	for n, rec := range recs[1:] {
 		row := Row{FreeParams: map[string]any{}, Metrics: map[string]float64{}}
 		for i, col := range header {
 			if i >= len(rec) || rec[i] == "" {
@@ -218,12 +338,22 @@ func Decode(b []byte) (Ledger, error) {
 				}
 			case col == "stopped":
 				row.Stopped = rec[i]
+			case col == "repeat":
+				if _, err := experiment.ParseRepeatLabel(rec[i]); err != nil {
+					return Ledger{}, fmt.Errorf("ledger row %d: %w", n+1, err)
+				}
+				row.Repeat = rec[i]
 			case strings.HasPrefix(col, fpPrefix):
 				row.FreeParams[strings.TrimPrefix(col, fpPrefix)] = parseCell(rec[i])
 			case strings.HasPrefix(col, metricPrefix):
 				if f, err := strconv.ParseFloat(rec[i], 64); err == nil {
 					row.Metrics[strings.TrimPrefix(col, metricPrefix)] = f
 				}
+			default:
+				if row.Extra == nil {
+					row.Extra = map[string]string{}
+				}
+				row.Extra[col] = rec[i]
 			}
 		}
 		if len(row.FreeParams) == 0 {
@@ -232,7 +362,9 @@ func Decode(b []byte) (Ledger, error) {
 		if len(row.Metrics) == 0 {
 			row.Metrics = nil
 		}
-		l.Append(row)
+		if err := l.Append(row); err != nil {
+			return Ledger{}, fmt.Errorf("ledger row %d: %w", n+1, err)
+		}
 	}
 	return l, nil
 }
