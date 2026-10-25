@@ -1,13 +1,21 @@
 ---
 id: 000070
-status: open
+status: working
 deps: [ariadne#459]
 github_issue:
 created: 2026-10-19
-updated: 2026-10-19
+updated: 2026-10-25
 estimate_hours:
 collaboration-mode: collaboration
-card_mirror: '028fd25129b923a9380700583206ac2eddb3a20f' # card fields mirrored from issue-cards; edit via sdlc
+card_mirror: '1c4cdb37fad1ad261c07f231280f83837eff93c9' # card fields mirrored from issue-cards; edit via sdlc
+started: 2026-10-25T04:16:09-07:00
+claimant:
+    operator: Xian Xu
+    machine: 4716879978a7b90f6b583da1716fd0e9
+    machine_name: Xian’s MacBook Pro
+    workspace: metis:1
+    worktree: /Users/xianxu/workspace/worktree/metis-slot1/metis
+    repository: github.com/xianxu/metis
 ---
 
 # CI: build weave from a pinned ariadne commit
@@ -45,10 +53,34 @@ on pin acquisition/build failure. Preserve bootstrap, setup and check ordering.
 
 ## Plan
 
-Leave unclaimed for the hub to dispatch to a repository slot after ariadne#459
-lands. Read its approved guard/template and verified consumer inventory before
-planning the bounded migration. No downstream workflow edits or PR are made by
-this filing operation.
+Quick flow. The reviewed upstream template is already on metis main:
+`.github/workflows/merge-check.yml` is weave-seeded from ariadne#459 and already
+reads, fetches, verifies and builds `.sdlc/weave-compiler-ref` before
+bootstrap, with no fallback. Its malformed-pin, fetch/build-failure and
+PATH-precedence tests live upstream (`scripts/test/portable-ci.test.sh`,
+`scripts/test/weave-compatibility.test.sh`). The only missing piece is the
+consumer-authored pin, whose absence is what fails CI today (PR #51).
+
+- [ ] Author `.sdlc/weave-compiler-ref` = `63d6bfd86509d97649e10d7a5dd1e9a06db17d21`
+      plus a newline; it equals ariadne's own selected and only supported ref
+      (`ariadne/.sdlc/weave-compiler-refs`).
+- [ ] Local evidence: run the workflow's own validator on the file; fetch that
+      SHA into a temp checkout, build `./cmd/weave` the workflow's way
+      (CGO_ENABLED=0, GOTOOLCHAIN=local, -trimpath) and confirm
+      `vcs.revision` equals the pin with `vcs.modified=false`; feed a malformed
+      pin (short, uppercase, missing newline) to the validator and see it refuse.
+- [ ] Not manifest-managed: `construct/base.manifest` has no `.sdlc` entry; run
+      `weave refresh` and confirm the pin survives byte-identical.
+- [ ] Open the PR; real CI is the cold-checkout acceptance (the regenerated
+      vocabulary and sidecars, with no authored-replacement refusal). The
+      `local-gates-guard` check is expected to fail until the operator verifies
+      and applies `local-gates-verified`. Report the PR, compiler identity and CI
+      result to the hub. Never apply the label.
+- [ ] Atlas: note the pin and its bump procedure (operator-verified,
+      a supported ariadne ref) in the atlas CI entry.
+
+Out of scope: workflow edits (the seeded template is upstream's), and the
+other repositories' pins.
 
 ## Log
 
@@ -57,3 +89,8 @@ checkout, unclaimed, depending on ariadne#459. Source class A; inventory:
 [verified active GitHub consumers](https://github.com/xianxu/ariadne/blob/000459-weave-release-downstream-ci-still-runs-weave-0-1-0-pre-422-vocabulary-changes-break-every-downstream-merge-check/workshop/plans/000459-downstream-compiler-inventory.md).
 The upstream owner files the hand-off; this repository's assigned slot and the
 operator own implementation and acceptance.
+
+2026-10-25 metis:1: claimed and started. Several claims are open at once in
+this slot (#71, #72, #73, #74, #76; ariadne#580 fixes active-time attribution).
+The seeded workflow already carries the template, so the plan is the pin file
+plus verification.
