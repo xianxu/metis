@@ -1,13 +1,13 @@
 ---
 id: 000071
-status: working
+status: codecomplete
 deps: []
 github_issue:
 created: 2026-10-23
-updated: 2026-10-23
+updated: 2026-10-25
 estimate_hours:
 collaboration-mode: collaboration
-card_mirror: 'c37f29809c390541ae7ea3e6ae1968bc815da3c0' # card fields mirrored from issue-cards; edit via sdlc
+card_mirror: '108b584f44c65b5fd66eca8464a58f9acaa257a8' # card fields mirrored from issue-cards; edit via sdlc
 started: 2026-10-23T17:13:44-07:00
 claimant:
     operator: Xian Xu
@@ -17,6 +17,7 @@ claimant:
     worktree: /Users/xianxu/workspace/worktree/metis-slot1/metis
     repository: github.com/xianxu/metis
 flow: {kind: full, provenance: inferred}
+actual_hours: 0.19
 ---
 
 # Step-level never-cache policy with safe downstream invalidation
