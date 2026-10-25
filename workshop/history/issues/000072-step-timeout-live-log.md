@@ -1,13 +1,13 @@
 ---
 id: 000072
-status: codecomplete
+status: done
 deps: [metis#71]
 github_issue:
 created: 2026-10-23
 updated: 2026-10-25
 estimate_hours: 3
 collaboration-mode: collaboration
-card_mirror: 'fa0a04c3347003e18001b2626027f751390b9a34' # card fields mirrored from issue-cards; edit via sdlc
+card_mirror: '6a7705a984d5f32a4846fa97939ebf8581277bd7' # card fields mirrored from issue-cards; edit via sdlc
 started: 2026-10-23T19:38:26-07:00
 claimant:
     operator: Xian Xu
