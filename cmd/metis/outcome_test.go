@@ -11,7 +11,7 @@ import (
 func TestClassifyOutcome_Table(t *testing.T) {
 	t0 := time.Date(2026, 10, 25, 9, 0, 0, 0, time.UTC)
 	ran := func(ev endEvent, code int, sig string, joined bool, pending string) stepEnding {
-		return stepEnding{event: ev, launched: true, exitCode: code, signal: sig, joined: joined,
+		return stepEnding{event: ev, launched: true, exitKnown: true, exitCode: code, signal: sig, joined: joined,
 			pending: []byte(pending), started: t0, ended: t0.Add(90 * time.Second), tail: []byte("last words")}
 	}
 	cases := []struct {
@@ -27,6 +27,7 @@ func TestClassifyOutcome_Table(t *testing.T) {
 		{"cancelled running", ran(endCancelled, -1, "TERM", true, ""), outcomeCancelled, "cancelled"},
 		{"cancelled before launch", stepEnding{event: endCancelled}, outcomeCancelled, "before launch"},
 		{"launch failed", stepEnding{event: endExited, launchErr: "permission denied"}, outcomeFailed, "start: permission denied"},
+		{"forked, log missing", stepEnding{event: endExited, launched: true, joined: true, logMissing: true, logPath: "s/step.log"}, outcomeFailed, "wrote no s/step.log"},
 		{"join unconfirmed beats exit 0", ran(endExited, 0, "", false, ""), outcomeCleanupUnconfirmed, "cleanup unconfirmed"},
 		{"join unconfirmed beats pending", ran(endDeadline, -1, "KILL", false, `["actor-1"]`), outcomeCleanupUnconfirmed, "cleanup unconfirmed"},
 		{"pending beats exit 0", ran(endExited, 0, "", true, `["actor-1"]`), outcomeResourcesUnretired, `["actor-1"]`},
@@ -55,7 +56,7 @@ func TestClassifyOutcome_Table(t *testing.T) {
 // Only a launched step carries times; runtime is launch → exit, and failure messages carry the tail.
 func TestClassifyOutcome_RecordFields(t *testing.T) {
 	t0 := time.Date(2026, 10, 25, 9, 0, 0, 0, time.UTC)
-	o, err := classifyOutcome(stepEnding{event: endExited, launched: true, exitCode: 1, joined: true,
+	o, err := classifyOutcome(stepEnding{event: endExited, launched: true, exitKnown: true, exitCode: 1, joined: true,
 		started: t0, ended: t0.Add(1500 * time.Millisecond), tail: []byte("boom"), logTruncated: true})
 	if o.RuntimeSeconds == nil || *o.RuntimeSeconds != 1.5 || o.Started == nil || o.ExitCode == nil || *o.ExitCode != 1 || !o.LogTruncated {
 		t.Errorf("record = %+v", o)

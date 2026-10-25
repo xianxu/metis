@@ -11,6 +11,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -69,8 +70,11 @@ func parseWrapper(exe string) (wrapperSpec, bool) {
 var errServerUnavailable = errors.New("fork-server unavailable")
 
 type forkResp struct {
-	Exit   int
-	Output string
+	Exit         int
+	Output       string  // the log tail (metis#72)
+	Joined       bool    // the server confirmed the child exited and its pipe drained
+	LogTruncated bool    // step.log hit its cap
+	Runtime      float64 // seconds, fork to exit (the join wait is not compute)
 }
 
 // forkServer is one warm server process (one uv project root). Response routing is by
@@ -94,18 +98,56 @@ const stderrCap = 64 << 10
 // protoLine is the union of the server's stdout lines: the one-shot ready handshake and
 // per-request responses.
 type protoLine struct {
-	Ready  bool   `json:"ready"`
-	ID     *int   `json:"id"`
-	Exit   int    `json:"exit"`
-	Output string `json:"output"`
+	Ready        bool    `json:"ready"`
+	ID           *int    `json:"id"`
+	Exit         int     `json:"exit"`
+	Output       string  `json:"output"`
+	Joined       bool    `json:"joined"`
+	LogTruncated bool    `json:"log_truncated"`
+	Runtime      float64 `json:"runtime"`
 }
 
 type forkReq struct {
-	ID     int               `json:"id"`
-	Module string            `json:"module"`
-	Cwd    string            `json:"cwd"`
-	Env    map[string]string `json:"env"`
+	ID        int               `json:"id"`
+	Module    string            `json:"module"`
+	Cwd       string            `json:"cwd"`
+	Env       map[string]string `json:"env"`
+	LogPath   string            `json:"log_path,omitempty"` // metis#72: the server streams into it
+	LogCap    int               `json:"log_cap,omitempty"`
+	LogMarker string            `json:"log_marker,omitempty"`
+	Grace     float64           `json:"grace,omitempty"`      // seconds, for the server-owned join
+	JoinBound float64           `json:"join_bound,omitempty"` // seconds
 }
+
+// forkCancel asks the server to signal an unreaped child's process group (metis#72). The server
+// is the child's only reaper, so this is the only safe way to signal it: Go never signals a
+// forkserver pid itself.
+type forkCancel struct {
+	Cancel int    `json:"cancel"`
+	Signal string `json:"signal"`
+}
+
+// forkOpts are one forked step's lifecycle parameters.
+type forkOpts struct {
+	timeout   time.Duration // zero: none
+	grace     time.Duration
+	joinBound time.Duration
+	logPath   string
+}
+
+// forkRun is what one forked step's lifecycle observed: the first terminal event, the response
+// (if one arrived), the last signal requested, and when the request was dispatched.
+type forkRun struct {
+	resp    forkResp
+	got     bool
+	event   endEvent
+	signal  string
+	started time.Time
+}
+
+// errCancelledBeforeDispatch: the run was cancelled while the step waited for the server to be
+// ready. Nothing was dispatched, so the step is cancelled before launch, never a legacy re-run.
+var errCancelledBeforeDispatch = errors.New("cancelled before dispatch")
 
 // startForkServer launches `uv run --project <root> python -m metis.forkserver` and wires
 // the reader goroutines. The server env = ambient + the default single-thread BLAS pins
@@ -192,7 +234,7 @@ func (s *forkServer) readLoop(stdout io.Reader) {
 		delete(s.pending, *pl.ID)
 		s.mu.Unlock()
 		if ch != nil {
-			ch <- forkResp{Exit: pl.Exit, Output: pl.Output}
+			ch <- forkResp{Exit: pl.Exit, Output: pl.Output, Joined: pl.Joined, LogTruncated: pl.LogTruncated, Runtime: pl.Runtime}
 		}
 	}
 	err := sc.Err()
@@ -222,21 +264,31 @@ func (s *forkServer) readLoop(stdout io.Reader) {
 // Close-review I1: only a PRE-dispatch failure is safe to fall back on.
 var errDispatchedLost = errors.New("fork-server died with the request in flight")
 
-// execute runs one step request to completion. errServerUnavailable = nothing dispatched,
-// legacy fallback is safe; errDispatchedLost = the child may be running, error the step; any
-// response — even exit != 0 — is a real step outcome.
-func (s *forkServer) execute(module, cwd string, env map[string]string) (forkResp, error) {
-	<-s.ready
+// execute runs one step request to its first terminal event: its response, its timeout, or the
+// run's cancellation (metis#72). On a timeout or cancel it asks the server to TERM the child's
+// group, then KILL after grace, and waits for the response within a bound that covers the
+// server's own post-exit join (join, grace, join). errServerUnavailable: nothing dispatched,
+// legacy fallback is safe. errCancelledBeforeDispatch: the ready wait was cancelled, nothing
+// dispatched. errDispatchedLost: the server died with the request in flight, the child may
+// still run. A response, even exit != 0, is a real outcome; one that lands after a timeout or
+// cancel does not change the event (the first observed wins).
+func (s *forkServer) execute(ctx context.Context, module, cwd string, env map[string]string, o forkOpts) (forkRun, error) {
+	select {
+	case <-s.ready:
+	case <-ctx.Done():
+		return forkRun{}, errCancelledBeforeDispatch
+	}
 	s.mu.Lock()
 	if s.dead != nil { // nothing dispatched yet — safe to fall back
 		defer s.mu.Unlock()
-		return forkResp{}, s.dead
+		return forkRun{}, s.dead
 	}
 	s.nextID++
 	id := s.nextID
 	ch := make(chan forkResp, 1)
 	s.pending[id] = ch
-	b, err := json.Marshal(forkReq{ID: id, Module: module, Cwd: cwd, Env: env})
+	b, err := json.Marshal(forkReq{ID: id, Module: module, Cwd: cwd, Env: env, LogPath: o.logPath,
+		LogCap: stepLogCap, LogMarker: truncationMarker, Grace: o.grace.Seconds(), JoinBound: o.joinBound.Seconds()})
 	if err == nil {
 		_, err = s.stdin.Write(append(b, '\n'))
 	}
@@ -245,16 +297,64 @@ func (s *forkServer) execute(module, cwd string, env map[string]string) (forkRes
 		// dispatched (conservative: no legacy re-run against a possibly-forked child).
 		delete(s.pending, id)
 		s.mu.Unlock()
-		return forkResp{}, fmt.Errorf("%w: write request: %v", errDispatchedLost, err)
+		return forkRun{}, fmt.Errorf("%w: write request: %v", errDispatchedLost, err)
 	}
 	s.mu.Unlock()
-	resp, ok := <-ch
-	if !ok { // channel closed by readLoop's death path — request was in flight
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		return forkResp{}, fmt.Errorf("%w: %v", errDispatchedLost, s.dead)
+	run := forkRun{started: time.Now(), event: endExited}
+
+	var deadline <-chan time.Time
+	if o.timeout > 0 {
+		timer := time.NewTimer(o.timeout)
+		defer timer.Stop()
+		deadline = timer.C
 	}
-	return resp, nil
+	receive := func(resp forkResp, ok bool) error {
+		if !ok { // closed by readLoop's death path — the request was in flight
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			return fmt.Errorf("%w: %v", errDispatchedLost, s.dead)
+		}
+		run.resp, run.got = resp, true
+		return nil
+	}
+	select {
+	case resp, ok := <-ch:
+		return run, receive(resp, ok)
+	case <-deadline:
+		run.event = endDeadline
+	case <-ctx.Done():
+		run.event = endCancelled
+	}
+	for _, step := range []struct {
+		sig  string
+		wait time.Duration
+	}{{"TERM", o.grace}, {"KILL", 2*o.joinBound + o.grace + time.Second}} {
+		run.signal = step.sig
+		if err := s.cancel(id, step.sig); err != nil {
+			return run, fmt.Errorf("%w: cancel: %v", errDispatchedLost, err)
+		}
+		select {
+		case resp, ok := <-ch:
+			return run, receive(resp, ok)
+		case <-time.After(step.wait):
+		}
+	}
+	return run, nil // no response within the bound: the join is unconfirmed
+}
+
+// cancel writes a signal request for an in-flight id.
+func (s *forkServer) cancel(id int, sig string) error {
+	b, err := json.Marshal(forkCancel{Cancel: id, Signal: sig})
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.dead != nil {
+		return s.dead
+	}
+	_, err = s.stdin.Write(append(b, '\n'))
+	return err
 }
 
 func (s *forkServer) shutdown() {
@@ -302,15 +402,17 @@ func (p *serverPool) noticeOnce(key, msg string) {
 }
 
 // execute routes a parsed step through the root's warm server. Outcomes:
-//   - (resp, true, nil)  — a real step outcome (even exit != 0);
-//   - (_, false, nil)    — nothing dispatched (broken/unstartable server) → legacy is SAFE;
-//   - (_, false, err)    — dispatched-and-lost → the caller must ERROR the step (I1: the
-//     forked child may still be running; a legacy re-run would double-execute into stepDir).
-func (p *serverPool) execute(spec wrapperSpec, cwd string, env map[string]string) (forkResp, bool, error) {
+//   - (run, true, nil)  — dispatched; run holds what the lifecycle observed (a response, or none
+//     within the bound after KILL: the join is unconfirmed, and the root is marked broken);
+//   - (_, false, nil)   — nothing dispatched (broken/unstartable server) → legacy is SAFE;
+//   - (_, false, errCancelledBeforeDispatch) — the run was cancelled before dispatch;
+//   - (_, true, err)    — dispatched-and-lost → the caller must ERROR the step (I1: the forked
+//     child may still be running; a legacy re-run would double-execute into stepDir).
+func (p *serverPool) execute(ctx context.Context, spec wrapperSpec, cwd string, env map[string]string, o forkOpts) (forkRun, bool, error) {
 	p.mu.Lock()
 	if p.broken[spec.root] {
 		p.mu.Unlock()
-		return forkResp{}, false, nil
+		return forkRun{}, false, nil
 	}
 	s := p.servers[spec.root]
 	if s == nil {
@@ -320,25 +422,33 @@ func (p *serverPool) execute(spec wrapperSpec, cwd string, env map[string]string
 			p.broken[spec.root] = true
 			p.mu.Unlock()
 			p.noticeOnce("root:"+spec.root, fmt.Sprintf("start failed for %s (%v) — legacy exec for this root", spec.root, err))
-			return forkResp{}, false, nil
+			return forkRun{}, false, nil
 		}
 		p.servers[spec.root] = s
 	}
 	p.mu.Unlock()
 
-	resp, err := s.execute(spec.module, cwd, env)
-	if err != nil {
-		p.mu.Lock()
-		p.broken[spec.root] = true
-		p.mu.Unlock()
-		if errors.Is(err, errDispatchedLost) {
-			p.noticeOnce("root:"+spec.root, fmt.Sprintf("server for %s died mid-flight (%v) — erroring the step; later leaves use legacy", spec.root, err))
-			return forkResp{}, false, err
-		}
-		p.noticeOnce("root:"+spec.root, fmt.Sprintf("server for %s unavailable (%v) — legacy exec for this root", spec.root, err))
-		return forkResp{}, false, nil
+	run, err := s.execute(ctx, spec.module, cwd, env, o)
+	switch {
+	case errors.Is(err, errCancelledBeforeDispatch):
+		return forkRun{}, false, err
+	case errors.Is(err, errDispatchedLost):
+		p.markBroken(spec.root, fmt.Sprintf("server for %s died mid-flight (%v) — erroring the step; later leaves use legacy", spec.root, err))
+		return run, true, err
+	case err != nil:
+		p.markBroken(spec.root, fmt.Sprintf("server for %s unavailable (%v) — legacy exec for this root", spec.root, err))
+		return forkRun{}, false, nil
+	case !run.got:
+		p.markBroken(spec.root, fmt.Sprintf("server for %s did not answer a cancelled step within its bound — later leaves use legacy", spec.root))
 	}
-	return resp, true, nil
+	return run, true, nil
+}
+
+func (p *serverPool) markBroken(root, msg string) {
+	p.mu.Lock()
+	p.broken[root] = true
+	p.mu.Unlock()
+	p.noticeOnce("root:"+root, msg)
 }
 
 // shutdown closes every server (EOF-drain). Deferred by runExperiment.

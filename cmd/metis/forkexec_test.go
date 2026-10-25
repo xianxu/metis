@@ -111,7 +111,7 @@ func TestForkServerPool_RealServerRoundTrip(t *testing.T) {
 	if err := os.MkdirAll(stepDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	resp, ok, ferr := pool.execute(wrapperSpec{root: root, module: "toyfork"}, stepDir,
+	resp, ok, ferr := poolExec(pool, wrapperSpec{root: root, module: "toyfork"}, stepDir,
 		map[string]string{"METIS_STEP_DIR": stepDir, "METIS_STEP_ID": "s1"})
 	if !ok || ferr != nil || resp.Exit != 0 {
 		t.Fatalf("round trip failed: ok=%v err=%v resp=%+v", ok, ferr, resp)
@@ -129,7 +129,7 @@ func TestForkServerPool_RealServerRoundTrip(t *testing.T) {
 	if err := os.MkdirAll(boomDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	resp, ok, ferr = pool.execute(wrapperSpec{root: root, module: "toyboom"}, boomDir,
+	resp, ok, ferr = poolExec(pool, wrapperSpec{root: root, module: "toyboom"}, boomDir,
 		map[string]string{"METIS_STEP_DIR": boomDir})
 	if !ok || ferr != nil {
 		t.Fatal("a step FAILURE is a real outcome, not server-unavailable")
@@ -150,7 +150,7 @@ func TestForkServerPool_BrokenRootFallsBack(t *testing.T) {
 	defer pool.shutdown()
 	bogus := t.TempDir() // no pyproject/venv — uv run will fail (or hang-free error)
 	for i := 0; i < 3; i++ {
-		_, ok, ferr := pool.execute(wrapperSpec{root: bogus, module: "x"}, t.TempDir(), nil)
+		_, ok, ferr := poolExec(pool, wrapperSpec{root: bogus, module: "x"}, t.TempDir(), nil)
 		if ok || ferr != nil {
 			t.Fatal("bogus root must be unavailable pre-dispatch (fallback-safe, no step error)")
 		}
@@ -235,7 +235,7 @@ func TestForkServerPerf_LooseBound(t *testing.T) {
 	defer pool.shutdown()
 	forkOne := func() {
 		dir := t.TempDir()
-		resp, ok, ferr := pool.execute(wrapperSpec{root: root, module: "toyheavy"}, dir,
+		resp, ok, ferr := poolExec(pool, wrapperSpec{root: root, module: "toyheavy"}, dir,
 			map[string]string{"METIS_STEP_DIR": dir})
 		if !ok || ferr != nil || resp.Exit != 0 {
 			t.Fatalf("fork run failed: ok=%v err=%v resp=%+v", ok, ferr, resp)
@@ -288,7 +288,7 @@ func TestForkServerPool_MidFlightDeathErrorsTheStep(t *testing.T) {
 	}
 	done := make(chan result, 1)
 	go func() {
-		_, ok, ferr := pool.execute(wrapperSpec{root: root, module: "toyslow"}, t.TempDir(),
+		_, ok, ferr := poolExec(pool, wrapperSpec{root: root, module: "toyslow"}, t.TempDir(),
 			map[string]string{})
 		done <- result{ok, ferr}
 	}()
@@ -349,7 +349,7 @@ func TestForkServer_ChildInheritsBlasPins(t *testing.T) {
 	if err := os.MkdirAll(stepDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	resp, ok, ferr := pool.execute(wrapperSpec{root: root, module: "toyenv"}, stepDir,
+	resp, ok, ferr := poolExec(pool, wrapperSpec{root: root, module: "toyenv"}, stepDir,
 		map[string]string{"METIS_STEP_DIR": stepDir})
 	if !ok || ferr != nil || resp.Exit != 0 {
 		t.Fatalf("fork exec failed: ok=%v err=%v resp=%+v", ok, ferr, resp)
@@ -361,4 +361,12 @@ func TestForkServer_ChildInheritsBlasPins(t *testing.T) {
 	if !strings.Contains(string(b), `"omp": "1"`) {
 		t.Errorf("forked child must inherit the server's pin; envcap.json = %s", b)
 	}
+}
+
+// poolExec runs one request with no timeout and default bounds, returning the response, whether
+// the request was dispatched, and the error (the pre-metis#72 shape these tests assert on).
+func poolExec(pool *serverPool, spec wrapperSpec, cwd string, env map[string]string) (forkResp, bool, error) {
+	run, dispatched, err := pool.execute(context.Background(), spec, cwd, env,
+		forkOpts{grace: defaultGrace, joinBound: defaultJoinBound, logPath: filepath.Join(cwd, stepLogFile)})
+	return run.resp, dispatched, err
 }

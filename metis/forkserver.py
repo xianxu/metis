@@ -16,7 +16,7 @@ Protocol (JSONL over the server's stdin/stdout; stderr is free-form diagnostics)
   →  {"cancel": 7, "signal": "TERM" | "KILL"}   (metis#72: signal request 7's process group)
   ←  {"ready": true}                        (once, after preload — requests may be sent before)
   ←  {"id": 7, "exit": 0, "output": "<combined child stdout+stderr, tail>", "joined": true,
-      "log_truncated": false}
+      "log_truncated": false, "runtime": <seconds, fork to exit>}
 stdin EOF ⇒ drain in-flight children, exit 0.
 
 Lifecycle (metis#72), mirroring the Go legacy path: each child leads its own process group;
@@ -52,6 +52,7 @@ import select
 import signal
 import sys
 import threading
+import time
 import traceback
 
 _DEFAULT_PRELOAD = "numpy,pandas,sklearn,pyarrow"
@@ -185,6 +186,7 @@ def _wait_inner(req: dict, pid: int, rfd: int, lock: threading.Lock, out) -> Non
     confirm or give up the join within bounds, then reap under the lock and respond. IO only:
     never forks, never touches os.environ."""
     req_id = req["id"]
+    started = time.monotonic()  # the waiter starts right after the fork
     grace = float(req.get("grace", 10.0))
     join = float(req.get("join_bound", 5.0))
     log = _Log(req.get("log_path"), req.get("log_cap"), req.get("log_marker"))
@@ -207,6 +209,7 @@ def _wait_inner(req: dict, pid: int, rfd: int, lock: threading.Lock, out) -> Non
     reader = threading.Thread(target=read, daemon=True)
     reader.start()
     _wait_exit_noreap(pid)
+    runtime = time.monotonic() - started  # launch to exit: the join wait is not compute
     joined = drained.wait(join)
     if not joined:
         with lock:
@@ -224,7 +227,7 @@ def _wait_inner(req: dict, pid: int, rfd: int, lock: threading.Lock, out) -> Non
     log.close()
     resp = {"id": req_id, "exit": os.waitstatus_to_exitcode(status),
             "output": log.tail.decode("utf-8", "replace"), "joined": joined,
-            "log_truncated": log.truncated}
+            "log_truncated": log.truncated, "runtime": runtime}
     with lock:
         out.write(json.dumps(resp) + "\n")
         out.flush()

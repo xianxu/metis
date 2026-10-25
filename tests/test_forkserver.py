@@ -316,6 +316,8 @@ def test_escaped_holder_is_unjoined_within_bound(server, tmp_path):
         assert resp is not None, "the server must answer within its join bounds"
         assert resp["exit"] == 0 and resp["joined"] is False, resp
         assert time.monotonic() - start < 3.0
+        # runtime is fork to exit; the bounded join wait that followed is not compute
+        assert 0 <= resp["runtime"] < 0.3 + 0.2 + 0.3, resp
     finally:
         pid = int((step / "orphan.pid").read_text())
         os.kill(pid, signal.SIGKILL)

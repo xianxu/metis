@@ -115,9 +115,9 @@ broken-graph surfaces layergraph's actionable error rather than degrading silent
   there is no default. A step runs as its own process group. On its timeout, or on SIGINT/SIGTERM
   to metis (`main`'s signal context; a second signal exits hard), the group gets TERM, then KILL
   after a 10s grace, then a 5s bounded join. A step queued for a budget slot when the run is
-  cancelled never launches (`leafBudget.acquire(ctx, …)`). **Until #72 M2 lands, only the legacy
-  launch path honors this:** a step routed through the forkserver ignores the timeout and writes
-  no `step.log` or `outcome.json`.
+  cancelled never launches (`leafBudget.acquire(ctx, …)`). Both launch paths honor all of this:
+  the legacy subprocess (`runLegacy`) and the warm forkserver (`runForked`, see its entry below),
+  in `cmd/metis/steplifecycle.go`.
 - **Live log and outcome (metis#72):** child stdout+stderr stream into `step.log` as they arrive
   (`boundedLog`: capped at 64 MiB with one truncation marker, the rest drained so the child never
   blocks; a 64 KiB tail feeds the failure message). Every executed step writes `outcome.json`
@@ -130,7 +130,8 @@ broken-graph surfaces layergraph's actionable error rather than degrading silent
   the pipe drained within the bound. After a normal exit, a descendant still in the step's own
   process group that holds the pipe is stopped (TERM, grace, KILL) and the join then confirmed; a
   descendant that left the group and still holds it means `cleanup-unconfirmed`, whatever else
-  happened (legacy path; the forkserver path gets the same rules in M2). `runtime_seconds` is
+  happened (on the forkserver path the server applies the same rules and answers `joined`).
+  `runtime_seconds` is
   launch to exit, so the termination wait is not compute. Residue: `step.log` adds at most 64 MiB per executed step, and
   it, `outcome.json` and `pending-resources.json` go with their run dir; nothing removes run dirs
   automatically, so disk use per run is bounded by steps × the cap and cleared by removing runs.
@@ -420,6 +421,19 @@ wrapped by **thin step-executables** honoring the contract above. Hermetic via *
   wrappers and failed/dead servers fall back to the legacy subprocess LOUDLY, once per uses-type/
   root. `metis run --forkserver=false` is the escape hatch. Step authoring is UNCHANGED (a step is
   still a wrapper file; discovery/resolve untouched).
+  **Lifecycle (metis#72):** each forked child leads its own process group, and its output streams
+  live into `step.log` (capped; Go sends the cap and marker) while the server keeps the tail for
+  the response. The server is the child's **only reaper**: it detects the exit without reaping
+  (`waitid(WNOWAIT)`, or kqueue `NOTE_EXIT` on macOS), runs the post-exit join (drain within
+  `join_bound`, else TERM/grace/KILL what is left of the group, then the bound again) and reaps
+  under the protocol lock while dropping the child from its table. Go never signals a forkserver
+  pid: on a timeout or cancel it sends `{"cancel": id, "signal": "TERM"|"KILL"}`, and the server
+  signals only an unreaped child's group, so a recycled pid is never hit. The response carries
+  `joined`, `log_truncated` and `runtime` (fork to exit). `runForked` shares the budget, policy,
+  `classifyOutcome` and `outcome.json` with the legacy path; once a request is dispatched it never
+  falls back (a timeout, cancel, lost server or unanswered cancel is a step error, and the last two
+  are `cleanup-unconfirmed` with the root marked broken). The ready wait is context-bounded: a run
+  cancelled before dispatch is `cancelled`, never a legacy re-run.
 - **Step entrypoints — `metis/steps/{cv_split,train,predict,outer_split}.py`:** thin `io → pure core → io`.
   - `cv-split`: load Dataset (`with.dataset`, exp-relative) → `cv_folds` → `folds.json` + `{k,n}`.
   - `train`: load Dataset + upstream `folds.json` → `cv_score` + fit-on-all → `model.pkl` + `{cv_score}`.

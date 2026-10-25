@@ -32,7 +32,9 @@ type stepEnding struct {
 	event        endEvent
 	launched     bool   // false: cancelled while waiting for a slot, or the launch itself failed
 	launchErr    string // why a non-cancelled step never launched (log create, exec start)
-	exitCode     int    // valid when the child exited (-1 when killed by a signal)
+	logMissing   bool   // a forked step's server wrote no step.log (a stale server)
+	exitKnown    bool   // the child's exit was observed (a reap or a server response)
+	exitCode     int    // valid when exitKnown (-1 when killed by a signal)
 	signal       string // the last termination signal metis sent ("TERM" | "KILL" | "")
 	joined       bool   // the child and its output pipe were confirmed finished
 	pending      []byte // contents of a non-empty pending-resources.json (opaque, bounded)
@@ -64,7 +66,7 @@ func classifyOutcome(e stepEnding) (Outcome, error) {
 		started, ended := e.started, e.ended
 		rt := ended.Sub(started).Seconds()
 		o.Started, o.Ended, o.RuntimeSeconds = &started, &ended, &rt
-		if e.event == endExited {
+		if e.exitKnown { // also after a timeout or cancel: a late exit 0 is recorded, not obeyed
 			code := e.exitCode
 			o.ExitCode = &code
 		}
@@ -92,6 +94,9 @@ func classifyOutcome(e stepEnding) (Outcome, error) {
 	case !e.launched:
 		o.Outcome = outcomeFailed
 		return o, fmt.Errorf("start: %s", e.launchErr)
+	case e.logMissing:
+		o.Outcome = outcomeFailed
+		return o, fmt.Errorf("the forkserver wrote no %s (a server older than this metis?)%s", e.logPath, tail)
 	case e.exitCode != 0:
 		o.Outcome = outcomeFailed
 		return o, fmt.Errorf("exit status %d%s", e.exitCode, tail)

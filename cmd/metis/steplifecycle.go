@@ -138,7 +138,7 @@ func (e execStep) runLegacy(ctx context.Context, step experiment.Step, exe, step
 	end.ended = time.Now()
 	if procDone {
 		end.ended = x.at // runtime is launch to exit; termination is not compute
-		end.exitCode = cmd.ProcessState.ExitCode()
+		end.exitKnown, end.exitCode = true, cmd.ProcessState.ExitCode()
 		end.joined = e.awaitDrain(cmd.Process.Pid, drained, &end.signal)
 	}
 	pr.Close() // stop the copier if a holder remains; the log is read only after it stops
@@ -235,4 +235,66 @@ func writeOutcome(stepDir string, o Outcome) error {
 		return err
 	}
 	return os.WriteFile(filepath.Join(stepDir, outcomeFile), append(b, '\n'), 0o644)
+}
+
+// runForked is runLegacy's counterpart for a convention-conforming wrapper routed through the
+// warm forkserver (metis#44): the same budget, policy, classifier and outcome.json, with the
+// child's lifecycle (process group, live log, post-exit join) owned by the server that reaps it.
+// fellBack reports that nothing was dispatched and the caller should run the legacy path; once
+// a request is dispatched it never falls back (a legacy re-run could double-execute).
+func (e execStep) runForked(ctx context.Context, step experiment.Step, spec wrapperSpec, stepDir string, env map[string]string) (err error, fellBack bool) {
+	policy, err := experiment.ParseExecPolicy(step)
+	if err != nil {
+		return err, false
+	}
+	end := stepEnding{event: endExited, logPath: filepath.Join(stepDir, stepLogFile)}
+	record := func() error {
+		o, cerr := classifyOutcome(end)
+		if werr := writeOutcome(stepDir, o); werr != nil && cerr == nil {
+			return werr
+		}
+		return cerr
+	}
+	if e.budget != nil {
+		if err := e.budget.acquire(ctx, e.priority); err != nil {
+			end.event = endCancelled
+			return errors.Join(record(), err), false
+		}
+	}
+	run, dispatched, ferr := e.pool.execute(ctx, spec, stepDir, env,
+		forkOpts{timeout: policy.Timeout, grace: e.graceOr(), joinBound: e.joinBoundOr(), logPath: end.logPath})
+	if e.budget != nil {
+		e.budget.release() // before any legacy fallback acquires its own slot
+	}
+	switch {
+	case errors.Is(ferr, errCancelledBeforeDispatch):
+		end.event = endCancelled
+		return errors.Join(record(), ctx.Err()), false
+	case !dispatched:
+		return nil, true
+	}
+	end.launched, end.started, end.event, end.signal = true, run.started, run.event, run.signal
+	end.ended = time.Now()
+	if run.got {
+		end.ended = run.started.Add(time.Duration(run.resp.Runtime * float64(time.Second)))
+		end.exitKnown, end.exitCode, end.joined = true, run.resp.Exit, run.resp.Joined
+		end.logTruncated, end.tail = run.resp.LogTruncated, []byte(run.resp.Output)
+		if _, err := os.Stat(end.logPath); errors.Is(err, fs.ErrNotExist) {
+			end.logMissing = true
+		}
+		if run.event != endExited && run.resp.Exit == 0 {
+			fmt.Fprintf(e.out, "· step %s: an exit-0 result arrived after the %s; dropped\n", step.ID, map[endEvent]string{endDeadline: "timeout", endCancelled: "cancel"}[run.event])
+		}
+	}
+	// No response (none within the bound after KILL, or the server died with it in flight):
+	// the child may still run in its own group, so the join is unconfirmed.
+	end.pending = readPending(stepDir)
+	cerr := record()
+	if ferr != nil {
+		cerr = errors.Join(cerr, ferr)
+	}
+	if end.event == endCancelled && cerr != nil {
+		cerr = errors.Join(cerr, ctx.Err())
+	}
+	return cerr, false
 }

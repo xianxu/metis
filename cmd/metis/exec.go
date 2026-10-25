@@ -106,29 +106,16 @@ func (e execStep) Execute(ctx context.Context, step experiment.Step, runDir stri
 		return experiment.StepResult{}, err
 	}
 
-	// metis#44: route a convention-conforming wrapper through the warm fork-server. A leaf
-	// slot is held around the in-flight fork exactly as around a legacy subprocess. ok=false
-	// (non-conforming wrapper, or a server that failed/died — noticed loudly, once) falls
-	// through to the legacy spawn below; a RESPONSE, even exit != 0, is a real step outcome.
+	// metis#44: route a convention-conforming wrapper through the warm fork-server (runForked:
+	// the same budget, policy, classifier and outcome.json as the legacy path, metis#72). Only a
+	// step that dispatched nothing (non-conforming wrapper, or a server that failed to start or
+	// died earlier — noticed loudly, once) falls through to the legacy spawn below.
 	if e.pool != nil {
 		if spec, forkable := parseWrapper(exe); forkable {
-			if e.budget != nil {
-				if err := e.budget.acquire(ctx, e.priority); err != nil {
-					return experiment.StepResult{}, fmt.Errorf("cancelled before launch: %w", err)
-				}
-			}
-			resp, ok, ferr := e.pool.execute(spec, stepDir, env)
-			if e.budget != nil {
-				e.budget.release()
-			}
-			if ferr != nil {
-				// I1: dispatched-and-lost — the forked child may still be running in this
-				// stepDir; a legacy re-run would double-execute. Error the step instead.
-				return experiment.StepResult{}, fmt.Errorf("exec %s (forkserver): %v", exe, ferr)
-			}
-			if ok {
-				if resp.Exit != 0 {
-					return experiment.StepResult{}, fmt.Errorf("exec %s (forkserver): exit status %d\n%s", exe, resp.Exit, resp.Output)
+			err, fellBack := e.runForked(ctx, step, spec, stepDir, env)
+			if !fellBack {
+				if err != nil {
+					return experiment.StepResult{}, fmt.Errorf("exec %s (forkserver): %w", exe, err)
 				}
 				return e.collectResult(step, stepDir, runDir)
 			}
