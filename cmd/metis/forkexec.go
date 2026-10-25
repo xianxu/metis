@@ -106,8 +106,8 @@ type forkServer struct {
 
 	ready    chan struct{} // closed when the server's {"ready":true} line arrives
 	protocol int           // from the ready line (written before ready closes)
-	done   chan struct{} // closed when the reader loop exits
-	stderr bytes.Buffer  // capped diagnostics for start-failure messages (guarded by mu)
+	done     chan struct{} // closed when the reader loop exits
+	stderr   bytes.Buffer  // capped diagnostics for start-failure messages (guarded by mu)
 }
 
 const stderrCap = 64 << 10
