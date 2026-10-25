@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"time"
 
 	"github.com/xianxu/metis/pkg/experiment"
@@ -67,8 +68,8 @@ type activityExecutor struct {
 	emit  activityEmitter
 }
 
-func (e activityExecutor) Execute(step experiment.Step, runDir string) (experiment.StepResult, error) {
-	res, err := e.inner.Execute(step, runDir)
+func (e activityExecutor) Execute(ctx context.Context, step experiment.Step, runDir string) (experiment.StepResult, error) {
+	res, err := e.inner.Execute(ctx, step, runDir)
 	if err != nil {
 		return res, err
 	}

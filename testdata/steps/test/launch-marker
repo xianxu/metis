@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# test/launch-marker — metis#72: proves whether a step launched at all.
+touch "$METIS_RUN_DIR/launched"

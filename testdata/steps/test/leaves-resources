@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# test/leaves-resources — metis#72: starts an "external resource" and never retires it: lists it
+# in $METIS_PENDING_RESOURCES and exits 0.
+echo '["actor-1"]' > "$METIS_PENDING_RESOURCES"

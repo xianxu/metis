@@ -5,6 +5,7 @@ package main
 // loud legacy fallback for non-conforming wrappers.
 
 import (
+	"context"
 	"io"
 	"os"
 	"os/exec"
@@ -110,7 +111,7 @@ func TestForkServerPool_RealServerRoundTrip(t *testing.T) {
 	if err := os.MkdirAll(stepDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	resp, ok, ferr := pool.execute(wrapperSpec{root: root, module: "toyfork"}, stepDir,
+	resp, ok, ferr := poolExec(pool, wrapperSpec{root: root, module: "toyfork"}, stepDir,
 		map[string]string{"METIS_STEP_DIR": stepDir, "METIS_STEP_ID": "s1"})
 	if !ok || ferr != nil || resp.Exit != 0 {
 		t.Fatalf("round trip failed: ok=%v err=%v resp=%+v", ok, ferr, resp)
@@ -128,7 +129,7 @@ func TestForkServerPool_RealServerRoundTrip(t *testing.T) {
 	if err := os.MkdirAll(boomDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	resp, ok, ferr = pool.execute(wrapperSpec{root: root, module: "toyboom"}, boomDir,
+	resp, ok, ferr = poolExec(pool, wrapperSpec{root: root, module: "toyboom"}, boomDir,
 		map[string]string{"METIS_STEP_DIR": boomDir})
 	if !ok || ferr != nil {
 		t.Fatal("a step FAILURE is a real outcome, not server-unavailable")
@@ -149,7 +150,7 @@ func TestForkServerPool_BrokenRootFallsBack(t *testing.T) {
 	defer pool.shutdown()
 	bogus := t.TempDir() // no pyproject/venv — uv run will fail (or hang-free error)
 	for i := 0; i < 3; i++ {
-		_, ok, ferr := pool.execute(wrapperSpec{root: bogus, module: "x"}, t.TempDir(), nil)
+		_, ok, ferr := poolExec(pool, wrapperSpec{root: bogus, module: "x"}, t.TempDir(), nil)
 		if ok || ferr != nil {
 			t.Fatal("bogus root must be unavailable pre-dispatch (fallback-safe, no step error)")
 		}
@@ -178,7 +179,7 @@ func TestExecute_NonConformingWrapperUsesLegacyLoudly(t *testing.T) {
 		out: &out, pool: newServerPool(&out, nil)}
 	defer e.pool.shutdown()
 	runDir := filepath.Join(ws, "runs", "r1")
-	res, err := e.Execute(experiment.Step{ID: "sh", Uses: "test/shellstep"}, runDir)
+	res, err := e.Execute(context.Background(), experiment.Step{ID: "sh", Uses: "test/shellstep"}, runDir)
 	if err != nil {
 		t.Fatalf("legacy fallback must still run the step: %v", err)
 	}
@@ -189,7 +190,7 @@ func TestExecute_NonConformingWrapperUsesLegacyLoudly(t *testing.T) {
 		t.Errorf("fallback must be LOUD, got:\n%s", out.String())
 	}
 	// second execution: no second notice
-	if _, err := e.Execute(experiment.Step{ID: "sh2", Uses: "test/shellstep"}, runDir); err != nil {
+	if _, err := e.Execute(context.Background(), experiment.Step{ID: "sh2", Uses: "test/shellstep"}, runDir); err != nil {
 		t.Fatal(err)
 	}
 	if n := strings.Count(out.String(), "doesn't match"); n != 1 {
@@ -234,7 +235,7 @@ func TestForkServerPerf_LooseBound(t *testing.T) {
 	defer pool.shutdown()
 	forkOne := func() {
 		dir := t.TempDir()
-		resp, ok, ferr := pool.execute(wrapperSpec{root: root, module: "toyheavy"}, dir,
+		resp, ok, ferr := poolExec(pool, wrapperSpec{root: root, module: "toyheavy"}, dir,
 			map[string]string{"METIS_STEP_DIR": dir})
 		if !ok || ferr != nil || resp.Exit != 0 {
 			t.Fatalf("fork run failed: ok=%v err=%v resp=%+v", ok, ferr, resp)
@@ -287,7 +288,7 @@ func TestForkServerPool_MidFlightDeathErrorsTheStep(t *testing.T) {
 	}
 	done := make(chan result, 1)
 	go func() {
-		_, ok, ferr := pool.execute(wrapperSpec{root: root, module: "toyslow"}, t.TempDir(),
+		_, ok, ferr := poolExec(pool, wrapperSpec{root: root, module: "toyslow"}, t.TempDir(),
 			map[string]string{})
 		done <- result{ok, ferr}
 	}()
@@ -307,9 +308,10 @@ func TestForkServerPool_MidFlightDeathErrorsTheStep(t *testing.T) {
 	}
 	<-srv.ready
 	time.Sleep(300 * time.Millisecond) // let the request dispatch + fork
-	// Group-kill: `uv run` spawns python as a child — killing only the uv parent would
-	// leave the real server (and its forked step child) alive and the request would
-	// complete normally after the sleep.
+	// Group-kill: `uv run` spawns python as a child — killing only the uv parent would leave
+	// the real server alive and the request would complete normally after the sleep. The
+	// forked step child leads its own group (metis#72) and is not reached: it runs out its
+	// sleep, which is why a lost dispatch is unconfirmed, never re-run.
 	if err := syscall.Kill(-srv.cmd.Process.Pid, syscall.SIGKILL); err != nil {
 		t.Fatal(err)
 	}
@@ -348,7 +350,7 @@ func TestForkServer_ChildInheritsBlasPins(t *testing.T) {
 	if err := os.MkdirAll(stepDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	resp, ok, ferr := pool.execute(wrapperSpec{root: root, module: "toyenv"}, stepDir,
+	resp, ok, ferr := poolExec(pool, wrapperSpec{root: root, module: "toyenv"}, stepDir,
 		map[string]string{"METIS_STEP_DIR": stepDir})
 	if !ok || ferr != nil || resp.Exit != 0 {
 		t.Fatalf("fork exec failed: ok=%v err=%v resp=%+v", ok, ferr, resp)
@@ -360,4 +362,12 @@ func TestForkServer_ChildInheritsBlasPins(t *testing.T) {
 	if !strings.Contains(string(b), `"omp": "1"`) {
 		t.Errorf("forked child must inherit the server's pin; envcap.json = %s", b)
 	}
+}
+
+// poolExec runs one request with no timeout and default bounds, returning the response, whether
+// the request was dispatched, and the error (the pre-metis#72 shape these tests assert on).
+func poolExec(pool *serverPool, spec wrapperSpec, cwd string, env map[string]string) (forkResp, bool, error) {
+	run, dispatched, err := pool.execute(context.Background(), spec, cwd, env,
+		forkOpts{grace: defaultGrace, joinBound: defaultJoinBound, logPath: filepath.Join(cwd, stepLogFile)})
+	return run.resp, dispatched, err
 }

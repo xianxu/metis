@@ -17,6 +17,7 @@ var usesRE = regexp.MustCompile(`^[a-z0-9-]+/[a-z0-9-]+$`)
 //   - every `needs` id resolves to a real step in the same experiment,
 //   - every `uses` matches "<layer>/<steptype>",
 //   - every `with.cache` is a well-formed CachePolicy (metis#71),
+//   - every `with.exec` is a well-formed ExecPolicy (metis#72),
 //   - the needs-graph is acyclic (delegated to TopoSort — one impl, ARCH-DRY).
 //
 // Pure. Returns a single joined error (errors.Join) listing ALL violations, so an
@@ -46,6 +47,9 @@ func Validate(exp Experiment) error {
 			}
 		}
 		if _, err := ParseCachePolicy(s); err != nil {
+			errs = append(errs, err)
+		}
+		if _, err := ParseExecPolicy(s); err != nil {
 			errs = append(errs, err)
 		}
 	}

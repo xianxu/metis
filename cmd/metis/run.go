@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -62,6 +63,7 @@ func ensureCacheGitignore(cacheDir string) error {
 // runOpts are the inputs to one `metis run`. now/git/out are injected so the e2e
 // test gets a deterministic clock, a fake git probe, and can discard progress output.
 type runOpts struct {
+	ctx      context.Context // metis#72: run cancellation (SIGINT/SIGTERM); nil = Background
 	expPath  string
 	runID    string
 	stepPath []string
@@ -263,7 +265,7 @@ func runResolvedExperimentAdmitted(exp experiment.Experiment, o runOpts, runID s
 	exec = activityExecutor{inner: exec, now: now, emit: o.activity}
 	runner := experiment.Runner{Exec: exec, Now: now}
 	fmt.Fprintf(out, "metis: run %s of experiment %q\n", runID, exp.ID)
-	run, steps, runErr := runner.Run(exp, runID, runDir)
+	run, steps, runErr := runner.Run(orBackground(o.ctx), exp, runID, runDir)
 
 	// Execution-time enforcement: Runner.Run validates the experiment BEFORE any
 	// step executes, so a semantically-invalid experiment (dangling needs, bad
@@ -324,4 +326,12 @@ func writeRunJSON(runDir string, run experiment.Run) error {
 		return err
 	}
 	return os.WriteFile(filepath.Join(runDir, "run.json"), append(b, '\n'), 0o644)
+}
+
+// orBackground is the nil-safe run context: option structs built by tests leave ctx unset.
+func orBackground(ctx context.Context) context.Context {
+	if ctx == nil {
+		return context.Background()
+	}
+	return ctx
 }

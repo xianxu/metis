@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -16,7 +17,7 @@ import (
 // held-out scores have non-zero spread (the predictive rule's variance path).
 type familyFakeExec struct{}
 
-func (familyFakeExec) Execute(step experiment.Step, runDir string) (experiment.StepResult, error) {
+func (familyFakeExec) Execute(ctx context.Context, step experiment.Step, runDir string) (experiment.StepResult, error) {
 	stepDir := filepath.Join(runDir, step.ID)
 	if err := os.MkdirAll(stepDir, 0o755); err != nil {
 		return experiment.StepResult{}, err

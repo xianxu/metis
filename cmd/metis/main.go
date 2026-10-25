@@ -7,40 +7,48 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
 	"runtime"
 	"strconv"
 	"strings"
+	"syscall"
 )
 
 func main() {
-	if err := run(os.Args[1:]); err != nil {
+	// metis#72: SIGINT/SIGTERM cancel the run: a running step is terminated (TERM, grace,
+	// KILL) and recorded cancelled, and no further step starts. A second signal exits hard:
+	// stop() restores the default disposition once the first has been seen.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	go func() { <-ctx.Done(); stop() }()
+	if err := run(ctx, os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, "metis:", err)
 		os.Exit(1)
 	}
 }
 
-func run(args []string) error {
+func run(ctx context.Context, args []string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("usage: metis run [--run <id>] <experiment.md>")
 	}
 	switch args[0] {
 	case "run":
-		return cmdRun(args[1:])
+		return cmdRun(ctx, args[1:])
 	case "select":
-		return cmdSelect(args[1:])
+		return cmdSelect(ctx, args[1:])
 	case "ledger":
 		return cmdLedger(args[1:])
 	case "blend":
-		return cmdBlend(args[1:])
+		return cmdBlend(ctx, args[1:])
 	default:
 		return fmt.Errorf("unknown subcommand %q (want: run | select | ledger | blend)", args[0])
 	}
 }
 
-func cmdRun(args []string) error {
+func cmdRun(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	runID := fs.String("run", "", "run id (default: run-<UTC timestamp>; ignored for a multi-point sweep — each point keys off its content-address)")
 	cache := fs.Bool("cache", true, "use the metis#2 validating-trace step cache (<expDir>/.metis-cache); --cache=false to disable")
@@ -66,6 +74,7 @@ func cmdRun(args []string) error {
 	// cmdRun just passes maxParallel; runExperiment establishes the parallel invariant
 	// (leafSem + syncWriter) in one home so no runOpts caller can forget it (#31).
 	o := runOpts{
+		ctx:          ctx,
 		expPath:      rest[0],
 		runID:        *runID,
 		stepPath:     stepPath(rest[0]),

@@ -1,6 +1,9 @@
 package main
 
 import (
+	"context"
+	"errors"
+	"math/rand"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -34,7 +37,7 @@ func TestSelectLeafBudget(t *testing.T) {
 // decide), then release one at a time and record the grant order.
 func TestPrioritySem_GrantsLowestPriorityFirst(t *testing.T) {
 	s := newPrioritySem(1)
-	s.acquire(9) // the initial holder saturates the single slot
+	s.acquire(context.Background(), 9) // the initial holder saturates the single slot
 
 	const nWaiters = 4
 	prios := []int{3, 2, 1, 0}
@@ -45,7 +48,7 @@ func TestPrioritySem_GrantsLowestPriorityFirst(t *testing.T) {
 			// mark enqueue intent, then block; the test paces releases so all four are
 			// queued before the first release (see the wait below).
 			queued <- p
-			s.acquire(p)
+			s.acquire(context.Background(), p)
 			granted <- p
 			s.release()
 		}(p)
@@ -83,7 +86,7 @@ func TestPrioritySem_HonorsCapacity(t *testing.T) {
 		wg.Add(1)
 		go func(p int) {
 			defer wg.Done()
-			s.acquire(p)
+			s.acquire(context.Background(), p)
 			n := atomic.AddInt64(&live, 1)
 			for {
 				old := atomic.LoadInt64(&peak)
@@ -114,13 +117,13 @@ func TestPrioritySem_HonorsCapacity(t *testing.T) {
 // TestPrioritySem_FIFOWithinPriority: same-priority waiters are granted in arrival order.
 func TestPrioritySem_FIFOWithinPriority(t *testing.T) {
 	s := newPrioritySem(1)
-	s.acquire(0)
+	s.acquire(context.Background(), 0)
 	const n = 5
 	granted := make(chan int, n)
 	for i := 0; i < n; i++ {
 		// enqueue strictly in order: acquire the i-th only after i-1 is definitely queued.
 		go func(i int) {
-			s.acquire(2) // all same priority
+			s.acquire(context.Background(), 2) // all same priority
 			granted <- i
 			s.release()
 		}(i)
@@ -137,8 +140,8 @@ func TestPrioritySem_FIFOWithinPriority(t *testing.T) {
 // TestChanSem_CountsAndBounds: the default budget bounds concurrency and gauges occupancy.
 func TestChanSem_CountsAndBounds(t *testing.T) {
 	s := newChanSem(2)
-	s.acquire(0)
-	s.acquire(5) // priority ignored by the default budget
+	s.acquire(context.Background(), 0)
+	s.acquire(context.Background(), 5) // priority ignored by the default budget
 	if busy, capacity := s.gauge(); busy != 2 || capacity != 2 {
 		t.Fatalf("chanSem gauge = (%d,%d), want (2,2)", busy, capacity)
 	}
@@ -165,5 +168,109 @@ func waitForWaiters(t *testing.T, s *prioritySem, n int) {
 			t.Fatalf("timed out waiting for %d queued waiters (have %d)", n, got)
 		}
 		time.Sleep(100 * time.Microsecond)
+	}
+}
+
+// metis#72: a waiter cancelled before any handoff leaves the queue; the holder's slot is
+// untouched and a later release frees it (no slot is lost or invented).
+func TestPrioritySem_CancelBeforeHandoff(t *testing.T) {
+	s := newPrioritySem(1)
+	if err := s.acquire(context.Background(), 0); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- s.acquire(ctx, 1) }()
+	waitForWaiters(t, s, 1)
+	cancel()
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled acquire = %v, want context.Canceled", err)
+	}
+	if busy, _ := s.gauge(); busy != 1 || s.waiterCount() != 0 {
+		t.Fatalf("after cancel: busy %d, waiters %d; want 1, 0", busy, s.waiterCount())
+	}
+	s.release()
+	if busy, _ := s.gauge(); busy != 0 {
+		t.Fatalf("after release: busy %d, want 0", busy)
+	}
+}
+
+// metis#72: the race the cancel path must survive, forced deterministically: the holder's
+// release hands the slot to the waiter after the waiter has observed cancellation but before
+// it takes the lock. The waiter must give the slot back: to the next waiter if one is queued,
+// else to the pool. Slots are conserved either way.
+func TestPrioritySem_HandoffRacesCancel(t *testing.T) {
+	for _, second := range []bool{false, true} {
+		s := newPrioritySem(1)
+		if err := s.acquire(context.Background(), 0); err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		s.onCancelObserved = func() { s.release() } // the handoff lands inside the race window
+		done := make(chan error, 1)
+		go func() { done <- s.acquire(ctx, 1) }()
+		waitForWaiters(t, s, 1)
+		secondGot := make(chan struct{})
+		if second {
+			go func() {
+				if err := s.acquire(context.Background(), 2); err == nil {
+					close(secondGot)
+				}
+			}()
+			waitForWaiters(t, s, 2)
+		}
+		cancel()
+		if err := <-done; !errors.Is(err, context.Canceled) {
+			t.Fatalf("second=%v: cancelled acquire = %v, want context.Canceled", second, err)
+		}
+		want := 0
+		if second {
+			<-secondGot // the returned slot reached the queued waiter
+			want = 1
+		}
+		if busy, _ := s.gauge(); busy != want || s.waiterCount() != 0 {
+			t.Fatalf("second=%v: busy %d, waiters %d; want %d, 0 (slot conserved)", second, busy, s.waiterCount(), want)
+		}
+	}
+}
+
+func TestChanSem_CancelWhileFull(t *testing.T) {
+	s := newChanSem(1)
+	if err := s.acquire(context.Background(), 0); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := s.acquire(ctx, 0); !errors.Is(err, context.Canceled) {
+		t.Fatalf("acquire on a full, cancelled chanSem = %v, want context.Canceled", err)
+	}
+	if busy, _ := s.gauge(); busy != 1 {
+		t.Fatalf("busy %d, want 1", busy)
+	}
+}
+
+// Conservation under arbitrary interleavings of grants, releases and cancels: whatever the
+// scheduler does, every acquire that succeeded is released and the pool ends empty.
+func TestPrioritySem_ConservesSlotsUnderCancel(t *testing.T) {
+	r := rand.New(rand.NewSource(72))
+	for iter := 0; iter < 200; iter++ {
+		s := newPrioritySem(2)
+		var wg sync.WaitGroup
+		for i := 0; i < 8; i++ {
+			ctx, cancel := context.WithCancel(context.Background())
+			delay := time.Duration(r.Intn(200)) * time.Microsecond
+			wg.Add(1)
+			go func(p int) {
+				defer wg.Done()
+				go func() { time.Sleep(delay); cancel() }()
+				if err := s.acquire(ctx, p); err == nil {
+					s.release()
+				}
+			}(i % 3)
+		}
+		wg.Wait()
+		if busy, _ := s.gauge(); busy != 0 || s.waiterCount() != 0 {
+			t.Fatalf("iter %d: busy %d, waiters %d after all returned; want 0, 0", iter, busy, s.waiterCount())
+		}
 	}
 }

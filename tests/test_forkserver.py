@@ -7,9 +7,13 @@ from __future__ import annotations
 
 import json
 import os
+import select
+import signal
 import subprocess
 import sys
 import textwrap
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -173,3 +177,382 @@ def test_eof_drains_in_flight_children(server, tmp_path):
     assert resp["exit"] == 0
     assert server.wait(timeout=30) == 0
     assert json.load(open(step / "metrics.json")) == {"ok": 1}
+
+
+# ── metis#72: live capped log, process groups, cancel, and the server-owned join ──────────────
+
+MARKER = "\n[test: truncated]\n"
+
+
+def _gate(tmp_path: Path) -> Path:
+    g = tmp_path / "gate"
+    os.mkfifo(g)
+    return g
+
+
+def _open_gate(g: Path) -> None:
+    with open(g, "w") as fh:
+        fh.write("go\n")
+
+
+def _wait_path(p: Path, timeout: float = 10.0) -> None:
+    deadline = time.monotonic() + timeout
+    while not p.exists():
+        assert time.monotonic() < deadline, f"timed out waiting for {p}"
+        time.sleep(0.01)
+
+
+def _response_within(proc, timeout: float):
+    """The next response line, or None if none arrives within timeout."""
+    r, _, _ = select.select([proc.stdout], [], [], timeout)
+    if not r:
+        return None
+    return json.loads(proc.stdout.readline())
+
+
+def _lifecycle_req(i, module, step, **extra):
+    req = {"id": i, "module": module, "cwd": str(step), "env": {"METIS_STEP_DIR": str(step)},
+           "log_path": str(step / "step.log"), "log_cap": 1 << 20, "log_marker": MARKER,
+           "grace": 0.2, "join_bound": 0.3}
+    req["env"].update(extra.pop("env", {}))
+    req.update(extra)
+    return req
+
+
+GATED = """
+    import os, sys
+    print("early", flush=True)
+    open("ready", "w").close()
+    open(os.environ["TOY_GATE"]).read()
+    print("late", flush=True)
+"""
+
+
+def test_log_streams_before_exit_and_child_has_own_group(server, tmp_path):
+    _toy(tmp_path, "toy_gated", GATED + """
+    open("pgid", "w").write("%d %d" % (os.getpgid(0), os.getpid()))
+    """)
+    step, gate = _mkstep(tmp_path, 1), _gate(tmp_path)
+    _request(server, _lifecycle_req(1, "toy_gated", step, env={"TOY_GATE": str(gate)}))
+    _wait_path(step / "ready")
+    assert (step / "step.log").read_text() == "early\n"  # visible while the child still runs
+    _open_gate(gate)
+    resp = _responses(server, 1)[1]
+    assert resp["exit"] == 0 and resp["joined"] is True and resp["log_truncated"] is False, resp
+    assert (step / "step.log").read_text() == "early\nlate\n"
+    assert "late" in resp["output"]
+    pgid, pid = (step / "pgid").read_text().split()
+    assert pgid == pid, "a forked step must lead its own process group"
+
+
+def test_cancel_term(server, tmp_path):
+    _toy(tmp_path, "toy_gated", GATED)
+    step, gate = _mkstep(tmp_path, 1), _gate(tmp_path)
+    _request(server, _lifecycle_req(1, "toy_gated", step, env={"TOY_GATE": str(gate)}))
+    _wait_path(step / "ready")
+    _request(server, {"cancel": 1, "signal": "TERM"})
+    resp = _responses(server, 1)[1]
+    assert resp["exit"] == -signal.SIGTERM and resp["joined"] is True, resp
+
+
+def test_cancel_kill_when_term_ignored(server, tmp_path):
+    _toy(tmp_path, "toy_stubborn", """
+    import signal, time
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    open("ready", "w").close()
+    while True:
+        time.sleep(0.05)
+    """)
+    step = _mkstep(tmp_path, 1)
+    _request(server, _lifecycle_req(1, "toy_stubborn", step))
+    _wait_path(step / "ready")
+    _request(server, {"cancel": 1, "signal": "TERM"})
+    assert _response_within(server, 0.5) is None, "TERM is ignored: no response yet"
+    _request(server, {"cancel": 1, "signal": "KILL"})
+    resp = _responses(server, 1)[1]
+    assert resp["exit"] == -signal.SIGKILL, resp
+
+
+def test_cancel_after_reap_is_noop(server, tmp_path):
+    _toy(tmp_path, "toy_quick", """
+    print("done")
+    """)
+    s1, s2 = _mkstep(tmp_path, 1), _mkstep(tmp_path, 2)
+    _request(server, _lifecycle_req(1, "toy_quick", s1))
+    assert _responses(server, 1)[1]["exit"] == 0
+    _request(server, {"cancel": 1, "signal": "KILL"})  # reaped: must signal nothing
+    _request(server, _lifecycle_req(2, "toy_quick", s2))
+    assert _responses(server, 1)[2]["exit"] == 0, "the server survives a stale cancel"
+
+
+def test_output_is_tail_and_log_is_capped(server, tmp_path):
+    _toy(tmp_path, "toy_chatty", """
+    import sys
+    for i in range(20000):
+        sys.stdout.write("line %06d\\n" % i)
+    """)
+    step = _mkstep(tmp_path, 1)
+    _request(server, _lifecycle_req(1, "toy_chatty", step, log_cap=1000))
+    resp = _responses(server, 1)[1]
+    assert resp["exit"] == 0 and resp["log_truncated"] is True, resp
+    log = (step / "step.log").read_text()
+    assert log.startswith("line 000000\n") and log.endswith(MARKER) and len(log) <= 1000 + len(MARKER)
+    assert resp["output"].endswith("line 019999\n") and len(resp["output"]) <= 64 * 1024
+
+
+def test_escaped_holder_is_unjoined_within_bound(server, tmp_path):
+    _toy(tmp_path, "toy_escaper", """
+    import os, subprocess, sys, time
+    subprocess.Popen([sys.executable, "-c",
+        "import os, sys, time; os.setsid(); open(sys.argv[1], 'w').write(str(os.getpid())); time.sleep(30)",
+        "orphan.pid"])
+    while not os.path.exists("orphan.pid") or not open("orphan.pid").read():
+        time.sleep(0.01)
+    """)
+    step = _mkstep(tmp_path, 1)
+    try:
+        start = time.monotonic()
+        _request(server, _lifecycle_req(1, "toy_escaper", step))
+        resp = _response_within(server, 5.0)
+        assert resp is not None, "the server must answer within its join bounds"
+        assert resp["exit"] == 0 and resp["joined"] is False, resp
+        assert time.monotonic() - start < 3.0
+        # runtime is fork to exit; the bounded join wait that followed is not compute
+        assert 0 <= resp["runtime"] < 0.3 + 0.2 + 0.3, resp
+    finally:
+        pid = int((step / "orphan.pid").read_text())
+        os.kill(pid, signal.SIGKILL)
+
+
+def test_in_group_lingerer_is_stopped(server, tmp_path):
+    _toy(tmp_path, "toy_lingerer", """
+    import subprocess
+    p = subprocess.Popen(["sleep", "30"])
+    open("lingerer.pid", "w").write(str(p.pid))
+    """)
+    step = _mkstep(tmp_path, 1)
+    _request(server, _lifecycle_req(1, "toy_lingerer", step))
+    resp = _response_within(server, 5.0)
+    assert resp is not None and resp["exit"] == 0 and resp["joined"] is True, resp
+    pid = int((step / "lingerer.pid").read_text())
+    deadline = time.monotonic() + 5
+    while True:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            break
+        if time.monotonic() > deadline:
+            os.kill(pid, signal.SIGKILL)
+            pytest.fail("the in-group lingerer survived")
+        time.sleep(0.01)
+
+
+def test_ready_line_declares_protocol(tmp_path):
+    env = dict(os.environ, METIS_FORKSERVER_PRELOAD="")
+    proc = subprocess.Popen([sys.executable, "-m", "metis.forkserver"], stdin=subprocess.PIPE,
+                            stdout=subprocess.PIPE, cwd=REPO, env=env, text=True)
+    try:
+        assert json.loads(proc.stdout.readline())["protocol"] == 2
+    finally:
+        proc.stdin.close()
+        proc.wait(timeout=30)
+
+
+def test_unopenable_log_never_launches(server, tmp_path):
+    """A log the server cannot open refuses before fork: no child, an explicit not-launched answer."""
+    _toy(tmp_path, "toy_marker", """
+    open("launched", "w").close()
+    """)
+    step = _mkstep(tmp_path, 1)
+    _request(server, _lifecycle_req(1, "toy_marker", step, log_path=str(step)))  # a directory
+    resp = _responses(server, 1)[1]
+    assert resp["launched"] is False and resp["exit_known"] is False and "error" in resp, resp
+    assert not (step / "launched").exists()
+
+
+class _FailingSink:
+    def write(self, b):
+        raise OSError(28, "No space left on device")
+
+    def flush(self):
+        pass
+
+    def close(self):
+        pass
+
+
+def test_log_sink_error_keeps_draining_and_reports(tmp_path):
+    """A sink error never stops consumption (the child is never SIGPIPEd): the tail keeps
+    filling, the first error is kept, and EOF on the owned pipe is still what confirms the join."""
+    from metis import forkserver as fs
+
+    log = fs._Log(str(tmp_path / "step.log"), 1 << 20, MARKER)
+    log.fh.close()
+    log.fh = _FailingSink()
+    r, w = os.pipe()
+    os.write(w, b"a" * 1000 + b"\nfinished-cleanly\n")
+    os.close(w)
+    wake_r, wake_w = os.pipe()
+    try:
+        assert fs._pump(r, log, wake_r) is True, "EOF observed: the join is confirmed"
+    finally:
+        for fd in (wake_r, wake_w):
+            os.close(fd)
+    assert "No space left" in log.error
+    assert log.tail.endswith(b"finished-cleanly\n")
+
+
+def test_pump_stopped_by_wake_is_not_eof(tmp_path):
+    """Stopping the reader (a holder outside the group keeps the pipe) is not a join."""
+    from metis import forkserver as fs
+
+    log = fs._Log(None, None, None)
+    r, w = os.pipe()  # the writer stays open: no EOF will come
+    wake_r, wake_w = os.pipe()
+    os.write(wake_w, b"x")
+    try:
+        assert fs._pump(r, log, wake_r) is False
+    finally:
+        for fd in (w, wake_r, wake_w):
+            os.close(fd)
+
+
+def _fork_quiet_child(behavior: str) -> tuple[int, int]:
+    """Fork a child (stdout and stderr to /dev/null, so its pipe EOF arrives at once) that either
+    exits 3 after a moment ("exits") or ignores TERM and loops ("stubborn"). Returns (pid, r)."""
+    r, w = os.pipe()
+    pid = os.fork()
+    if pid == 0:  # never returns: no pytest code runs in the child
+        try:
+            os.setpgid(0, 0)
+            devnull = os.open(os.devnull, os.O_WRONLY)
+            os.dup2(devnull, 1)
+            os.dup2(devnull, 2)
+            os.close(r)
+            os.close(w)
+            if behavior == "exits":
+                time.sleep(0.2)
+                os._exit(3)
+            signal.signal(signal.SIGTERM, signal.SIG_IGN)
+            while True:
+                time.sleep(0.05)
+        finally:
+            os._exit(1)
+    # As the server does (metis#72): set the group in the parent too, so a signal sent before the
+    # child is scheduled still reaches it. Without this a loaded machine lets TERM and KILL both
+    # miss (ESRCH), and the child then makes its group and loops on forever.
+    try:
+        os.setpgid(pid, pid)
+    except OSError:
+        pass
+    os.close(w)
+    return pid, r
+
+
+def _run_waiter(fs, pid, r):
+    import io as _io
+
+    lock = threading.Lock()
+    out = _io.StringIO()
+    fs._children[1] = pid
+    t = threading.Thread(target=fs._wait, args=({"id": 1, "grace": 0.2, "join_bound": 0.2}, pid, r,
+                                                fs._Log(None, None, None), lock, out), daemon=True)
+    t.start()
+    return t, lock, out
+
+
+def _check_answered_and_reaped(fs, t, lock, out, pid):
+    time.sleep(0.1)
+    assert lock.acquire(timeout=0.5), "the waiter must never block while holding the lock"
+    lock.release()
+    t.join(timeout=5)
+    assert not t.is_alive(), "the waiter must finish within its bounds"
+    resp = json.loads(out.getvalue())
+    with pytest.raises(ChildProcessError):
+        os.waitpid(pid, os.WNOHANG)  # already reaped by the waiter
+    assert 1 not in fs._children
+    return resp
+
+
+def _cleanup(fs, pid):
+    try:
+        os.kill(pid, signal.SIGKILL)
+        os.waitpid(pid, 0)
+    except (ProcessLookupError, ChildProcessError):
+        pass
+    fs._children.pop(1, None)
+
+
+def _boom(*_a, **_k):
+    raise RuntimeError("injected waiter failure")
+
+
+# The child of these in-process forks makes only raw os calls and exits; it takes no Python lock,
+# so forking from pytest's multi-threaded process is safe here.
+@pytest.mark.filterwarnings("ignore:This process .* is multi-threaded:DeprecationWarning")
+def test_waiter_failure_after_exit_answers_unjoined_and_reaps(monkeypatch):
+    """BR-10: a waiter failure after the child's exit still reaps it and answers, unjoined, with
+    the real exit code (not an invented one)."""
+    from metis import forkserver as fs
+
+    monkeypatch.setattr(fs, "_drain_join", _boom)  # before the fork: a failed patch leaks nothing
+    pid, r = _fork_quiet_child("exits")
+    try:
+        t, lock, out = _run_waiter(fs, pid, r)
+        resp = _check_answered_and_reaped(fs, t, lock, out, pid)
+        assert resp["joined"] is False and "injected waiter failure" in resp["error"], resp
+        assert resp["exit_known"] is True and resp["exit"] == 3, resp
+    finally:
+        _cleanup(fs, pid)
+
+
+# The child of these in-process forks makes only raw os calls and exits; it takes no Python lock,
+# so forking from pytest's multi-threaded process is safe here.
+@pytest.mark.filterwarnings("ignore:This process .* is multi-threaded:DeprecationWarning")
+def test_exit_watcher_failure_falls_back_and_still_reaps(monkeypatch):
+    """BR-10: when exit observation itself fails, a non-blocking reap under the lock takes over:
+    a cancel still ends the child, which is reaped and answered (unjoined, error reported)."""
+    from metis import forkserver as fs
+
+    monkeypatch.setattr(fs, "_wait_exit_noreap", _boom)
+    pid, r = _fork_quiet_child("stubborn")
+    try:
+        t, lock, out = _run_waiter(fs, pid, r)
+        time.sleep(0.2)
+        assert lock.acquire(timeout=1), "the waiter must not hold the lock while the child lives"
+        try:
+            fs._signal_group(1, signal.SIGKILL)  # what a cancel request does
+        finally:
+            lock.release()
+        resp = _check_answered_and_reaped(fs, t, lock, out, pid)
+        assert resp["exit_known"] is True and resp["exit"] == -signal.SIGKILL, resp
+        assert resp["joined"] is False and "injected waiter failure" in resp["error"], resp
+    finally:
+        _cleanup(fs, pid)
+
+
+# See the note above test_waiter_failure_after_exit_answers_unjoined_and_reaps.
+@pytest.mark.filterwarnings("ignore:This process .* is multi-threaded:DeprecationWarning")
+def test_watcher_start_failure_still_ends_the_child(monkeypatch):
+    """BR-18: if the exit watcher cannot even start, the waiter still escalates (TERM, KILL) on
+    the child it owns and answers; the child does not keep running."""
+    from metis import forkserver as fs
+
+    monkeypatch.setattr(fs, "_start_watcher", _boom)
+    pid, r = _fork_quiet_child("stubborn")
+    try:
+        t, lock, out = _run_waiter(fs, pid, r)
+        t.join(timeout=5)
+        assert not t.is_alive(), "the waiter must finish within its bounds"
+        resp = json.loads(out.getvalue())
+        assert resp["joined"] is False and "injected waiter failure" in resp["error"], resp
+        deadline = time.monotonic() + 5
+        while True:  # KILLed by the escalation; reaped by the late reaper (the one reaper: the
+            try:     # test only probes, since a second waitpid would race it)
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                break
+            assert time.monotonic() < deadline, "the stubborn child is still running"
+            time.sleep(0.02)
+    finally:
+        _cleanup(fs, pid)

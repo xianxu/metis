@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -210,8 +211,8 @@ type scheduleTraceExec struct {
 	trace *scheduleTrace
 }
 
-func (e scheduleTraceExec) Execute(step experiment.Step, runDir string) (experiment.StepResult, error) {
-	result, err := e.in.Execute(step, runDir)
+func (e scheduleTraceExec) Execute(ctx context.Context, step experiment.Step, runDir string) (experiment.StepResult, error) {
+	result, err := e.in.Execute(ctx, step, runDir)
 	if err == nil && step.ID == "train" {
 		e.trace.add("train-complete:" + runDir)
 	}
@@ -276,7 +277,7 @@ type peakExec struct {
 	in   foldFakeExec
 }
 
-func (p peakExec) Execute(step experiment.Step, runDir string) (experiment.StepResult, error) {
+func (p peakExec) Execute(ctx context.Context, step experiment.Step, runDir string) (experiment.StepResult, error) {
 	p.sem <- struct{}{}
 	p.mu.Lock()
 	*p.cur++
@@ -284,7 +285,7 @@ func (p peakExec) Execute(step experiment.Step, runDir string) (experiment.StepR
 		*p.peak = *p.cur
 	}
 	p.mu.Unlock()
-	res, err := p.in.Execute(step, runDir)
+	res, err := p.in.Execute(ctx, step, runDir)
 	time.Sleep(time.Millisecond) // hold the slot so concurrency builds against the cap
 	p.mu.Lock()
 	*p.cur--
@@ -428,7 +429,7 @@ func newFailureBarrierExec() *failureBarrierExec {
 	}
 }
 
-func (f *failureBarrierExec) Execute(step experiment.Step, runDir string) (experiment.StepResult, error) {
+func (f *failureBarrierExec) Execute(ctx context.Context, step experiment.Step, runDir string) (experiment.StepResult, error) {
 	if step.ID == partitionStepID {
 		f.mu.Lock()
 		if _, seen := f.innerDirs[runDir]; !seen {
@@ -455,7 +456,7 @@ func (f *failureBarrierExec) Execute(step experiment.Step, runDir string) (exper
 		}
 		return experiment.StepResult{}, errRunAborted
 	}
-	return f.in.Execute(step, runDir)
+	return f.in.Execute(ctx, step, runDir)
 }
 
 func waitFailureBarrier(ch <-chan struct{}, what string) error {
@@ -527,8 +528,8 @@ func TestNestedCV_FirstFailureStopsAllObservableWork(t *testing.T) {
 	}
 }
 
-func (s sleepExec) Execute(step experiment.Step, runDir string) (experiment.StepResult, error) {
-	res, err := s.in.Execute(step, runDir)
+func (s sleepExec) Execute(ctx context.Context, step experiment.Step, runDir string) (experiment.StepResult, error) {
+	res, err := s.in.Execute(ctx, step, runDir)
 	time.Sleep(s.d)
 	return res, err
 }
