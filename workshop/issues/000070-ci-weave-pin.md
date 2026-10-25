@@ -85,6 +85,8 @@ other repositories' pins.
 
 ## Log
 
+
+- 2026-10-25: closed — pin authored at the Spec SHA; workflow validator accepts it and refuses 5 malformed shapes; pinned weave builds with vcs.revision=63d6bfd86509d97649e10d7a5dd1e9a06db17d21 and vcs.modified=false; no manifest names .sdlc; pin byte-identical across weave compile. no-plan-check: the one open item is opening the PR and its real CI run, which follow close (local-gates-guard red until the operator labels).; review verdict: SHIP
 Filed under explicit hub authorization from this repository's primary :0
 checkout, unclaimed, depending on ariadne#459. Source class A; inventory:
 [verified active GitHub consumers](https://github.com/xianxu/ariadne/blob/000459-weave-release-downstream-ci-still-runs-weave-0-1-0-pre-422-vocabulary-changes-break-every-downstream-merge-check/workshop/plans/000459-downstream-compiler-inventory.md).
