@@ -60,3 +60,11 @@ TestExecStep_ConfinementAgreesAcrossPathForms (real uv cv-split, physical exp
 dir and logical read root: within-root read succeeds). Both failed before the
 fix. Several claims are open at once in this slot (ariadne#580 fixes
 attribution).
+
+2026-10-25 metis:1: close round 2 SHIP; two advisories. (1) The metis#70
+lesson in workshop/lessons.md rides along here because #70 had already landed
+when its lesson was written; it is one bullet, kept beside this issue's lesson
+on the same class (a check must not misreport its own preconditions). (2) No
+direct table test for physicalPath's edge branches (ENOTDIR ancestor, dangling
+symlink, which both return errors, and the root fallback, unreachable in
+practice since / exists): left as advisory, not chased after a SHIP.
