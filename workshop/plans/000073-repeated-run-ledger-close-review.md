@@ -378,3 +378,72 @@ dispose:
 ```
 
 <!-- sdlc-review-usage [{"version":1,"intent":{"disposable_root":true,"id":"ffc21355-9c95-407d-98d0-6e9ecaabe208","repository":"github.com/xianxu/metis","issue_id":"000073","recipe":"fix-review","round":3,"attempt":1,"agent":"claude","root":"/Volumes/TestScratch/review-checkouts/20be9ef6bc3cbbcd","reviewed_head":"214f1d00904e90d35acfb6e4dc6ef0fcb5b31521","slot":"metis:1","requested_at":"2026-10-25T20:51:00.096497Z"},"phase":"finished","pid":80457,"started_at":"2026-10-25T20:51:00.19467Z","finished_at":"2026-10-25T20:52:09.615269Z","session_id":"20ad1185-b0f7-44a7-b0dc-de8206c18dab","outcome":"returned"}] -->
+
+---
+
+## Re-review — 2026-10-25T15:43:32-07:00 (SHIP)
+
+| field | value |
+|-------|-------|
+| issue | 73 — Repeat-shaped run records and ledger rows without CV folds |
+| repo | metis |
+| issue file | workshop/issues/000073-repeated-run-ledger.md |
+| boundary | whole-issue close |
+| milestone | — |
+| window | 2790f41261abff41265df45de229103eff052553..059c14eb4a96517ea4d80921dddbe4db9082f318 |
+| command | sdlc close --issue 73 |
+| reviewer | claude (anthropic; author anthropic) |
+| isolation | fenced |
+| timestamp | 2026-10-25T15:43:32-07:00 |
+| verdict | SHIP |
+
+## Review
+
+Running the modified test against the pinned ariadne. Fixing the go.work path.
+
+```verdict
+verdict: SHIP
+confidence: high
+```
+
+All prior findings (BR-1 to BR-10) were already disposed in earlier rounds, so none are open. This window adds one code change, which is test-only. After #72 merged, the integrated suite failed in `TestExecStep_EscapedGrandchildIsCleanupUnconfirmed/exit_0`: under suite load the 300ms `joinBound` was shorter than python3 takes to start. The fix sets a 3s bound for the exit-0 subtest only (`cmd/metis/exec_lifecycle_test.go:194-198`) and prints the runtime value instead of the pointer (`:219-224`). The other changes are a lesson in `workshop/lessons.md`, the gate and review records, and log, hours and card metadata in the issue file. `## Spec`, `## Revisions` and `## Done when` are untouched, so scope did not change. There are no conflict resolutions to judge. I ran the test against the pinned ariadne (a temp `go.work` replace pointing at `f96ece89…`) with `-count=3`, and every subtest passed.
+
+1. **Strengths**
+   - The wider bound applies only to the subtest that asserts runtime. The `exit 1` and `timeout` cases keep the 300ms bound, so their timing coverage is unchanged.
+   - The assertion still tests what it should. The drain wait runs until `joinBound`, and the test still requires runtime < `joinBound`. With a 3s bound, "the runtime excludes the drain wait" is clearly true or false, instead of depending on how long the interpreter takes to start.
+   - The failure message now prints the dereferenced runtime and separates a missing runtime from one over the bound (`:220-224`).
+   - The lesson (`workshop/lessons.md:107-110`) states a general rule, not just this one case.
+
+2. **Critical:** none.
+
+3. **Important:** none.
+
+4. **Minor**
+   - Each `exit_0` run now takes about 6s, against about 0.6–0.9s for the other subtests, because the drain wait runs to the new 3s bound. That costs suite time but is correct. A smaller bound such as 1.5s would halve it if suite time ever matters.
+   - Picking the subtest with `c.name == "exit 0"` is the same name-keyed pattern the assertion below it already uses. A `joinBound` field on the case struct would be tidier, but it isn't worth a finding.
+
+5. **Test coverage notes**
+   - Over three runs, `exit_0` took 6.04s each time and passed. The other subtests passed in 0.64–0.91s.
+   - This is a test-only change, so no regression-without-fix check applies.
+
+6. **Architecture (interdiff only)**
+   - **ARCH-DRY: pass.** No duplicated logic was added.
+   - **ARCH-PURE: pass.** Only test code changed; there is no production IO or logic change.
+   - **ARCH-PURPOSE: pass.** The fix answers the class of problem: the lesson states the general rule for time bounds under load, beyond this one site. No other bound in the window was at risk.
+   - **ARCH-EVOLVE: pass.** No persisted format changes.
+
+7. **Plan revision recommendations:** none.
+
+```findings
+findings:
+  - id: new
+    severity: Minor
+    kind: defect
+    family: test-time-bound-under-load
+    title: |
+      exit_0 subtest now spends about 6s waiting for the drain to reach the 3s joinBound
+    detail: |
+      This is correct, but each run adds about 6s to the suite. A bound around 1.5s would still clear interpreter startup under load at half the cost. Optional.
+```
+
+<!-- sdlc-review-usage [{"version":1,"intent":{"disposable_root":true,"id":"40e2454b-ee8e-4d4b-a219-c7c99cec8d11","repository":"github.com/xianxu/metis","issue_id":"000073","recipe":"fix-review","round":4,"attempt":1,"agent":"claude","root":"/Volumes/TestScratch/review-checkouts/c7f3128e8df2aa88","reviewed_head":"059c14eb4a96517ea4d80921dddbe4db9082f318","slot":"metis:1","requested_at":"2026-10-25T22:42:20.271117Z"},"phase":"finished","pid":93346,"started_at":"2026-10-25T22:42:20.414582Z","finished_at":"2026-10-25T22:43:30.611269Z","session_id":"a3663f50-a5f8-4d0f-a748-a1e7278500ef","outcome":"returned"}] -->
