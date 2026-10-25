@@ -49,21 +49,27 @@ type execStep struct {
 // stepEnv builds the per-step METIS_* contract vars — the ONE definition both executors
 // share: the legacy subprocess appends them to the ambient env; a fork-server request
 // carries them verbatim (the child scrubs METIS_* first, so absence — e.g. no READ_ROOT on
-// an unconfined run — is authoritative).
-func (e execStep) stepEnv(step experiment.Step, stepDir, runDir string) map[string]string {
-	m := map[string]string{
-		"METIS_STEP_DIR": stepDir,
-		"METIS_RUN_DIR":  runDir,
-		"METIS_STEP_ID":  step.ID,
-		"METIS_EXP_DIR":  e.expDir,
-		"METIS_SEED":     strconv.Itoa(e.seed),
-	}
+// an unconfined run — is authoritative). Every path var is physical (metis#76), whichever
+// caller built it (run, blend, the sealed sweep's readRoot): this is the one place they meet.
+func (e execStep) stepEnv(step experiment.Step, stepDir, runDir string) (map[string]string, error) {
+	paths := map[string]string{"METIS_STEP_DIR": stepDir, "METIS_RUN_DIR": runDir, "METIS_EXP_DIR": e.expDir}
 	if e.readRoot != "" {
 		// confinement: only inject when sealing an outer-fold sweep, so the flat
 		// driver:single path leaves the var unset (unconfined).
-		m["METIS_READ_ROOT"] = e.readRoot
+		paths["METIS_READ_ROOT"] = e.readRoot
 	}
-	return m
+	m := map[string]string{
+		"METIS_STEP_ID": step.ID,
+		"METIS_SEED":    strconv.Itoa(e.seed),
+	}
+	for k, p := range paths {
+		phys, err := physicalPath(p)
+		if err != nil {
+			return nil, fmt.Errorf("%s: resolve %s: %w", k, p, err)
+		}
+		m[k] = phys
+	}
+	return m, nil
 }
 
 func (e execStep) Execute(step experiment.Step, runDir string) (experiment.StepResult, error) {
@@ -89,7 +95,10 @@ func (e execStep) Execute(step experiment.Step, runDir string) (experiment.StepR
 	}
 
 	fmt.Fprintf(e.out, "→ step %s (uses %s)\n", step.ID, step.Uses)
-	env := e.stepEnv(step, stepDir, runDir)
+	env, err := e.stepEnv(step, stepDir, runDir)
+	if err != nil {
+		return experiment.StepResult{}, err
+	}
 
 	// metis#44: route a convention-conforming wrapper through the warm fork-server. A leaf
 	// slot is held around the in-flight fork exactly as around a legacy subprocess. ok=false
