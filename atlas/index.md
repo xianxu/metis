@@ -258,6 +258,12 @@ identical on a non-Kaggle platform?* — if yes, it lives here.
   a ref ariadne lists in its `.sdlc/weave-compiler-refs`; it is local-gates configuration, so each
   bump is its own operator-verified PR. See
   [compiler compatibility](workflow/ci-merge-check.md#compiler-compatibility-459). [metis#70]
+- **CI tool PATH hook** — compile builds layer tools (`vocabulary`) into `../ariadne/bin` and only
+  prints the directory, so `scripts/ci-setup.sh` (the seeded post-compile hook) appends
+  `../ariadne/bin` and `bin` to `GITHUB_PATH`. Temporary: delete it with this line when ariadne#627
+  makes the seeded workflow do it. The experiment merge-checks source
+  `scripts/merge-checks.d/_vocab.bash` (non-executable, so not run as a check) and exit 2 naming a
+  missing tool, never a schema verdict (`tests/test_merge_checks.py`). [metis#70]
 
 **Roadmap (metis#1 — all milestones shipped):** M1 (experiment datatype), M2 (Go step-runner:
 `cmd/metis run` + pure `pkg/experiment` `Parse`/`Validate`/`TopoSort`, semantics enforced on

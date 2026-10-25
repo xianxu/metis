@@ -52,6 +52,14 @@ on pin acquisition/build failure. Preserve bootstrap, setup and check ordering.
 - Operator verifies the local-gates PR and applies local-gates-verified. Agents
   never apply that label. Future pin bumps require the same verification.
 - The owner reports the PR, compiler identity and real CI acceptance to the hub.
+- (Revision 1) CI clones the substrate over https from `construct/deps`; a
+  local checkout with ../ariadne present never clones.
+- (Revision 2) CI finds the layer tools by name: `scripts/ci-setup.sh` puts
+  ../ariadne/bin and bin on GITHUB_PATH until ariadne#627 lands, and is then
+  deleted with its atlas line.
+- (Revision 2) Both experiment merge-checks exit 2 naming a missing vocabulary
+  tool instead of reporting a schema verdict; `tests/test_merge_checks.py`
+  pins it.
 
 ## Plan
 
@@ -157,3 +165,19 @@ red, awaiting the operator label. The fixed-then-ship re-close returned REWORK
 (BR-2: the post-close commits are scope revisions, so a full close is due);
 recorded them under Revisions and added tests/test_merge_checks.py (3 pass;
 reverting the selftest guard fails it).
+
+2026-10-25 metis:1: evidence per Done-when clause. (1) Pinned build before
+bootstrap: CI runs 40189012386 and 40189166668 build 63d6bfd8 with vcs.revision
+matching and vcs.modified=false; the malformed-pin, fetch/build-failure and
+PATH-precedence tests are upstream (portable-ci.test.sh, weave-compatibility.test.sh),
+and the validator was rerun here on five malformed shapes. (2) Cold checkout: the
+same runs compile cold under the pinned compiler with no authored-replacement
+refusal; the tampered-output refusal is upstream's compatibility check. (3) Pin
+survives compile and is unmanaged: no manifest names .sdlc; the CI compiles ran
+with it present. (4) Operator label: pending, owned by the operator (the hub
+put PR #52 in front of them); agents do not apply it. (5) Hub reports: Couch
+receipts 15c3d811 (plan), 78b7ef4d (ssh blocker), a6af3ffd (ci-setup/vocabulary,
+filings), 69dc2ddf (PR #52 green apart from the guard, compiler identity).
+(Revision 1) https clone: run 40188715202 and later pass bootstrap. (Revision 2)
+PATH hook: runs 40189012386, 40189166668 pass experiment-schema-selftest;
+missing-tool refusal: tests/test_merge_checks.py 3 pass, reverting the guard fails.

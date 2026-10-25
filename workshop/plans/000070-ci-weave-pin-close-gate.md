@@ -261,6 +261,160 @@ rounds:
       recipe: fix-review
       isolation: fenced
       blocked: true
+    - reviewer_runs:
+        - version: 1
+          intent:
+            disposable_root: true
+            id: bc42968f-393f-4a0c-8485-c4cf6853c694
+            repository: github.com/xianxu/metis
+            issue_id: "000070"
+            recipe: small-diff-review
+            round: 3
+            attempt: 1
+            agent: claude
+            root: /Volumes/TestScratch/review-checkouts/0c71a2a145c281d4
+            reviewed_head: 4c7ce7e5c53c45ed0ac5666a1fb81470a1f4b65f
+            slot: metis:1
+            requested_at: "2026-10-25T11:36:47.060401Z"
+          phase: finished
+          pid: 28778
+          started_at: "2026-10-25T11:36:47.261083Z"
+          finished_at: "2026-10-25T11:39:06.250149Z"
+          session_id: 34376b90-cfdf-492d-8c22-c00929d3ccb7
+          outcome: returned
+      actual_inputs:
+        version: 4
+        method: active-time-v3-branch-v1
+        repository: github.com/xianxu/metis
+        code_head: 4c7ce7e5c53c45ed0ac5666a1fb81470a1f4b65f
+        tracker_head: 303fb79c2695ed91822dcb74540fe1524a50928c
+        branch_point: 4cb2c455fd62430e4ab25fdddeb940236c30f74d
+        since: "2026-10-25T04:16:09-07:00"
+        until: "2026-10-25T04:35:51-07:00"
+        brain_root: /Users/xianxu/workspace/brain
+        gap_minutes: 15
+        commit_weight: 1
+        include_assistant: true
+        engagements:
+            - start: "2026-10-25T04:16:09-07:00"
+              end: "2026-10-25T04:35:51-07:00"
+              began: "2026-10-25T04:16:09-07:00"
+              roots:
+                - /Users/xianxu/workspace/worktree/metis-slot1/metis
+        sources:
+            - harness: claude
+              id: 621e2c42-a080-4dc1-9165-83040e197e38
+              slot: metis:1
+              cwd: /Users/xianxu/workspace/worktree/metis-slot1/metis
+              digest: 1dcbe8f73576e2e33f0e9231b1054548cbbab9601e0dd181b9a54544d8f1de8e
+              started: "2026-10-24T00:13:14.303Z"
+              spawned: false
+              bytes: 6055526
+              windows:
+                - start: "2026-10-25T11:16:32Z"
+                  end: "2026-10-25T04:35:51-07:00"
+              dispatch_windows:
+                - start: "2026-10-25T04:16:09-07:00"
+                  end: "2026-10-25T04:35:51-07:00"
+        cuts:
+            - dispatched: "2026-10-25T04:21:06-07:00"
+              finalized: "2026-10-25T04:21:56-07:00"
+              finalizing: true
+            - dispatched: "2026-10-25T04:34:22-07:00"
+              finalized: "2026-10-25T04:35:07-07:00"
+              finalizing: false
+        branches:
+            - root: /Users/xianxu/workspace/worktree/metis-slot1/metis
+              path: /Users/xianxu/workspace/metis/.git/worktrees/metis/logs/HEAD
+              head: 4c7ce7e5c53c45ed0ac5666a1fb81470a1f4b65f
+              branch: 000070-ci-weave-pin
+              digest: d8e8b44cda289216c89c87c756d3af99e4cc9890e8cf23e021ba64bfb8d3dc7c
+              bytes: 12922
+              intervals:
+                - source: claude/0869d57a-be29-46b9-99c9-b00decfa590d
+                  start: "2026-10-25T04:16:09-07:00"
+                  end: "2026-10-25T11:16:32Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source: claude/0869d57a-be29-46b9-99c9-b00decfa590d
+                  start: "2026-10-25T11:16:32Z"
+                  end: "2026-10-25T04:35:51-07:00"
+                  kind: branch
+                - source: claude/551b999c-0156-4396-815b-ab3e30b9f070
+                  start: "2026-10-25T04:16:09-07:00"
+                  end: "2026-10-25T11:16:32Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source: claude/551b999c-0156-4396-815b-ab3e30b9f070
+                  start: "2026-10-25T11:16:32Z"
+                  end: "2026-10-25T04:35:51-07:00"
+                  kind: branch
+                - source_index: 0
+                  start: "2026-10-25T04:16:09-07:00"
+                  end: "2026-10-25T11:16:32Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source_index: 0
+                  start: "2026-10-25T11:16:32Z"
+                  end: "2026-10-25T04:35:51-07:00"
+                  kind: branch
+                - source: claude/e26c5e7a-df9a-4671-86ec-e5ceff7a6ac1
+                  start: "2026-10-25T04:16:09-07:00"
+                  end: "2026-10-25T11:16:32Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source: claude/e26c5e7a-df9a-4671-86ec-e5ceff7a6ac1
+                  start: "2026-10-25T11:16:32Z"
+                  end: "2026-10-25T04:35:51-07:00"
+                  kind: branch
+                - source: claude/f2d4b646-eda5-4c47-8d97-ddd84ac73472
+                  start: "2026-10-25T04:16:09-07:00"
+                  end: "2026-10-25T11:16:32Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source: claude/f2d4b646-eda5-4c47-8d97-ddd84ac73472
+                  start: "2026-10-25T11:16:32Z"
+                  end: "2026-10-25T04:35:51-07:00"
+                  kind: branch
+      "n": 3
+      timestamp: "2026-10-25T04:39:10-07:00"
+      dispatched: "2026-10-25T04:36:47-07:00"
+      agent: claude
+      reviewer: claude (anthropic; author anthropic)
+      dispose:
+        - id: BR-1
+          disposition: addressed
+          note: Log now records passing cold-checkout CI runs 40189012386/40189166668 under the pinned compiler; structurally verified no manifest (metis or ariadne base.manifest) names .sdlc and upstream portable-ci.test.sh:167 asserts the pin is never generated.
+          round: 3
+        - id: BR-2
+          disposition: addressed
+          note: 'This is the full close; both scope revisions are recorded under the Revisions heading, and the missing-tool guard is pinned by tests/test_merge_checks.py (verified: reverting both checks fails 2 of 3 tests).'
+          round: 3
+      findings:
+        - kind: defect
+          id: BR-3
+          severity: Important
+          title: Done-when not updated for the two hub-approved scope revisions
+          detail: '2nd in family. Rule: a Revisions entry adding behaviour must add the matching Done-when clause in the same commit. Instances in window: (a) construct/deps https clone with local ../ariadne untouched; (b) scripts/ci-setup.sh putting ../ariadne/bin and bin on GITHUB_PATH until ariadne#627; (c) both experiment checks exit 2 naming a missing vocabulary tool (tests/test_merge_checks.py). None appear in the Done-when list at lines 43-54.'
+          family: scope-changed-after-close
+          round: 3
+        - kind: defect
+          id: BR-4
+          severity: Important
+          title: atlas update appears missing for the scripts/ci-setup.sh CI hook and vocabulary guard
+          detail: 'atlas/index.md covers the compiler pin only. Add a sentence: ci-setup.sh appends the layer tool dirs to GITHUB_PATH (temporary, removed by ariadne#627), and the experiment merge-checks exit 2 when vocabulary is missing. Only instance in window; the repo has no README.'
+          family: atlas-missing-new-surface
+          round: 3
+        - kind: defect
+          id: BR-5
+          severity: Minor
+          title: Hub report (Done-when clause 5) is ticked in the Plan but has no Log evidence
+          detail: '2nd in family. Rule: every Done-when clause needs a Log line naming its evidence (run ID, message, SHA) or saying explicitly that it is pending and who owns it. Instances: clause 5 hub report (no evidence); clause 4 operator label (correctly logged as pending); clause 3 now covered per BR-1.'
+          family: done-when-evidence-partial
+          round: 3
+      recipe: small-diff-review
+      isolation: checkout
+      blocked: true
 ---
 
 # Gate ledger — metis#70 (boundary-review)
@@ -286,7 +440,24 @@ later rounds disposed of them. Generated — edit the gate, not this file.
 - **BR-2** [Important] `scope-changed-after-close` (kind: defect) Scope changed after close: run a full sdlc close
   The interdiff adds behaviour no prior finding asked for. construct/deps now clones over https instead of ssh, the new scripts/ci-setup.sh post-compile hook adds layer bin dirs to GITHUB_PATH, and the new scripts/merge-checks.d/_vocab.bash guard makes both experiment checks exit 2 when vocabulary is missing. The Log calls these scope revisions 1 and 2. A narrow fix review does not cover them; run a full sdlc close and record them under the Revisions heading.
 
+## Round 3 — 2026-10-25T04:39:10-07:00 (claude) — BLOCKED
+
+### Disposed
+
+- BR-1 — addressed — Log now records passing cold-checkout CI runs 40189012386/40189166668 under the pinned compiler; structurally verified no manifest (metis or ariadne base.manifest) names .sdlc and upstream portable-ci.test.sh:167 asserts the pin is never generated.
+- BR-2 — addressed — This is the full close; both scope revisions are recorded under the Revisions heading, and the missing-tool guard is pinned by tests/test_merge_checks.py (verified: reverting both checks fails 2 of 3 tests).
+
+### Raised
+
+- **BR-3** [Important] `scope-changed-after-close` (kind: defect) Done-when not updated for the two hub-approved scope revisions
+  2nd in family. Rule: a Revisions entry adding behaviour must add the matching Done-when clause in the same commit. Instances in window: (a) construct/deps https clone with local ../ariadne untouched; (b) scripts/ci-setup.sh putting ../ariadne/bin and bin on GITHUB_PATH until ariadne#627; (c) both experiment checks exit 2 naming a missing vocabulary tool (tests/test_merge_checks.py). None appear in the Done-when list at lines 43-54.
+- **BR-4** [Important] `atlas-missing-new-surface` (kind: defect) atlas update appears missing for the scripts/ci-setup.sh CI hook and vocabulary guard
+  atlas/index.md covers the compiler pin only. Add a sentence: ci-setup.sh appends the layer tool dirs to GITHUB_PATH (temporary, removed by ariadne#627), and the experiment merge-checks exit 2 when vocabulary is missing. Only instance in window; the repo has no README.
+- **BR-5** [Minor] `done-when-evidence-partial` (kind: defect) Hub report (Done-when clause 5) is ticked in the Plan but has no Log evidence
+  2nd in family. Rule: every Done-when clause needs a Log line naming its evidence (run ID, message, SHA) or saying explicitly that it is pending and who owns it. Instances: clause 5 hub report (no evidence); clause 4 operator label (correctly logged as pending); clause 3 now covered per BR-1.
+
 ## Open findings
 
-- **BR-1** [Minor] `done-when-evidence-partial` (kind: defect) "Pin survives compile" is shown structurally, not by a full weave compile run
-- **BR-2** [Important] `scope-changed-after-close` (kind: defect) Scope changed after close: run a full sdlc close
+- **BR-3** [Important] `scope-changed-after-close` (kind: defect) Done-when not updated for the two hub-approved scope revisions
+- **BR-4** [Important] `atlas-missing-new-surface` (kind: defect) atlas update appears missing for the scripts/ci-setup.sh CI hook and vocabulary guard
+- **BR-5** [Minor] `done-when-evidence-partial` (kind: defect) Hub report (Done-when clause 5) is ticked in the Plan but has no Log evidence
