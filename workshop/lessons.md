@@ -75,6 +75,14 @@ work. Keep numerical and incident detail in the issue or experiment record.
   same bug produce false greens.
 - Plans state the estimand, tolerance arithmetic, fold cardinality, cache key,
   and failure behavior. Close only after the measured evidence exists.
+- A test harness's scratch file (a temporary go.mod, generated config) lives in
+  a private per-run `mktemp -d` that a trap removes, never at a fixed shared path:
+  concurrent suites on one host collide there and nothing cleans it up (metis#75
+  BR-1).
+- A cache key that addresses inputs cannot see an upstream's realized output. A
+  nondeterministic producer therefore makes every descendant uncached; it never
+  makes them "reuse if output unchanged" unless the declared artifacts provably
+  capture everything read (metis#71).
 
 ## Working rule
 

@@ -238,6 +238,15 @@ identical on a non-Kaggle platform?* — if yes, it lives here.
   provenance path (`buildRecord`) is separate and still OUTPUT-addressed — post-#24 the two deliberately
   diverge (input-addressed key vs output-addressed provenance). The **leaf policy**
   (`with: {cache: {leaf: immutable}}`) HITs on the K_pre match alone (pinned external fetch).
+  **Never-cache (metis#71):** `with: {cache: {policy: never}}` declares a nondeterministic step
+  (an agent session, a human grade). It never looks up or stores, and **every transitive
+  descendant is uncached too** (`experiment.UncachedSteps`), because an input-addressed
+  downstream key cannot tell two realized outputs apart, so a stale score could stand in for a
+  new candidate. Binding descendants to realized artifact hashes was rejected: it is sound only
+  if the declared artifacts capture everything read, which metis cannot verify. Determinism is
+  never inferred from a missing reads.json; the policy is declared. `experiment.ParseCachePolicy`
+  is the one parser for `with.cache` (CUE `#CachePolicy`); Validate refuses a non-map, an
+  unknown key or value, or leaf + never.
   **The decided trade-off (metis#24, recorded):** input-addressing GIVES UP early-cutoff (a code
   edit yielding byte-identical upstream output still re-keys downstream) — deliberately cheap in
   ML, where training outputs are rarely byte-reproducible so early-cutoff almost never fires;

@@ -274,3 +274,64 @@ func contains(xs []string, x string) bool {
 	}
 	return false
 }
+
+// metis#71 through the real decorator: root (cacheable) → session (policy: never) → score
+// (deterministic, but downstream of a nondeterministic producer). Same config and seed every
+// run. The session runs on EVERY repeat; score runs on every repeat whether the session's
+// realized output is unchanged (nonce fixed) or changed (nonce bumped), so an old score can
+// never stand in for a new candidate; neither leaves an index entry. root still HITs —
+// propagation is descendant-only. (Contrast UpstreamOutputChangeDoesNotRekeyDownstream:
+// for a cacheable upstream, an output change still does not rekey downstream.)
+func TestCachingExecutor_NeverCacheRunsEveryRepeatWithDescendants(t *testing.T) {
+	ws, codeRepo := soundnessSetup(t)
+	md := `---
+type: experiment
+id: bench
+seed: 5
+status: active
+steps:
+  - id: root
+    uses: test/echo
+    with: {k: 0}
+  - id: session
+    uses: test/echo
+    needs: [root]
+    with: {k: 1, cache: {policy: never}}
+  - id: score
+    uses: test/echo
+    needs: [session]
+    with: {k: 2}
+---
+`
+	if err := os.WriteFile(filepath.Join(ws, "exp.md"), []byte(md), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	nonce := 0
+	fake := traceFakeExec{codeRepo: codeRepo, reads: map[string]string{"root": "up.py", "session": "up.py", "score": "down.py"}, nonce: &nonce}
+	runSound(t, ws, fake, "r0") // cold
+
+	for i, n := range []int{0, 0, 1} { // two unchanged repeats, then a changed candidate
+		nonce = n
+		var calls []string
+		fake.calls = &calls
+		runID := "r" + strconv.Itoa(i+1)
+		runSound(t, ws, fake, runID)
+		if contains(calls, "root") {
+			t.Errorf("%s: cacheable root above the session must HIT, got %v", runID, calls)
+		}
+		if !contains(calls, "session") || !contains(calls, "score") {
+			t.Errorf("%s: session and its descendant must execute every repeat, got %v", runID, calls)
+		}
+		got, err := os.ReadFile(filepath.Join(ws, "runs", runID, "score", "out.txt"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := "score-" + strconv.Itoa(n); string(got) != want {
+			t.Errorf("%s: score must be freshly computed %q, got %q", runID, want, got)
+		}
+	}
+	entries, err := filepath.Glob(filepath.Join(ws, ".metis-cache", "index", "*.json"))
+	if err != nil || len(entries) != 1 {
+		t.Errorf("only root may be stored; index has %v (err %v)", entries, err)
+	}
+}
