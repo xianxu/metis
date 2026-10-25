@@ -7,11 +7,11 @@ import (
 	"io"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/xianxu/metis/pkg/experiment"
 )
@@ -23,9 +23,11 @@ import (
 // Contract per step (what every real step-type honors):
 //   - working dir = <runDir>/<stepID>/, created here;
 //   - input: with.json (the step's `with` config) written into that dir;
-//   - env: METIS_STEP_DIR / METIS_RUN_DIR / METIS_STEP_ID / METIS_EXP_DIR / METIS_SEED;
+//   - env: METIS_STEP_DIR / METIS_RUN_DIR / METIS_STEP_ID / METIS_EXP_DIR / METIS_SEED /
+//     METIS_PENDING_RESOURCES (metis#72: where a step lists external resources it has not retired);
 //   - output: an optional metrics.json (flat {name: number}) + any artifact files
-//     the step writes into its dir, which execStep reads back.
+//     the step writes into its dir, which execStep reads back;
+//   - bookkeeping (metis#72): step.log (live, capped output) and outcome.json (how it ended).
 type execStep struct {
 	stepPath []string      // dirs searched for <layer>/<steptype>
 	expDir   string        // absolute experiment dir; anchor for exp-relative step inputs
@@ -45,6 +47,8 @@ type execStep struct {
 	pins []string // metis#48: default leaf BLAS pins (computed once per run by runExperiment;
 	//              ambient-set names already excluded there) — appended to the legacy child env.
 	//              The fork-server path carries them on the SERVER env instead (children inherit).
+	grace     time.Duration // metis#72: TERM → KILL wait; zero = defaultGrace (tests shrink it)
+	joinBound time.Duration // metis#72: bound on confirming the join after exit/KILL; zero = default
 }
 
 // stepEnv builds the per-step METIS_* contract vars — the ONE definition both executors
@@ -53,7 +57,8 @@ type execStep struct {
 // an unconfined run — is authoritative). Every path var is physical (metis#76), whichever
 // caller built it (run, blend, the sealed sweep's readRoot): this is the one place they meet.
 func (e execStep) stepEnv(step experiment.Step, stepDir, runDir string) (map[string]string, error) {
-	paths := map[string]string{"METIS_STEP_DIR": stepDir, "METIS_RUN_DIR": runDir, "METIS_EXP_DIR": e.expDir}
+	paths := map[string]string{"METIS_STEP_DIR": stepDir, "METIS_RUN_DIR": runDir, "METIS_EXP_DIR": e.expDir,
+		"METIS_PENDING_RESOURCES": filepath.Join(stepDir, pendingResources)}
 	if e.readRoot != "" {
 		// confinement: only inject when sealing an outer-fold sweep, so the flat
 		// driver:single path leaves the var unset (unconfined).
@@ -95,7 +100,7 @@ func (e execStep) Execute(ctx context.Context, step experiment.Step, runDir stri
 		return experiment.StepResult{}, err
 	}
 
-	fmt.Fprintf(e.out, "→ step %s (uses %s)\n", step.ID, step.Uses)
+	fmt.Fprintf(e.out, "→ step %s (uses %s; log %s)\n", step.ID, step.Uses, filepath.Join(stepDir, stepLogFile))
 	env, err := e.stepEnv(step, stepDir, runDir)
 	if err != nil {
 		return experiment.StepResult{}, err
@@ -133,8 +138,6 @@ func (e execStep) Execute(ctx context.Context, step experiment.Step, runDir stri
 		}
 	}
 
-	cmd := exec.Command(exe)
-	cmd.Dir = stepDir
 	// metis#23: strip any inherited METIS_READ_ROOT so an ambient shell value can never
 	// confine the flat (driver:single) path — we set it ourselves below only when sealing.
 	base := make([]string, 0, len(os.Environ()))
@@ -149,29 +152,10 @@ func (e execStep) Execute(ctx context.Context, step experiment.Step, runDir stri
 	for _, k := range sortedKeys(env) {
 		base = append(base, k+"="+env[k])
 	}
-	cmd.Env = base
-	// metis#31: acquire the global leaf budget around the ONLY real subprocess spawn
-	// (resolve/mkdir/with.json above are cheap, non-subprocess — they draw no budget).
-	// Release immediately after the process exits, before the cheap metrics/artifact
-	// reads, so a slot is held only while a subprocess is actually running. An
-	// orchestration goroutine never reaches here holding another slot ⇒ deadlock-free.
-	// metis#66: acquire at this leaf's outer-fold priority — the prioritySem grants fold 0
-	// first (chanSem ignores it → global fan-out).
-	if e.budget != nil {
-		if err := e.budget.acquire(ctx, e.priority); err != nil {
-			return experiment.StepResult{}, fmt.Errorf("cancelled before launch: %w", err)
-		}
+	// Runner.Run already prefixes `step %q:`; name the executable, not the id again.
+	if err := e.runLegacy(ctx, step, exe, stepDir, base); err != nil {
+		return experiment.StepResult{}, fmt.Errorf("exec %s: %w", exe, err)
 	}
-	combined, cmdErr := cmd.CombinedOutput()
-	if e.budget != nil {
-		e.budget.release()
-	}
-	if cmdErr != nil {
-		// Runner.Run already prefixes `step %q:`; name the executable, not the id
-		// again, to avoid a doubled "step first: step first" prefix.
-		return experiment.StepResult{}, fmt.Errorf("exec %s: %w\n%s", exe, cmdErr, combined)
-	}
-
 	return e.collectResult(step, stepDir, runDir)
 }
 
@@ -188,6 +172,13 @@ func (e execStep) collectResult(step experiment.Step, stepDir, runDir string) (e
 	}
 	fmt.Fprintf(e.out, "✓ step %s\n", step.ID)
 	return experiment.StepResult{Metrics: metrics, Artifacts: artifacts}, nil
+}
+
+// reservedStepFiles are the step-dir top-level names that are contract or bookkeeping channels,
+// never artifacts and never in the output hash (see collectArtifacts).
+var reservedStepFiles = map[string]bool{
+	"with.json": true, "metrics.json": true, "reads.json": true,
+	stepLogFile: true, outcomeFile: true, pendingResources: true,
 }
 
 // sortedKeys gives a deterministic env append order (map iteration is randomized).
@@ -250,7 +241,7 @@ func collectArtifacts(stepDir, runDir string) ([]string, error) {
 			return nil
 		}
 		if filepath.Dir(path) == stepDir {
-			if name := d.Name(); name == "with.json" || name == "metrics.json" || name == "reads.json" {
+			if reservedStepFiles[d.Name()] {
 				return nil // reserved contract / bookkeeping channels (top level only)
 			}
 		}

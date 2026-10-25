@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# test/escaper — metis#72: leaves a setsid'd grandchild holding the log pipe, then exits 0. The
+# grandchild is outside the step's process group (an "independently managed" process metis must
+# not chase), so the join cannot be confirmed. It records its pid for the test to clean up.
+python3 -c 'import os, sys, time
+os.setsid()
+open(sys.argv[1], "w").write(str(os.getpid()))
+time.sleep(30)' "$METIS_RUN_DIR/orphan.pid" &
+while [ ! -s "$METIS_RUN_DIR/orphan.pid" ]; do sleep 0.01; done
+exit 0
