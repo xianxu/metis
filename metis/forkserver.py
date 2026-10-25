@@ -10,10 +10,24 @@ its own reads.json, an authoritative env) while skipping the ~1s interpreter+imp
 metis#44 measured on every one of a sweep's ~5k leaf spawns.
 
 Protocol (JSONL over the server's stdin/stdout; stderr is free-form diagnostics):
-  →  {"id": 7, "module": "kbench.titanic.features", "cwd": "<stepDir>", "env": {"METIS_*": …}}
+  →  {"id": 7, "module": "kbench.titanic.features", "cwd": "<stepDir>", "env": {"METIS_*": …},
+      "log_path": "<stepDir>/step.log", "log_cap": N, "log_marker": "…",   (metis#72, optional)
+      "grace": s, "join_bound": s}
+  →  {"cancel": 7, "signal": "TERM" | "KILL"}   (metis#72: signal request 7's process group)
   ←  {"ready": true}                        (once, after preload — requests may be sent before)
-  ←  {"id": 7, "exit": 0, "output": "<combined child stdout+stderr, tail-capped>"}
+  ←  {"id": 7, "exit": 0, "output": "<combined child stdout+stderr, tail>", "joined": true,
+      "log_truncated": false}
 stdin EOF ⇒ drain in-flight children, exit 0.
+
+Lifecycle (metis#72), mirroring the Go legacy path: each child leads its own process group;
+its output streams live into log_path (capped, one marker, the rest drained) while a tail is
+kept for the response. The server is the only process that reaps a child, and it reaps only
+under the protocol lock while removing the child from its table, so a cancel signals a group
+whose leader is unreaped (its pid, hence the group id, still reserved): never a recycled pid.
+After the child exits, the join is confirmed when its pipe drains within join_bound; failing
+that the server stops what is left of the group (TERM, grace, KILL) and waits join_bound
+again. A holder that left the group keeps the pipe: the server stops reading and answers
+joined=false. Every response therefore arrives within bounded time of the child's exit.
 
 Design constraints (the metis#44 plan pins these):
   - Preload THIRD-PARTY ONLY. The cache read-set D is derived from the child's sys.modules
@@ -34,12 +48,81 @@ import importlib
 import io
 import json
 import os
+import select
+import signal
 import sys
 import threading
 import traceback
 
 _DEFAULT_PRELOAD = "numpy,pandas,sklearn,pyarrow"
-_OUTPUT_CAP = 200_000  # keep the tail; matches CombinedOutput's role (error context only)
+_TAIL = 64 * 1024  # response output: the log tail (Go's stepLogTail)
+_SIGNALS = {"TERM": signal.SIGTERM, "KILL": signal.SIGKILL}
+
+# id -> pid of every forked child not yet reaped. Guarded by the protocol lock: insertion at
+# fork, removal together with the reap, and every cancel signal, so none can interleave.
+_children: dict = {}
+
+
+class _Log:
+    """The bounded live log (metis#72; Go's boundedLog): bytes go to log_path until the cap, then
+    one marker, the rest drained; a fixed tail is kept for the response."""
+
+    def __init__(self, path, cap, marker):
+        self.fh = open(path, "wb") if path else None
+        self.cap = cap if cap is not None else (1 << 62)
+        self.marker = (marker or "\n[step.log truncated]\n").encode()
+        self.written = 0
+        self.consumed = 0
+        self.truncated = False
+        self.tail = bytearray()
+
+    def write(self, b: bytes) -> None:
+        self.consumed += len(b)
+        room = self.cap - self.written
+        if self.fh and room > 0:
+            chunk = b[:room]
+            self.fh.write(chunk)
+            self.fh.flush()
+            self.written += len(chunk)
+        if not self.truncated and self.consumed > self.cap:
+            self.truncated = True
+            if self.fh:
+                self.fh.write(self.marker)
+                self.fh.flush()
+        self.tail += b[-_TAIL:]
+        if len(self.tail) > _TAIL:
+            del self.tail[:-_TAIL]
+
+    def close(self) -> None:
+        if self.fh:
+            self.fh.close()
+
+
+def _wait_exit_noreap(pid: int) -> None:
+    """Block until the child exits WITHOUT reaping it (its pid and group id stay reserved)."""
+    if hasattr(os, "waitid"):
+        os.waitid(os.P_PID, pid, os.WEXITED | os.WNOWAIT)
+        return
+    kq = select.kqueue()  # macOS: no waitid in Python
+    try:
+        ev = select.kevent(pid, filter=select.KQ_FILTER_PROC,
+                           flags=select.KQ_EV_ADD | select.KQ_EV_ONESHOT, fflags=select.KQ_NOTE_EXIT)
+        try:
+            kq.control([ev], 1, None)
+        except ProcessLookupError:
+            pass  # already exited (a zombie only this server can reap)
+    finally:
+        kq.close()
+
+
+def _signal_group(req_id, sig) -> None:
+    """Signal a child's process group iff it is still unreaped. Caller holds the lock."""
+    pid = _children.get(req_id)
+    if pid is not None:
+        try:
+            os.killpg(pid, sig)
+        except (ProcessLookupError, PermissionError):
+            pass  # nothing left to signal (macOS: EPERM when only the exited leader remains)
 
 
 def _preload() -> list[str]:
@@ -84,23 +167,66 @@ def _child(req: dict) -> "None":  # never returns — os._exit
         os._exit(code)
 
 
-def _wait(req_id, pid: int, rfd: int, lock: threading.Lock, out) -> None:
-    """Waiter thread: drain the child's combined-output pipe to EOF, reap it, emit the
-    response line. IO only — never forks, never touches os.environ."""
-    chunks = []
-    with os.fdopen(rfd, "rb") as fh:
-        while True:
-            b = fh.read(65536)
-            if not b:
-                break
-            chunks.append(b)
-    _, status = os.waitpid(pid, 0)
-    exit_code = os.waitstatus_to_exitcode(status)
-    output = b"".join(chunks).decode("utf-8", "replace")
-    if len(output) > _OUTPUT_CAP:
-        output = output[-_OUTPUT_CAP:]
+def _wait(req: dict, pid: int, rfd: int, lock: threading.Lock, out) -> None:
+    """Every request gets a response: an unexpected waiter failure answers unjoined (the child's
+    fate is then unconfirmed), never silence."""
+    try:
+        _wait_inner(req, pid, rfd, lock, out)
+    except BaseException:
+        resp = {"id": req["id"], "exit": -1, "output": traceback.format_exc(), "joined": False,
+                "log_truncated": False}
+        with lock:
+            out.write(json.dumps(resp) + "\n")
+            out.flush()
+
+
+def _wait_inner(req: dict, pid: int, rfd: int, lock: threading.Lock, out) -> None:
+    """Waiter thread: stream the child's output into its log, wait for its exit (unreaped),
+    confirm or give up the join within bounds, then reap under the lock and respond. IO only:
+    never forks, never touches os.environ."""
+    req_id = req["id"]
+    grace = float(req.get("grace", 10.0))
+    join = float(req.get("join_bound", 5.0))
+    log = _Log(req.get("log_path"), req.get("log_cap"), req.get("log_marker"))
+    drained, stop = threading.Event(), threading.Event()
+
+    def read() -> None:
+        try:
+            while not stop.is_set():
+                ready, _, _ = select.select([rfd], [], [], 0.05)
+                if not ready:
+                    continue
+                b = os.read(rfd, 65536)
+                if not b:
+                    break
+                log.write(b)
+        finally:
+            os.close(rfd)
+            drained.set()
+
+    reader = threading.Thread(target=read, daemon=True)
+    reader.start()
+    _wait_exit_noreap(pid)
+    joined = drained.wait(join)
+    if not joined:
+        with lock:
+            _signal_group(req_id, signal.SIGTERM)
+        joined = drained.wait(grace)
+        if not joined:
+            with lock:
+                _signal_group(req_id, signal.SIGKILL)
+            joined = drained.wait(join)
+    stop.set()  # a holder outside the group keeps the pipe: stop reading it
+    reader.join()
     with lock:
-        out.write(json.dumps({"id": req_id, "exit": exit_code, "output": output}) + "\n")
+        del _children[req_id]
+        _, status = os.waitpid(pid, 0)
+    log.close()
+    resp = {"id": req_id, "exit": os.waitstatus_to_exitcode(status),
+            "output": log.tail.decode("utf-8", "replace"), "joined": joined,
+            "log_truncated": log.truncated}
+    with lock:
+        out.write(json.dumps(resp) + "\n")
         out.flush()
 
 
@@ -117,6 +243,10 @@ def serve() -> None:
         if not line:
             continue
         req = json.loads(line)  # a malformed line is a protocol bug — fail loud, not skip
+        if "cancel" in req:  # metis#72: signal an unreaped child's group; a reaped one is a no-op
+            with lock:
+                _signal_group(req["cancel"], _SIGNALS[req["signal"]])
+            continue
         r, w = os.pipe()
         # C1 (close review): fork UNDER the protocol lock. Waiter threads write responses to
         # `out` only while holding `lock`, so holding it across fork() guarantees stdout's
@@ -126,7 +256,16 @@ def serve() -> None:
         # whole run. The child never touches `lock` itself.
         with lock:
             pid = os.fork()
+            if pid:
+                # metis#72: the child leads its own group. Set it here too (the child does the
+                # same) so a cancel arriving before the child runs still reaches the group.
+                try:
+                    os.setpgid(pid, pid)
+                except OSError:
+                    pass
+                _children[req["id"]] = pid
         if pid == 0:  # ---- child
+            os.setpgid(0, 0)
             os.close(r)
             os.dup2(w, 1)
             os.dup2(w, 2)
@@ -143,7 +282,7 @@ def serve() -> None:
             _child(req)  # never returns
         # ---- parent
         os.close(w)
-        t = threading.Thread(target=_wait, args=(req["id"], pid, r, lock, out), daemon=True)
+        t = threading.Thread(target=_wait, args=(req, pid, r, lock, out), daemon=True)
         t.start()
         waiters.append(t)
     for t in waiters:  # stdin EOF: drain in-flight children before exiting

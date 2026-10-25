@@ -7,9 +7,12 @@ from __future__ import annotations
 
 import json
 import os
+import select
+import signal
 import subprocess
 import sys
 import textwrap
+import time
 from pathlib import Path
 
 import pytest
@@ -173,3 +176,169 @@ def test_eof_drains_in_flight_children(server, tmp_path):
     assert resp["exit"] == 0
     assert server.wait(timeout=30) == 0
     assert json.load(open(step / "metrics.json")) == {"ok": 1}
+
+
+# ── metis#72: live capped log, process groups, cancel, and the server-owned join ──────────────
+
+MARKER = "\n[test: truncated]\n"
+
+
+def _gate(tmp_path: Path) -> Path:
+    g = tmp_path / "gate"
+    os.mkfifo(g)
+    return g
+
+
+def _open_gate(g: Path) -> None:
+    with open(g, "w") as fh:
+        fh.write("go\n")
+
+
+def _wait_path(p: Path, timeout: float = 10.0) -> None:
+    deadline = time.monotonic() + timeout
+    while not p.exists():
+        assert time.monotonic() < deadline, f"timed out waiting for {p}"
+        time.sleep(0.01)
+
+
+def _response_within(proc, timeout: float):
+    """The next response line, or None if none arrives within timeout."""
+    r, _, _ = select.select([proc.stdout], [], [], timeout)
+    if not r:
+        return None
+    return json.loads(proc.stdout.readline())
+
+
+def _lifecycle_req(i, module, step, **extra):
+    req = {"id": i, "module": module, "cwd": str(step), "env": {"METIS_STEP_DIR": str(step)},
+           "log_path": str(step / "step.log"), "log_cap": 1 << 20, "log_marker": MARKER,
+           "grace": 0.2, "join_bound": 0.3}
+    req["env"].update(extra.pop("env", {}))
+    req.update(extra)
+    return req
+
+
+GATED = """
+    import os, sys
+    print("early", flush=True)
+    open("ready", "w").close()
+    open(os.environ["TOY_GATE"]).read()
+    print("late", flush=True)
+"""
+
+
+def test_log_streams_before_exit_and_child_has_own_group(server, tmp_path):
+    _toy(tmp_path, "toy_gated", GATED + """
+    open("pgid", "w").write("%d %d" % (os.getpgid(0), os.getpid()))
+    """)
+    step, gate = _mkstep(tmp_path, 1), _gate(tmp_path)
+    _request(server, _lifecycle_req(1, "toy_gated", step, env={"TOY_GATE": str(gate)}))
+    _wait_path(step / "ready")
+    assert (step / "step.log").read_text() == "early\n"  # visible while the child still runs
+    _open_gate(gate)
+    resp = _responses(server, 1)[1]
+    assert resp["exit"] == 0 and resp["joined"] is True and resp["log_truncated"] is False, resp
+    assert (step / "step.log").read_text() == "early\nlate\n"
+    assert "late" in resp["output"]
+    pgid, pid = (step / "pgid").read_text().split()
+    assert pgid == pid, "a forked step must lead its own process group"
+
+
+def test_cancel_term(server, tmp_path):
+    _toy(tmp_path, "toy_gated", GATED)
+    step, gate = _mkstep(tmp_path, 1), _gate(tmp_path)
+    _request(server, _lifecycle_req(1, "toy_gated", step, env={"TOY_GATE": str(gate)}))
+    _wait_path(step / "ready")
+    _request(server, {"cancel": 1, "signal": "TERM"})
+    resp = _responses(server, 1)[1]
+    assert resp["exit"] == -signal.SIGTERM and resp["joined"] is True, resp
+
+
+def test_cancel_kill_when_term_ignored(server, tmp_path):
+    _toy(tmp_path, "toy_stubborn", """
+    import signal, time
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    open("ready", "w").close()
+    while True:
+        time.sleep(0.05)
+    """)
+    step = _mkstep(tmp_path, 1)
+    _request(server, _lifecycle_req(1, "toy_stubborn", step))
+    _wait_path(step / "ready")
+    _request(server, {"cancel": 1, "signal": "TERM"})
+    assert _response_within(server, 0.5) is None, "TERM is ignored: no response yet"
+    _request(server, {"cancel": 1, "signal": "KILL"})
+    resp = _responses(server, 1)[1]
+    assert resp["exit"] == -signal.SIGKILL, resp
+
+
+def test_cancel_after_reap_is_noop(server, tmp_path):
+    _toy(tmp_path, "toy_quick", """
+    print("done")
+    """)
+    s1, s2 = _mkstep(tmp_path, 1), _mkstep(tmp_path, 2)
+    _request(server, _lifecycle_req(1, "toy_quick", s1))
+    assert _responses(server, 1)[1]["exit"] == 0
+    _request(server, {"cancel": 1, "signal": "KILL"})  # reaped: must signal nothing
+    _request(server, _lifecycle_req(2, "toy_quick", s2))
+    assert _responses(server, 1)[2]["exit"] == 0, "the server survives a stale cancel"
+
+
+def test_output_is_tail_and_log_is_capped(server, tmp_path):
+    _toy(tmp_path, "toy_chatty", """
+    import sys
+    for i in range(20000):
+        sys.stdout.write("line %06d\\n" % i)
+    """)
+    step = _mkstep(tmp_path, 1)
+    _request(server, _lifecycle_req(1, "toy_chatty", step, log_cap=1000))
+    resp = _responses(server, 1)[1]
+    assert resp["exit"] == 0 and resp["log_truncated"] is True, resp
+    log = (step / "step.log").read_text()
+    assert log.startswith("line 000000\n") and log.endswith(MARKER) and len(log) <= 1000 + len(MARKER)
+    assert resp["output"].endswith("line 019999\n") and len(resp["output"]) <= 64 * 1024
+
+
+def test_escaped_holder_is_unjoined_within_bound(server, tmp_path):
+    _toy(tmp_path, "toy_escaper", """
+    import os, subprocess, sys, time
+    subprocess.Popen([sys.executable, "-c",
+        "import os, sys, time; os.setsid(); open(sys.argv[1], 'w').write(str(os.getpid())); time.sleep(30)",
+        "orphan.pid"])
+    while not os.path.exists("orphan.pid") or not open("orphan.pid").read():
+        time.sleep(0.01)
+    """)
+    step = _mkstep(tmp_path, 1)
+    try:
+        start = time.monotonic()
+        _request(server, _lifecycle_req(1, "toy_escaper", step))
+        resp = _response_within(server, 5.0)
+        assert resp is not None, "the server must answer within its join bounds"
+        assert resp["exit"] == 0 and resp["joined"] is False, resp
+        assert time.monotonic() - start < 3.0
+    finally:
+        pid = int((step / "orphan.pid").read_text())
+        os.kill(pid, signal.SIGKILL)
+
+
+def test_in_group_lingerer_is_stopped(server, tmp_path):
+    _toy(tmp_path, "toy_lingerer", """
+    import subprocess
+    p = subprocess.Popen(["sleep", "30"])
+    open("lingerer.pid", "w").write(str(p.pid))
+    """)
+    step = _mkstep(tmp_path, 1)
+    _request(server, _lifecycle_req(1, "toy_lingerer", step))
+    resp = _response_within(server, 5.0)
+    assert resp is not None and resp["exit"] == 0 and resp["joined"] is True, resp
+    pid = int((step / "lingerer.pid").read_text())
+    deadline = time.monotonic() + 5
+    while True:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            break
+        if time.monotonic() > deadline:
+            os.kill(pid, signal.SIGKILL)
+            pytest.fail("the in-group lingerer survived")
+        time.sleep(0.01)
