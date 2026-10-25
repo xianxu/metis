@@ -120,3 +120,16 @@ main merge-check since failed the same way. Switched construct/deps to
 https://github.com/xianxu/ariadne.git (ariadne is public; pair uses the same
 URL). A local checkout with ../ariadne present never clones, so local slots are
 unaffected.
+
+2026-10-25 metis:1: second scope revision (hub-approved, same operator
+verification). With https deps, CI passed the pin build and the cold compile,
+then experiment-schema-selftest failed ("valid-baseline.md should PASS but was
+rejected", run 40188715202): compile builds vocabulary into ../ariadne/bin and
+only prints the dir, so CI had no vocabulary on PATH, and the selftest hid the
+command-not-found. Added scripts/ci-setup.sh (the seeded post-compile hook),
+which appends ../ariadne/bin and bin to GITHUB_PATH; both experiment checks
+now source scripts/merge-checks.d/_vocab.bash and exit 2 naming the tool when
+it is missing. Removal trigger for the hook: ariadne#627 (the seeded workflow
+puts weave's tool dirs on PATH itself). Also found, filed by the hub:
+ariadne#628 (40-duplicate-issue-id.sh exits 141, SIGPIPE under pipefail, when
+construct/dev-aliases.sh exists; local only).
