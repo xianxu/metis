@@ -253,7 +253,10 @@ def _wait(req: dict, pid: int, rfd: int, log: _Log, lock: threading.Lock, out) -
             _wait_exit_noreap(pid)
         except BaseException:
             # Exit observation without reaping failed: fall back to polling a non-blocking reap,
-            # atomic with the table removal under the lock (still never waiting under it).
+            # atomic with the table removal under the lock (still never waiting under it). The
+            # leader is then reaped before any post-exit escalation, so by the rule (signal a
+            # group only while its leader is unreaped) _escalate signals nothing: an in-group
+            # holder is left alone, and the answer carries this error and joined=false.
             box["watch_error"] = traceback.format_exc()
             while True:
                 with lock:
@@ -266,45 +269,66 @@ def _wait(req: dict, pid: int, rfd: int, log: _Log, lock: threading.Lock, out) -
         box["runtime"] = time.monotonic() - started  # launch to exit: the join is not compute
         exited.set()
 
-    reader = threading.Thread(target=read, daemon=True)
-    watcher = threading.Thread(target=watch, daemon=True)
-    reader.start()
-    watcher.start()
-    error = ""
-    try:
-        exited.wait()
-        _drain_join(req_id, lock, drained, grace, join)
-    except BaseException:
-        error = traceback.format_exc()
+    errors: list[str] = []
     resp = {"id": req_id, "launched": True, "exit_known": False, "joined": False,
             "log_truncated": False, "log_error": "", "output": ""}
-    try:
-        if not exited.is_set():  # the exit was never observed: end the group, on the exit
+    reader = threading.Thread(target=read, daemon=True)
+    watcher = threading.Thread(target=watch, daemon=True)
+
+    def guarded(stage) -> None:
+        """Run one stage; a failure is recorded and never skips the stages after it."""
+        try:
+            stage()
+        except BaseException:
+            errors.append(traceback.format_exc())
+
+    def run() -> None:
+        reader.start()
+        watcher.start()
+        exited.wait()
+        _drain_join(req_id, lock, drained, grace, join)
+
+    def end_group() -> None:
+        if not exited.is_set() and watcher.is_alive():  # exit never observed: end it, on the exit
             _escalate(req_id, lock, exited, grace, join)
-        if not drained.is_set():
+
+    def stop_reader() -> None:
+        if reader.is_alive() and not drained.is_set():
             os.write(wake_w, b"x")  # a holder outside the group keeps the pipe: stop reading
-        reader.join()
+        if reader.is_alive():
+            reader.join()
+
+    def close_fds() -> None:
         for fd in (rfd, wake_r, wake_w):
-            os.close(fd)
+            try:
+                os.close(fd)
+            except OSError:
+                pass
         log.close()
-        if exited.is_set():  # reaping an exited child returns at once: safe under the lock
-            status = box["status"]
-            if status is None:
-                with lock:
-                    _children.pop(req_id, None)
-                    _, status = os.waitpid(pid, 0)
-            resp["exit_known"], resp["exit"] = True, os.waitstatus_to_exitcode(status)
-            if box["runtime"] is not None:
-                resp["runtime"] = box["runtime"]
-        else:  # it survived KILL: reap it whenever it dies, off the lock; report it unobserved
+
+    def reap() -> None:
+        if not exited.is_set():  # it survived KILL (or was never watched): reap it off the lock
             threading.Thread(target=_late_reap, args=(req_id, pid, lock), daemon=True).start()
-        resp["joined"] = box["eof"] and not error
+            return
+        status = box["status"]
+        if status is None:  # reaping an exited child returns at once: safe under the lock
+            with lock:
+                try:
+                    _, status = os.waitpid(pid, 0)
+                finally:
+                    _children.pop(req_id, None)
+        resp["exit_known"], resp["exit"] = True, os.waitstatus_to_exitcode(status)
+        if box["runtime"] is not None:
+            resp["runtime"] = box["runtime"]
+
+    def report() -> None:
+        resp["joined"] = box["eof"]
         resp["output"] = log.tail.decode("utf-8", "replace")
         resp["log_truncated"], resp["log_error"] = log.truncated, log.error
-    except BaseException:
-        error += traceback.format_exc()
-        resp["joined"] = False
-    error += box["watch_error"]
+
+    for stage in (run, end_group, stop_reader, close_fds, reap, report):
+        guarded(stage)
+    error = "".join(errors) + box["watch_error"]
     if error:
         resp["error"] = error
         resp["joined"] = False

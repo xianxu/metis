@@ -61,6 +61,10 @@ work. Keep numerical and incident detail in the issue or experiment record.
 - A check that hides a tool's stderr must refuse a missing tool before judging
   (metis#70): command-not-found once read as "valid fixture rejected".
 
+- A process-group owner signals a group only while its leader is unreaped (the pid, hence the
+  group id, stays reserved), escalates on the observed exit rather than on the output pipe, and
+  never waits under a lock another actor needs to signal (metis#72). Go's exec reports
+  ErrWaitDelay only after a successful exit, so join evidence comes from EOF on a pipe you own.
 ## Testing and CLI
 
 - Test through the CLI entry point for path, environment, and serialization
@@ -83,6 +87,11 @@ work. Keep numerical and incident detail in the issue or experiment record.
   nondeterministic producer therefore makes every descendant uncached; it never
   makes them "reuse if output unchanged" unless the declared artifacts provably
   capture everything read (metis#71).
+
+- A test that forks or spawns a long-lived child installs every patch before the fork, sends
+  the child's stdout and stderr away from the runner, and kills it in `finally`. A child left
+  holding the runner's stderr hangs the whole run; a mutation that breaks process-group code
+  leaks its fixtures (metis#72, twice).
 
 ## Working rule
 

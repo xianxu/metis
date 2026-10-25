@@ -512,8 +512,11 @@ def test_exit_watcher_failure_falls_back_and_still_reaps(monkeypatch):
     try:
         t, lock, out = _run_waiter(fs, pid, r)
         time.sleep(0.2)
-        with lock:
+        assert lock.acquire(timeout=1), "the waiter must not hold the lock while the child lives"
+        try:
             fs._signal_group(1, signal.SIGKILL)  # what a cancel request does
+        finally:
+            lock.release()
         resp = _check_answered_and_reaped(fs, t, lock, out, pid)
         assert resp["exit_known"] is True and resp["exit"] == -signal.SIGKILL, resp
         assert resp["joined"] is False and "injected waiter failure" in resp["error"], resp
