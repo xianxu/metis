@@ -42,7 +42,7 @@ Extend the existing execution owner with explicit step timeouts, persistent boun
 Durable plan: `workshop/plans/000072-step-timeout-live-log-plan.md` (full flow, M1 legacy and cancellation, M2 forkserver). Design decisions 1 to 9 there were approved by the TL (see Log).
 
 - [x] M1 — policy, outcome, bounded live log, legacy path, cancellation
-- [ ] M2 — forkserver path
+- [x] M2 — forkserver path
 
 ## Estimate
 
@@ -79,6 +79,8 @@ The thorough plan gives a +15% design buffer, and impl is 40% of the v2 ranges.
 ## Log
 
 
+
+- 2026-10-25: closed M2 — Round 4: BR-10 one _escalate on the observed exit for both waiter paths, exit-watcher with non-blocking-reap fallback under the lock, survivor reaped off the lock, always answers (test_waiter_failure_after_exit_answers_unjoined_and_reaps, test_exit_watcher_failure_falls_back_and_still_reaps; lock never held while waiting). BR-12 pinned by TestForkedStep_RequestWriteFailureRecordsOnlyObservedTimes (fails if started moves after the write). go test ./cmd/metis ./pkg/... ok; pytest 153 passed.; review verdict: SHIP
 - 2026-10-25: closed M1 — Round 1 findings fixed as classes: join confirmed from an owned pipe (escaper exit 0, exit 1 and timeout all cleanup-unconfirmed); start and log-create failures through classifyOutcome; unreadable pending file is unretired; runtime launch to exit (TestExecStep_RuntimeExcludesTermination); copier joined before log reads (-race x2 clean); atlas states the M1 forkserver limit and step.log residue. All TestExecStep_, ClassifyOutcome, PrioritySem tests pass.; review verdict: FIX-THEN-SHIP
 2026-10-23: Filed unclaimed for ariadne#577. Primary seam: cmd/metis/exec.go execStep.Execute, with forkexec.go and runcontrol.go lifecycle integration. No code changed.
 2026-10-23 (metis:1): Concurrent claims in this slot: #71, #75, #76 and #72 are open at once while #75 waits on the operator CI pin (metis#70). Active-time attribution across them is approximate until ariadne#580 lands.
