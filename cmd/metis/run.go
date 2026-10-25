@@ -227,6 +227,11 @@ func runSingleExperiment(exp experiment.Experiment, o runOpts, now func() time.T
 		if _, err := experiment.ParseRepeatLabel(o.repeat); err != nil {
 			return experiment.Run{}, fmt.Errorf("%s: %w", o.expPath, err)
 		}
+		// The claim is only single-use if the dir name is the point's content address: an
+		// untracked experiment falls back to a timestamped dir, which never collides.
+		if _, err := shapeBlobHash(o.expPath); err != nil {
+			return experiment.Run{}, fmt.Errorf("%s: --repeat needs the experiment tracked in git (its content address names the repeat's run dir, which makes a label single-use): %v", o.expPath, err)
+		}
 		runID = repeatRunID(runID, o.repeat)
 		runDir, err := runDirFor(o.expPath, runID)
 		if err != nil {
@@ -240,6 +245,13 @@ func runSingleExperiment(exp experiment.Experiment, o runOpts, now func() time.T
 		}
 	}
 	run, runErr := runResolvedExperiment(exp, o, runID, now, out)
+	if run.Started == "" && o.repeat != "" {
+		// Refused before any step ran (validation): release the claim, so the label is not
+		// spent on an execution that never happened. The dir is empty; Remove refuses otherwise.
+		if dir, err := runDirFor(o.expPath, runID); err == nil {
+			os.Remove(dir)
+		}
+	}
 	if run.Started == "" || o.skipPublish {
 		return run, runErr // never started: no record, nothing to publish
 	}

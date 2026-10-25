@@ -226,6 +226,14 @@ func readFinalRecord(runDir string) (record.RunRecord, error) {
 	if err := json.Unmarshal(b, &rec); err != nil || rec.RunID == "" || rec.Status == "" {
 		return record.RunRecord{}, fmt.Errorf("interrupted execution: %s/record.json is not a final record (%v)", runDir, err)
 	}
+	if rec.Repeat != "" { // a repeat's record must name its own dir: a hand-edited label refuses
+		if _, err := experiment.ParseRepeatLabel(rec.Repeat); err != nil {
+			return record.RunRecord{}, fmt.Errorf("%s/record.json: %w", runDir, err)
+		}
+		if want := repeatRunID(string(rec.PointAddress), rec.Repeat); filepath.Base(runDir) != want {
+			return record.RunRecord{}, fmt.Errorf("%s/record.json says repeat %s of point %s, which belongs in runs/%s", runDir, rec.Repeat, short(string(rec.PointAddress)), want)
+		}
+	}
 	return rec, nil
 }
 
@@ -246,12 +254,7 @@ func rowPublished(expPath string, row ledger.Row) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	for _, r := range led.Rows {
-		if r.PointAddr == row.PointAddr && r.CodeFingerprint == row.CodeFingerprint && r.Repeat == row.Repeat {
-			return true, nil
-		}
-	}
-	return false, nil
+	return led.Has(row), nil
 }
 
 // loadSweepRecords reads each point-run's record.json (per-step metrics + repo SHA).

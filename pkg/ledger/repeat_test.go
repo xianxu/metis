@@ -235,7 +235,7 @@ func TestAggregateView_RepeatFamily(t *testing.T) {
 	f := familyOf(t, v, "fp1", "a")
 	want := map[string]float64{
 		"train.s": 2, "train.s.se": 1, "train.s.n": 2,
-		"train.t": 10, "train.t.se": 0, "train.t.n": 1,
+		"train.t": 10, "train.t.n": 1, // n=1: no se, never an invented zero
 		RepeatsTotal: 3, RepeatsFailed: 1,
 	}
 	for k, w := range want {
@@ -359,5 +359,31 @@ func TestAggregateView_FoldGroupsUnchangedByRepeats(t *testing.T) {
 	after, _ := Encode(foldOnly)
 	if !bytes.Equal(before, after) {
 		t.Fatalf("fold aggregates changed:\n%s\n---\n%s", before, after)
+	}
+}
+
+// Publish refuses a row Decode would refuse (an invalid repeat label), keeps a replaced plain
+// row's unknown columns, and an Extra-only difference is no conflict for a repeat re-publish.
+func TestPublish_ValidatesLabelAndKeepsExtra(t *testing.T) {
+	var l Ledger
+	if err := l.Publish(Row{PointAddr: "a", Status: "ok", Repeat: AggregateRepeat}); err == nil {
+		t.Fatal("an aggregate marker must not be publishable as a sample")
+	}
+	plain := Row{CodeFingerprint: "fp", PointAddr: "a", Status: "ok", Extra: map[string]string{"zz.new": "v"}}
+	rep := Row{CodeFingerprint: "fp", PointAddr: "a", Status: "ok", Repeat: "1", Extra: map[string]string{"zz.new": "w"}}
+	if err := l.Append(plain, rep); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.Publish(Row{CodeFingerprint: "fp", PointAddr: "a", Status: "failed"}); err != nil {
+		t.Fatal(err)
+	}
+	if l.Rows[0].Status != "failed" || l.Rows[0].Extra["zz.new"] != "v" {
+		t.Fatalf("replace must keep unknown columns: %+v", l.Rows[0])
+	}
+	if err := l.Publish(Row{CodeFingerprint: "fp", PointAddr: "a", Status: "ok", Repeat: "1"}); err != nil {
+		t.Fatalf("a re-derived repeat row (no Extra) must be idempotent: %v", err)
+	}
+	if !l.Has(rep) || l.Has(Row{CodeFingerprint: "fp", PointAddr: "a", Repeat: "2"}) {
+		t.Fatal("Has must follow the row key")
 	}
 }

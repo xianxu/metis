@@ -132,17 +132,34 @@ func (l *Ledger) Append(rows ...Row) error {
 
 // Publish adds one execution's row (metis#73): a plain single-run row (no fold, level or
 // repeat) REPLACES the row with its key, since it mirrors the run dir a rerun overwrites
-// (latest replay wins); every other row follows Append.
+// (latest replay wins), keeping the old row's unknown columns; every other row follows
+// Append. A repeat label must be valid: Publish is the entry point for rows derived from
+// records on disk, and a row Decode would refuse must never be written.
 func (l *Ledger) Publish(r Row) error {
+	if r.Repeat != "" {
+		if _, err := experiment.ParseRepeatLabel(r.Repeat); err != nil {
+			return err
+		}
+	}
 	if r.Fold != nil || r.Level != "" || r.Repeat != "" {
 		return l.Append(r)
 	}
 	l.index()
 	if i, ok := l.seen[dedupKey(r)]; ok {
+		if r.Extra == nil {
+			r.Extra = l.Rows[i].Extra
+		}
 		l.Rows[i] = r
 		return nil
 	}
 	return l.Append(r)
+}
+
+// Has reports whether the ledger holds a row with r's key (the one row identity, dedupKey).
+func (l *Ledger) Has(r Row) bool {
+	l.index()
+	_, ok := l.seen[dedupKey(r)]
+	return ok
 }
 
 func conflictError(have, got Row) error {
@@ -152,7 +169,8 @@ func conflictError(have, got Row) error {
 
 // SameRow reports whether two rows carry the same data: what an idempotent re-publish must
 // match. Free params compare by canonical JSON (a CSV round-trip may turn 300 into 300.0),
-// metrics by value (NaN equals NaN), empty and nil maps alike.
+// metrics by value (NaN equals NaN), empty and nil maps alike. Unknown columns (Extra) are
+// not compared: a row re-derived from its record cannot know a newer version's columns.
 func SameRow(a, b Row) bool {
 	if a.CodeFingerprint != b.CodeFingerprint || a.PointAddr != b.PointAddr || a.Status != b.Status ||
 		a.Level != b.Level || a.Stopped != b.Stopped || a.Repeat != b.Repeat ||
@@ -164,17 +182,12 @@ func SameRow(a, b Row) bool {
 	if errA != nil || errB != nil || !bytes.Equal(fa, fb) {
 		return false
 	}
-	if len(a.Metrics) != len(b.Metrics) || len(a.Extra) != len(b.Extra) {
+	if len(a.Metrics) != len(b.Metrics) {
 		return false
 	}
 	for k, v := range a.Metrics {
 		w, ok := b.Metrics[k]
 		if !ok || (v != w && !(math.IsNaN(v) && math.IsNaN(w))) {
-			return false
-		}
-	}
-	for k, v := range a.Extra {
-		if w, ok := b.Extra[k]; !ok || v != w {
 			return false
 		}
 	}
@@ -397,8 +410,8 @@ const (
 // (code-fingerprint, point-address): the same config, seed and code. The family row carries
 // Repeat=AggregateRepeat and, for EVERY metric, the mean, `.se` and `.n` (how many repeats
 // reported it), plus RepeatsTotal and RepeatsFailed. A failed repeat counts but contributes no
-// values, a missing value shrinks only that metric's n (nothing is filled in), and the family
-// is ok when any member is. A repeat is a sample, never a fold: no CV reduction applies.
+// values, a missing value shrinks only that metric's n (nothing is filled in; `.se` is absent
+// below n=2, never a made-up zero), and the family is ok when any member is. A repeat is a sample, never a fold: no CV reduction applies.
 func AggregateView(l Ledger, metric string) Ledger {
 	type agg struct {
 		row      Row
@@ -470,7 +483,9 @@ func AggregateView(l Ledger, metric string) Ledger {
 			for name, vals := range g.byMetric {
 				mean, se := meanSE(vals)
 				row.Metrics[name] = mean
-				row.Metrics[name+seSuffix] = se
+				if len(vals) > 1 { // one sample has no measured spread
+					row.Metrics[name+seSuffix] = se
+				}
 				row.Metrics[name+nSuffix] = float64(len(vals))
 			}
 			out.Append(row)

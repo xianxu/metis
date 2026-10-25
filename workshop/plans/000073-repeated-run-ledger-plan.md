@@ -99,12 +99,12 @@ Covered: claim, execute, publish, and every interruption point. **Not covered:**
 
 ## Tasks (single review boundary: one close)
 
-- [ ] Task 1: `writeFileAtomic`, extracted from caching.go `writeEntry`; run.json and record.json writes switch to it. Test: crash simulation, where an injected failure before rename leaves the old file.
-- [ ] Task 2: `pkg/ledger`: `Row.Repeat`, `Row.Extra`, the extended `dedupKey`, `Append` returning an error on a repeat conflict, Encode/Decode for `repeat` and unknown columns. Tests: legacy round-trip byte-identical, unknown-column preservation, idempotent exact duplicate, conflict refusal, legacy skip-duplicate unchanged.
-- [ ] Task 3: `repeatGroups` in `AggregateView`. Tests: per-metric mean/se/n, a missing metric, a failed member, differing fingerprints, fold groups unchanged.
-- [ ] Task 4: `ParseRepeatLabel`, `RunRecord.Repeat` plus CUE, `--repeat` flag, `repeatRunID`, `claimRunDir`, the no-uncached-step warning, sweep refusal.
-- [ ] Task 5: `rowFromRecord`, `withLedgerLock`/`publishRows`, single-run publication, `writeSweepLedger` through `publishRows`, and `metis ledger publish`.
-- [ ] Task 6: e2e tests through `runExperiment` with the `traceFakeExec` seam:
+- [x] Task 1: `writeFileAtomic`, extracted from caching.go `writeEntry`; run.json and record.json writes switch to it. Test: crash simulation, where an injected failure before rename leaves the old file.
+- [x] Task 2: `pkg/ledger`: `Row.Repeat`, `Row.Extra`, the extended `dedupKey`, `Append` returning an error on a repeat conflict, Encode/Decode for `repeat` and unknown columns. Tests: legacy round-trip byte-identical, unknown-column preservation, idempotent exact duplicate, conflict refusal, legacy skip-duplicate unchanged.
+- [x] Task 3: `repeatGroups` in `AggregateView`. Tests: per-metric mean/se/n, a missing metric, a failed member, differing fingerprints, fold groups unchanged.
+- [x] Task 4: `ParseRepeatLabel`, `RunRecord.Repeat` plus CUE, `--repeat` flag, `repeatRunID`, `claimRunDir`, the no-uncached-step warning, sweep refusal.
+- [x] Task 5: `rowFromRecord`, `withLedgerLock`/`publishRows`, single-run publication, `writeSweepLedger` through `publishRows`, and `metis ledger publish`.
+- [x] Task 6: e2e tests through `runExperiment` with the `traceFakeExec` seam:
   - Two repeats of an identical config give 2 dirs, 2 records, 2 rows, and an aggregated n=2.
   - Repeat L again refuses.
   - A code edit between repeats gives 2 fingerprint groups.
@@ -112,7 +112,7 @@ Covered: claim, execute, publish, and every interruption point. **Not covered:**
   - A plain run gets a row.
   - The legacy sweep ledger's bytes are unchanged (the existing shapesweep tests stay green).
   - Parallel publishers lose no rows.
-- [ ] Task 7: atlas: the run identity, ledger and `metis ledger publish` sections.
+- [x] Task 7: atlas: the run identity, ledger and `metis ledger publish` sections.
 
 ## Revisions
 
@@ -133,3 +133,15 @@ Reason: three Important findings and five Minor ones. Deltas supersede the match
   - `AggregateView`: a property that per-metric n equals the number of reporting members and that no value is invented. Fold groups are byte-compared to the pre-change output.
   - `publishRows`: N real concurrent writers; the final row set equals the union.
   - e2e: claim/refuse, interrupted publish, and replace-on-rerun through `runExperiment`.
+
+### 2026-10-25, implementation and close review round 1 (metis:1)
+
+Reason: the code settled some names and surfaces differently from the text above, and the close review (FIX-THEN-SHIP) found four Important gaps. Deltas:
+
+- **Names:** the flock lives inline in `publishRows` (no separate `withLedgerLock`), and the repeat grouping is a branch of `AggregateView` (no separate `repeatGroups` function). The plain-row replace is `Ledger.Publish`, while `Append` keeps first-wins skip (and refuses repeat conflicts). `Ledger.Has` exposes the one row key for the claim's recovery hint.
+- **`metis ledger publish <experiment.md> <run-dir>`:** a run dir does not name its experiment file, and the ledger sits beside the .md. A dir outside that experiment's `runs/` refuses.
+- **BR-2, `--repeat` needs a tracked experiment:** without git there is no content address, the run dir falls back to a timestamp, and the mkdir claim would never collide. `--repeat` now refuses there, before any effect.
+- **BR-1, labels validated at publish:** `Ledger.Publish` refuses an invalid label, and `readFinalRecord` refuses a repeat record whose dir is not `repeatRunID(point_address, repeat)`. A hand-edited record can no longer make the ledger unreadable.
+- **BR-3, records keyed by run id:** `loadLedgerRecords` and `cohortSummaries` key records by `rowRunID`, so each repeat cohort shows its own record.
+- **BR-4, no invented uncertainty:** a repeat family omits `<m>.se` when n < 2 (the n=1 se was a made-up zero). Fold groups are unchanged.
+- **Minors:** a repeat refused at validation releases its empty claimed dir. A replaced plain row keeps its unknown columns. `SameRow` ignores `Extra`, since a row re-derived from a record cannot know a newer version's columns.

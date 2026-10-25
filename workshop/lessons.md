@@ -99,6 +99,11 @@ work. Keep numerical and incident detail in the issue or experiment record.
   the child is scheduled misses with ESRCH, and on a loaded machine TERM and KILL both miss. A
   test that checks a reaper's work probes with `kill(pid, 0)`, never a second `waitpid` that
   races the reaper (metis#72, failed the merge-time suite under load).
+- A single-use claim (an exclusive mkdir) is only exclusive if the name it locks is the
+  identity it guards. Check every fallback path that names the dir (here, an untracked
+  experiment's timestamp fallback made a repeat label reusable, metis#73). Likewise, any row
+  or record read back from disk goes through the same validator as the writer's input, so a
+  hand edit can never produce a file the reader refuses.
 
 ## Working rule
 

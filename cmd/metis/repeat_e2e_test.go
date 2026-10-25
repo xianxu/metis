@@ -384,3 +384,91 @@ func TestRowFromRecord(t *testing.T) {
 		t.Fatalf("failed row = %+v", r)
 	}
 }
+
+// BR-1: a record whose repeat label is not a valid label (or does not match its dir) is
+// refused by publish, so the ledger stays loadable.
+func TestLedgerPublish_RefusesInvalidOrMisplacedRepeatLabel(t *testing.T) {
+	expPath, codeRepo := repeatSetup(t, repeatExpMD)
+	if _, err := runRepeat(expPath, codeRepo, "1", 1, func(o *runOpts) { o.skipPublish = true }); err != nil {
+		t.Fatal(err)
+	}
+	runDir := filepath.Join(filepath.Dir(expPath), "runs", repeatDirs(t, expPath)[0])
+	rec, _ := readFinalRecord(runDir)
+	for _, label := range []string{"*", "2"} { // invalid; valid but names another dir
+		rec.Repeat = label
+		if err := writeRecordJSON(runDir, rec); err != nil {
+			t.Fatal(err)
+		}
+		if err := cmdLedgerPublish([]string{expPath, runDir}, &bytes.Buffer{}); err == nil {
+			t.Fatalf("label %q: want a refusal", label)
+		}
+	}
+	if _, err := loadLedger(expPath); err != nil {
+		t.Fatalf("the ledger must stay loadable: %v", err)
+	}
+}
+
+// BR-2: an untracked experiment has no content address, so its run dir would be timestamped
+// and a label could be reused; --repeat refuses before any effect.
+func TestRepeat_RefusesUntrackedExperiment(t *testing.T) {
+	expPath, codeRepo := repeatSetup(t, repeatExpMD)
+	untracked := filepath.Join(t.TempDir(), "exp.md")
+	if err := os.WriteFile(untracked, []byte(repeatExpMD), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_ = expPath
+	if _, err := runRepeat(untracked, codeRepo, "1", 1, nil); err == nil || !strings.Contains(err.Error(), "tracked in git") {
+		t.Fatalf("want an untracked refusal, got %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(untracked), "runs")); !os.IsNotExist(err) {
+		t.Fatalf("a refused repeat must create nothing (runs/ stat: %v)", err)
+	}
+}
+
+// BR-3: repeats at one point under two fingerprints each show their own record's commit in
+// the fingerprint view (records are keyed by run id, not by point).
+func TestRepeat_FingerprintCohortsUseOwnRecords(t *testing.T) {
+	expPath, codeRepo := repeatSetup(t, repeatExpMD)
+	if _, err := runRepeat(expPath, codeRepo, "1", 1, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(codeRepo, "train.py"), []byte("v = 2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runRepeat(expPath, codeRepo, "2", 3, nil); err != nil {
+		t.Fatal(err)
+	}
+	led := mustLedger(t, expPath)
+	recs := loadLedgerRecords(expPath, led)
+	if len(recs) != 2 {
+		t.Fatalf("want one record per repeat, got %d", len(recs))
+	}
+	cs := cohortSummaries(led, recs)
+	if len(cs) != 2 {
+		t.Fatalf("want 2 cohorts, got %+v", cs)
+	}
+	for _, c := range cs {
+		var own record.RunRecord
+		for _, r := range led.Rows {
+			if r.CodeFingerprint == c.Fingerprint {
+				own = recs[rowRunID(r)]
+			}
+		}
+		if c.Records != 1 || c.Commit != recCommit(own) || c.Commit == "" {
+			t.Errorf("cohort %s: records %d commit %q, want its own record's commit %q", short(c.Fingerprint), c.Records, c.Commit, recCommit(own))
+		}
+	}
+}
+
+// A repeat refused at validation (before any step ran) releases its claim: the label is
+// not spent on an execution that never happened.
+func TestRepeat_ValidationFailureReleasesClaim(t *testing.T) {
+	bad := strings.Replace(repeatExpMD, "    uses: test/echo\n", "    uses: test/echo\n    needs: [missing]\n", 1)
+	expPath, codeRepo := repeatSetup(t, bad)
+	if _, err := runRepeat(expPath, codeRepo, "1", 1, nil); err == nil {
+		t.Fatal("want the validation error")
+	}
+	if dirs := repeatDirs(t, expPath); len(dirs) != 0 {
+		t.Fatalf("the claim must be released, found %v", dirs)
+	}
+}

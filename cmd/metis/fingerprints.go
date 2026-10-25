@@ -53,7 +53,7 @@ func cohortSummaries(led ledger.Ledger, recs map[string]record.RunRecord) []coho
 		}
 		cs.Rows++
 		cs.ByLevel[r.Level]++
-		rec, ok := recs[r.PointAddr]
+		rec, ok := recs[rowRunID(r)] // metis#73: a repeat's record is its own run's, not its point's
 		if !ok {
 			continue
 		}
@@ -236,8 +236,9 @@ func distinctFingerprintCount(led ledger.Ledger) int {
 	return len(seen)
 }
 
-// loadLedgerRecords reads record.json for each distinct run the ledger references
-// (Row.PointAddr IS the run id — rowsFromManifest). Missing/unparseable records are
+// loadLedgerRecords reads record.json for each distinct run the ledger references, keyed by
+// run id (rowRunID: a sweep row's PointAddr IS its run id, rowsFromManifest; a repeat row adds
+// its label, metis#73). Missing/unparseable records are
 // SKIPPED (an inspect surface tolerates cleaned run dirs; the summary shows "?").
 // The IO seam for cohortSummaries — called on the inspect command, on select's error
 // paths, and (metis#53) on every --promote for the fingerprint-consistency guard.
@@ -248,10 +249,11 @@ func loadLedgerRecords(shapePath string, led ledger.Ledger) map[string]record.Ru
 		if r.PointAddr == "" {
 			continue
 		}
-		if _, ok := out[r.PointAddr]; ok {
+		id := rowRunID(r)
+		if _, ok := out[id]; ok {
 			continue
 		}
-		b, err := os.ReadFile(filepath.Join(dir, "runs", rowRunID(r), "record.json")) // metis#73: a repeat row names its own dir
+		b, err := os.ReadFile(filepath.Join(dir, "runs", id, "record.json"))
 		if err != nil {
 			continue
 		}
@@ -259,7 +261,7 @@ func loadLedgerRecords(shapePath string, led ledger.Ledger) map[string]record.Ru
 		if err := json.Unmarshal(b, &rec); err != nil {
 			continue
 		}
-		out[r.PointAddr] = rec
+		out[id] = rec
 	}
 	return out
 }
