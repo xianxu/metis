@@ -7,7 +7,7 @@ created: 2026-10-23
 updated: 2026-10-25
 estimate_hours: 1.74
 collaboration-mode: collaboration
-card_mirror: '28d4ac29c322c2e4401d3b6afa9c0b60109e2217' # card fields mirrored from issue-cards; edit via sdlc
+card_mirror: '3a724cf401c7cb79ed73adc8317865f473598924' # card fields mirrored from issue-cards; edit via sdlc
 started: 2026-10-23T19:48:43-07:00
 claimant:
     operator: Xian Xu
@@ -17,7 +17,7 @@ claimant:
     worktree: /Users/xianxu/workspace/worktree/metis-slot1/metis
     repository: github.com/xianxu/metis
 flow: {kind: full, provenance: operator}
-actual_hours: 0.68
+actual_hours: 1.36
 ---
 
 # Repeat-shaped run records and ledger rows without CV folds
