@@ -49,6 +49,7 @@ import io
 import json
 import os
 import select
+import selectors
 import signal
 import sys
 import threading
@@ -57,6 +58,7 @@ import traceback
 
 _DEFAULT_PRELOAD = "numpy,pandas,sklearn,pyarrow"
 _TAIL = 64 * 1024  # response output: the log tail (Go's stepLogTail)
+PROTOCOL = 2  # metis#72: lifecycle fields and cancel; the Go client refuses an older server
 _SIGNALS = {"TERM": signal.SIGTERM, "KILL": signal.SIGKILL}
 
 # id -> pid of every forked child not yet reaped. Guarded by the protocol lock: insertion at
@@ -66,7 +68,9 @@ _children: dict = {}
 
 class _Log:
     """The bounded live log (metis#72; Go's boundedLog): bytes go to log_path until the cap, then
-    one marker, the rest drained; a fixed tail is kept for the response."""
+    one marker, the rest drained; a fixed tail is kept for the response. Opening raises (the
+    caller refuses the request before fork); a later sink error never raises: consumption goes
+    on (a stalled reader would SIGPIPE or block the child) and the first error is kept."""
 
     def __init__(self, path, cap, marker):
         self.fh = open(path, "wb") if path else None
@@ -76,27 +80,54 @@ class _Log:
         self.consumed = 0
         self.truncated = False
         self.tail = bytearray()
+        self.error = ""
+
+    def _put(self, b: bytes) -> None:
+        if self.fh is None or self.error:
+            return
+        try:
+            self.fh.write(b)
+            self.fh.flush()
+        except OSError as e:
+            self.error = f"step.log: {e}"
 
     def write(self, b: bytes) -> None:
         self.consumed += len(b)
         room = self.cap - self.written
-        if self.fh and room > 0:
+        if room > 0:
             chunk = b[:room]
-            self.fh.write(chunk)
-            self.fh.flush()
+            self._put(chunk)
             self.written += len(chunk)
         if not self.truncated and self.consumed > self.cap:
             self.truncated = True
-            if self.fh:
-                self.fh.write(self.marker)
-                self.fh.flush()
+            self._put(self.marker)
         self.tail += b[-_TAIL:]
         if len(self.tail) > _TAIL:
             del self.tail[:-_TAIL]
 
     def close(self) -> None:
         if self.fh:
-            self.fh.close()
+            try:
+                self.fh.close()
+            except OSError as e:
+                self.error = self.error or f"step.log: {e}"
+
+
+def _pump(rfd: int, log: _Log, wake_r: int) -> bool:
+    """Copy the child's pipe into the log until EOF (returns True: the only evidence of a
+    drained join) or until woken (returns False: a holder outside the group keeps the pipe, so
+    the server stops reading it). One selector, no polling, no fd-number limit."""
+    with selectors.DefaultSelector() as sel:
+        sel.register(rfd, selectors.EVENT_READ)
+        sel.register(wake_r, selectors.EVENT_READ)
+        while True:
+            for key, _ in sel.select():
+                if key.fd == wake_r:
+                    return False
+                b = os.read(rfd, 65536)
+                if not b:
+                    return True
+                log.write(b)
 
 
 def _wait_exit_noreap(pid: int) -> None:
@@ -168,69 +199,73 @@ def _child(req: dict) -> "None":  # never returns — os._exit
         os._exit(code)
 
 
-def _wait(req: dict, pid: int, rfd: int, lock: threading.Lock, out) -> None:
-    """Every request gets a response: an unexpected waiter failure answers unjoined (the child's
-    fate is then unconfirmed), never silence."""
-    try:
-        _wait_inner(req, pid, rfd, lock, out)
-    except BaseException:
-        resp = {"id": req["id"], "exit": -1, "output": traceback.format_exc(), "joined": False,
-                "log_truncated": False}
-        with lock:
-            out.write(json.dumps(resp) + "\n")
-            out.flush()
+def _respond(lock: threading.Lock, out, resp: dict) -> None:
+    with lock:
+        out.write(json.dumps(resp) + "\n")
+        out.flush()
 
 
-def _wait_inner(req: dict, pid: int, rfd: int, lock: threading.Lock, out) -> None:
-    """Waiter thread: stream the child's output into its log, wait for its exit (unreaped),
-    confirm or give up the join within bounds, then reap under the lock and respond. IO only:
-    never forks, never touches os.environ."""
+def _wait(req: dict, pid: int, rfd: int, log: _Log, lock: threading.Lock, out) -> None:
+    """Waiter thread: stream the child's output into its log, observe its exit without reaping,
+    confirm or give up the join within bounds, then reap under the lock and respond. Every exit
+    path, an unexpected error included, stops the child's group if its exit was not observed,
+    reaps it and answers; an error is reported with joined=false, never as a clean ending. IO
+    only: never forks, never touches os.environ."""
     req_id = req["id"]
     started = time.monotonic()  # the waiter starts right after the fork
     grace = float(req.get("grace", 10.0))
     join = float(req.get("join_bound", 5.0))
-    log = _Log(req.get("log_path"), req.get("log_cap"), req.get("log_marker"))
-    drained, stop = threading.Event(), threading.Event()
+    wake_r, wake_w = os.pipe()
+    result = {"eof": False}
+    done = threading.Event()
 
     def read() -> None:
         try:
-            while not stop.is_set():
-                ready, _, _ = select.select([rfd], [], [], 0.05)
-                if not ready:
-                    continue
-                b = os.read(rfd, 65536)
-                if not b:
-                    break
-                log.write(b)
+            result["eof"] = _pump(rfd, log, wake_r)
         finally:
-            os.close(rfd)
-            drained.set()
+            done.set()
+
+    def stop_group(sig) -> None:
+        with lock:
+            _signal_group(req_id, sig)
 
     reader = threading.Thread(target=read, daemon=True)
     reader.start()
-    _wait_exit_noreap(pid)
-    runtime = time.monotonic() - started  # launch to exit: the join wait is not compute
-    joined = drained.wait(join)
-    if not joined:
+    runtime = None
+    error = ""
+    try:
+        _wait_exit_noreap(pid)
+        runtime = time.monotonic() - started  # launch to exit: the join wait is not compute
+        if not done.wait(join):
+            stop_group(signal.SIGTERM)
+            if not done.wait(grace):
+                stop_group(signal.SIGKILL)
+                done.wait(join)
+    except BaseException:
+        error = traceback.format_exc()
+        if runtime is None:  # the exit was never observed: end the group before reaping
+            stop_group(signal.SIGTERM)
+            if not done.wait(grace):
+                stop_group(signal.SIGKILL)
+    finally:
+        if not done.is_set():
+            os.write(wake_w, b"x")  # a holder outside the group keeps the pipe: stop reading
+        reader.join()
+        for fd in (rfd, wake_r, wake_w):
+            os.close(fd)
+        log.close()
         with lock:
-            _signal_group(req_id, signal.SIGTERM)
-        joined = drained.wait(grace)
-        if not joined:
-            with lock:
-                _signal_group(req_id, signal.SIGKILL)
-            joined = drained.wait(join)
-    stop.set()  # a holder outside the group keeps the pipe: stop reading it
-    reader.join()
-    with lock:
-        del _children[req_id]
-        _, status = os.waitpid(pid, 0)
-    log.close()
-    resp = {"id": req_id, "exit": os.waitstatus_to_exitcode(status),
-            "output": log.tail.decode("utf-8", "replace"), "joined": joined,
-            "log_truncated": log.truncated, "runtime": runtime}
-    with lock:
-        out.write(json.dumps(resp) + "\n")
-        out.flush()
+            _children.pop(req_id, None)
+            _, status = os.waitpid(pid, 0)
+    resp = {"id": req_id, "launched": True, "exit_known": True,
+            "exit": os.waitstatus_to_exitcode(status), "output": log.tail.decode("utf-8", "replace"),
+            "joined": result["eof"] and not error, "log_truncated": log.truncated,
+            "log_error": log.error}
+    if runtime is not None:
+        resp["runtime"] = runtime
+    if error:
+        resp["error"] = error
+    _respond(lock, out, resp)
 
 
 def serve() -> None:
@@ -238,7 +273,7 @@ def serve() -> None:
     lock = threading.Lock()
     loaded = _preload()
     with lock:
-        out.write(json.dumps({"ready": True, "preloaded": loaded}) + "\n")
+        out.write(json.dumps({"ready": True, "preloaded": loaded, "protocol": PROTOCOL}) + "\n")
         out.flush()
     waiters: list[threading.Thread] = []
     for line in sys.stdin:
@@ -249,6 +284,12 @@ def serve() -> None:
         if "cancel" in req:  # metis#72: signal an unreaped child's group; a reaped one is a no-op
             with lock:
                 _signal_group(req["cancel"], _SIGNALS[req["signal"]])
+            continue
+        try:
+            log = _Log(req.get("log_path"), req.get("log_cap"), req.get("log_marker"))
+        except OSError as e:  # metis#72: refuse before fork, so nothing launches
+            _respond(lock, out, {"id": req["id"], "launched": False, "exit_known": False,
+                                 "joined": False, "error": f"step.log: {e}", "output": ""})
             continue
         r, w = os.pipe()
         # C1 (close review): fork UNDER the protocol lock. Waiter threads write responses to
@@ -285,7 +326,7 @@ def serve() -> None:
             _child(req)  # never returns
         # ---- parent
         os.close(w)
-        t = threading.Thread(target=_wait, args=(req, pid, r, lock, out), daemon=True)
+        t = threading.Thread(target=_wait, args=(req, pid, r, log, lock, out), daemon=True)
         t.start()
         waiters.append(t)
     for t in waiters:  # stdin EOF: drain in-flight children before exiting

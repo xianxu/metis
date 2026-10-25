@@ -308,9 +308,10 @@ func TestForkServerPool_MidFlightDeathErrorsTheStep(t *testing.T) {
 	}
 	<-srv.ready
 	time.Sleep(300 * time.Millisecond) // let the request dispatch + fork
-	// Group-kill: `uv run` spawns python as a child — killing only the uv parent would
-	// leave the real server (and its forked step child) alive and the request would
-	// complete normally after the sleep.
+	// Group-kill: `uv run` spawns python as a child — killing only the uv parent would leave
+	// the real server alive and the request would complete normally after the sleep. The
+	// forked step child leads its own group (metis#72) and is not reached: it runs out its
+	// sleep, which is why a lost dispatch is unconfirmed, never re-run.
 	if err := syscall.Kill(-srv.cmd.Process.Pid, syscall.SIGKILL); err != nil {
 		t.Fatal(err)
 	}

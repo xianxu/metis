@@ -70,11 +70,27 @@ func parseWrapper(exe string) (wrapperSpec, bool) {
 var errServerUnavailable = errors.New("fork-server unavailable")
 
 type forkResp struct {
-	Exit         int
-	Output       string  // the log tail (metis#72)
-	Joined       bool    // the server confirmed the child exited and its pipe drained
-	LogTruncated bool    // step.log hit its cap
-	Runtime      float64 // seconds, fork to exit (the join wait is not compute)
+	Launched     bool     // false: the server refused before fork (e.g. step.log would not open)
+	ExitKnown    bool     // the server reaped the child and observed its exit status
+	Exit         int      // valid when ExitKnown
+	Output       string   // the log tail (metis#72)
+	Joined       bool     // the server saw EOF on the child's pipe: exited and drained
+	LogTruncated bool     // step.log hit its cap
+	LogError     string   // the first step.log write error (output kept flowing)
+	Error        string   // a server-side failure handling this request
+	Runtime      *float64 // seconds, fork to exit; absent when the exit was not observed
+}
+
+// forkProtocol is the server protocol this client speaks (metis.forkserver PROTOCOL). An older
+// server is refused at its ready line, before anything is dispatched: it would ignore log_path
+// and cancel, so the step falls back to the legacy path instead.
+const forkProtocol = 2
+
+func checkForkProtocol(v int) error {
+	if v < forkProtocol {
+		return fmt.Errorf("%w: protocol %d, want %d (a server older than this metis)", errServerUnavailable, v, forkProtocol)
+	}
+	return nil
 }
 
 // forkServer is one warm server process (one uv project root). Response routing is by
@@ -88,7 +104,8 @@ type forkServer struct {
 	nextID  int
 	dead    error // sticky: set when the reader loop exits
 
-	ready  chan struct{} // closed when the server's {"ready":true} line arrives
+	ready    chan struct{} // closed when the server's {"ready":true} line arrives
+	protocol int           // from the ready line (written before ready closes)
 	done   chan struct{} // closed when the reader loop exits
 	stderr bytes.Buffer  // capped diagnostics for start-failure messages (guarded by mu)
 }
@@ -98,13 +115,18 @@ const stderrCap = 64 << 10
 // protoLine is the union of the server's stdout lines: the one-shot ready handshake and
 // per-request responses.
 type protoLine struct {
-	Ready        bool    `json:"ready"`
-	ID           *int    `json:"id"`
-	Exit         int     `json:"exit"`
-	Output       string  `json:"output"`
-	Joined       bool    `json:"joined"`
-	LogTruncated bool    `json:"log_truncated"`
-	Runtime      float64 `json:"runtime"`
+	Ready        bool     `json:"ready"`
+	Protocol     int      `json:"protocol"`
+	ID           *int     `json:"id"`
+	Launched     bool     `json:"launched"`
+	ExitKnown    bool     `json:"exit_known"`
+	Exit         int      `json:"exit"`
+	Output       string   `json:"output"`
+	Joined       bool     `json:"joined"`
+	LogTruncated bool     `json:"log_truncated"`
+	LogError     string   `json:"log_error"`
+	Error        string   `json:"error"`
+	Runtime      *float64 `json:"runtime"`
 }
 
 type forkReq struct {
@@ -158,10 +180,13 @@ func startForkServer(root string, pins []string) (*forkServer, error) {
 	cmd := exec.Command("uv", "run", "--project", root, "python", "-m", "metis.forkserver")
 	cmd.Dir = root
 	cmd.Env = append(os.Environ(), pins...)
-	// Own process GROUP: `uv run` spawns python as a child (no exec), and the server forks
-	// step children — group-kill is the only way to reap the whole tree on a hung shutdown
-	// (and a test's mid-flight kill). Normal shutdown stays graceful (stdin EOF → drain);
-	// Ctrl-C on `metis run` closes the stdin pipe, so detached servers still self-exit.
+	// Own process GROUP: `uv run` spawns python as a child (no exec), so group-kill is the only
+	// way to stop uv and the server together on a hung shutdown (and a test's mid-flight kill).
+	// It does NOT reach forked step children: since metis#72 each leads its own group, stopped
+	// only through the server's cancel while the server lives; a forced kill orphans them (and a
+	// step in flight then ends cleanup-unconfirmed). Normal shutdown stays graceful (stdin EOF →
+	// drain, every waiter bounded); Ctrl-C on `metis run` closes the stdin pipe, so detached
+	// servers still self-exit.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -223,6 +248,7 @@ func (s *forkServer) readLoop(stdout io.Reader) {
 		}
 		if pl.Ready && !readyClosed {
 			readyClosed = true
+			s.protocol = pl.Protocol
 			close(s.ready)
 			continue
 		}
@@ -234,7 +260,8 @@ func (s *forkServer) readLoop(stdout io.Reader) {
 		delete(s.pending, *pl.ID)
 		s.mu.Unlock()
 		if ch != nil {
-			ch <- forkResp{Exit: pl.Exit, Output: pl.Output, Joined: pl.Joined, LogTruncated: pl.LogTruncated, Runtime: pl.Runtime}
+			ch <- forkResp{Launched: pl.Launched, ExitKnown: pl.ExitKnown, Exit: pl.Exit, Output: pl.Output,
+				Joined: pl.Joined, LogTruncated: pl.LogTruncated, LogError: pl.LogError, Error: pl.Error, Runtime: pl.Runtime}
 		}
 	}
 	err := sc.Err()
@@ -278,6 +305,9 @@ func (s *forkServer) execute(ctx context.Context, module, cwd string, env map[st
 	case <-ctx.Done():
 		return forkRun{}, errCancelledBeforeDispatch
 	}
+	if err := checkForkProtocol(s.protocol); err != nil {
+		return forkRun{}, err // nothing dispatched: fall back to legacy
+	}
 	s.mu.Lock()
 	if s.dead != nil { // nothing dispatched yet — safe to fall back
 		defer s.mu.Unlock()
@@ -289,6 +319,7 @@ func (s *forkServer) execute(ctx context.Context, module, cwd string, env map[st
 	s.pending[id] = ch
 	b, err := json.Marshal(forkReq{ID: id, Module: module, Cwd: cwd, Env: env, LogPath: o.logPath,
 		LogCap: stepLogCap, LogMarker: truncationMarker, Grace: o.grace.Seconds(), JoinBound: o.joinBound.Seconds()})
+	run := forkRun{started: time.Now(), event: endExited} // dispatch is the launch on this path
 	if err == nil {
 		_, err = s.stdin.Write(append(b, '\n'))
 	}
@@ -297,10 +328,14 @@ func (s *forkServer) execute(ctx context.Context, module, cwd string, env map[st
 		// dispatched (conservative: no legacy re-run against a possibly-forked child).
 		delete(s.pending, id)
 		s.mu.Unlock()
-		return forkRun{}, fmt.Errorf("%w: write request: %v", errDispatchedLost, err)
+		return run, fmt.Errorf("%w: write request: %v", errDispatchedLost, err)
 	}
 	s.mu.Unlock()
-	run := forkRun{started: time.Now(), event: endExited}
+	defer func() { // a request left unanswered (cancel bound, lost server) leaves no entry behind
+		s.mu.Lock()
+		delete(s.pending, id)
+		s.mu.Unlock()
+	}()
 
 	var deadline <-chan time.Time
 	if o.timeout > 0 {
@@ -361,7 +396,8 @@ func (s *forkServer) shutdown() {
 	_ = s.stdin.Close() // EOF → server drains in-flight children and exits
 	select {
 	case <-s.done:
-	case <-time.After(60 * time.Second): // a hung drain (e.g. a wedged child) — group-kill
+	case <-time.After(60 * time.Second): // a wedged server (its waiters are bounded) — group-kill uv
+		// and the server; forked step children lead their own groups and are not reached here
 		_ = syscall.Kill(-s.cmd.Process.Pid, syscall.SIGKILL)
 		<-s.done
 	}

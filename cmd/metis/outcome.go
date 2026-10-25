@@ -32,7 +32,6 @@ type stepEnding struct {
 	event        endEvent
 	launched     bool   // false: cancelled while waiting for a slot, or the launch itself failed
 	launchErr    string // why a non-cancelled step never launched (log create, exec start)
-	logMissing   bool   // a forked step's server wrote no step.log (a stale server)
 	exitKnown    bool   // the child's exit was observed (a reap or a server response)
 	exitCode     int    // valid when exitKnown (-1 when killed by a signal)
 	signal       string // the last termination signal metis sent ("TERM" | "KILL" | "")
@@ -62,13 +61,16 @@ type Outcome struct {
 // cleanup-unconfirmed > resources-unretired > timed-out / cancelled / failed > ok.
 func classifyOutcome(e stepEnding) (Outcome, error) {
 	o := Outcome{Signal: e.signal, LogTruncated: e.logTruncated, PendingResources: string(e.pending)}
+	// Times come only from observed events: a launch gives started; an observed exit gives
+	// ended, runtime and the exit code (also after a timeout or cancel: a late exit 0 is
+	// recorded, not obeyed). An unobserved exit leaves them out rather than guessing.
 	if e.launched {
-		started, ended := e.started, e.ended
-		rt := ended.Sub(started).Seconds()
-		o.Started, o.Ended, o.RuntimeSeconds = &started, &ended, &rt
-		if e.exitKnown { // also after a timeout or cancel: a late exit 0 is recorded, not obeyed
-			code := e.exitCode
-			o.ExitCode = &code
+		started := e.started
+		o.Started = &started
+		if e.exitKnown {
+			ended, code := e.ended, e.exitCode
+			rt := ended.Sub(started).Seconds()
+			o.Ended, o.RuntimeSeconds, o.ExitCode = &ended, &rt, &code
 		}
 	}
 	tail := ""
@@ -94,9 +96,6 @@ func classifyOutcome(e stepEnding) (Outcome, error) {
 	case !e.launched:
 		o.Outcome = outcomeFailed
 		return o, fmt.Errorf("start: %s", e.launchErr)
-	case e.logMissing:
-		o.Outcome = outcomeFailed
-		return o, fmt.Errorf("the forkserver wrote no %s (a server older than this metis?)%s", e.logPath, tail)
 	case e.exitCode != 0:
 		o.Outcome = outcomeFailed
 		return o, fmt.Errorf("exit status %d%s", e.exitCode, tail)

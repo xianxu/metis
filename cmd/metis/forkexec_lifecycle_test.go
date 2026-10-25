@@ -209,3 +209,88 @@ func TestForkedStep_CancelDuringReadyWaitNeverLaunches(t *testing.T) {
 		t.Error("the step launched after cancellation")
 	}
 }
+
+func TestForkedStep_CancelWhileRunning(t *testing.T) {
+	f := newForkFixture(t, map[string]string{"toy_gated": toyGated})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := f.start(t, ctx, experiment.Step{ID: "s", Uses: "t/x"}, "toy_gated")
+	waitFor(t, filepath.Join(f.runDir, "s", "ready"))
+	cancel()
+	err := <-done
+	if err == nil || !errors.Is(err, context.Canceled) || !strings.Contains(err.Error(), "cancelled") {
+		t.Fatalf("err = %v, want cancelled", err)
+	}
+	if o := readOutcome(t, filepath.Join(f.runDir, "s")); o.Outcome != outcomeCancelled || o.Signal != "TERM" || o.Started == nil {
+		t.Errorf("outcome = %+v, want cancelled by TERM after launch", o)
+	}
+}
+
+// The server answers joined=false (a descendant outside the group holds the pipe): unconfirmed.
+func TestForkedStep_UnjoinedResponseIsCleanupUnconfirmed(t *testing.T) {
+	f := newForkFixture(t, map[string]string{"toy_escaper": `import os, subprocess, sys, time
+subprocess.Popen([sys.executable, "-c",
+    "import os, sys, time; os.setsid(); open(sys.argv[1], 'w').write(str(os.getpid())); time.sleep(30)",
+    "orphan.pid"])
+while not os.path.exists("orphan.pid") or not open("orphan.pid").read():
+    time.sleep(0.01)
+`})
+	stepDir := filepath.Join(f.runDir, "s")
+	t.Cleanup(func() {
+		if b, err := os.ReadFile(filepath.Join(stepDir, "orphan.pid")); err == nil {
+			if pid, err := strconv.Atoi(string(b)); err == nil {
+				_ = syscall.Kill(pid, syscall.SIGKILL)
+			}
+		}
+	})
+	err := f.run(t, context.Background(), experiment.Step{ID: "s", Uses: "t/x"}, "toy_escaper")
+	if err == nil || !strings.Contains(err.Error(), "cleanup unconfirmed") {
+		t.Fatalf("err = %v, want cleanup unconfirmed", err)
+	}
+	o := readOutcome(t, stepDir)
+	if o.Outcome != outcomeCleanupUnconfirmed || o.ExitCode == nil || *o.ExitCode != 0 {
+		t.Errorf("outcome = %+v, want cleanup-unconfirmed with the observed exit 0", o)
+	}
+}
+
+func TestForkedStep_PendingResourcesRefuseSuccess(t *testing.T) {
+	f := newForkFixture(t, map[string]string{"toy_resources": `import os
+open(os.environ["METIS_PENDING_RESOURCES"], "w").write('["actor-1"]')
+`})
+	err := f.run(t, context.Background(), experiment.Step{ID: "s", Uses: "t/x"}, "toy_resources")
+	if err == nil || !strings.Contains(err.Error(), "actor-1") {
+		t.Fatalf("err = %v, want resources unretired naming actor-1", err)
+	}
+	if o := readOutcome(t, filepath.Join(f.runDir, "s")); o.Outcome != outcomeResourcesUnretired {
+		t.Errorf("outcome = %+v", o)
+	}
+}
+
+// The server refuses a request whose step.log it cannot open, before fork: not launched.
+func TestForkedStep_ServerRefusalBeforeForkNeverLaunches(t *testing.T) {
+	f := newForkFixture(t, map[string]string{"toy_marker": "import os\nopen(os.path.join(os.environ['METIS_RUN_DIR'], 'launched'), 'w').close()\n"})
+	if err := os.MkdirAll(filepath.Join(f.runDir, "s", stepLogFile), 0o755); err != nil { // a directory
+		t.Fatal(err)
+	}
+	err := f.run(t, context.Background(), experiment.Step{ID: "s", Uses: "t/x"}, "toy_marker")
+	if err == nil || !strings.Contains(err.Error(), "start") {
+		t.Fatalf("err = %v, want a refused start", err)
+	}
+	if o := readOutcome(t, filepath.Join(f.runDir, "s")); o.Outcome != outcomeFailed || o.Started != nil {
+		t.Errorf("outcome = %+v, want failed, never launched", o)
+	}
+	if _, err := os.Stat(filepath.Join(f.runDir, "launched")); err == nil {
+		t.Error("the step launched despite the refusal")
+	}
+}
+
+func TestCheckForkProtocol(t *testing.T) {
+	if err := checkForkProtocol(forkProtocol); err != nil {
+		t.Errorf("current protocol refused: %v", err)
+	}
+	for _, v := range []int{0, 1} { // 0: a pre-metis#72 server sends no protocol at all
+		if err := checkForkProtocol(v); !errors.Is(err, errServerUnavailable) {
+			t.Errorf("protocol %d: %v, want errServerUnavailable (fall back before dispatch)", v, err)
+		}
+	}
+}

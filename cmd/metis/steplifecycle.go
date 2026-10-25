@@ -273,16 +273,27 @@ func (e execStep) runForked(ctx context.Context, step experiment.Step, spec wrap
 	case !dispatched:
 		return nil, true
 	}
+	if run.got && !run.resp.Launched { // the server refused before fork
+		end.launchErr = run.resp.Error
+		return record(), false
+	}
 	end.launched, end.started, end.event, end.signal = true, run.started, run.event, run.signal
-	end.ended = time.Now()
 	if run.got {
-		end.ended = run.started.Add(time.Duration(run.resp.Runtime * float64(time.Second)))
-		end.exitKnown, end.exitCode, end.joined = true, run.resp.Exit, run.resp.Joined
-		end.logTruncated, end.tail = run.resp.LogTruncated, []byte(run.resp.Output)
-		if _, err := os.Stat(end.logPath); errors.Is(err, fs.ErrNotExist) {
-			end.logMissing = true
+		r := run.resp
+		end.exitKnown, end.exitCode, end.joined = r.ExitKnown, r.Exit, r.Joined
+		if r.Runtime != nil {
+			end.ended = run.started.Add(time.Duration(*r.Runtime * float64(time.Second)))
+		} else {
+			end.exitKnown = false // no observed exit time: record no end or exit code
 		}
-		if run.event != endExited && run.resp.Exit == 0 {
+		end.logTruncated, end.tail = r.LogTruncated, []byte(r.Output)
+		if r.Error != "" {
+			end.tail = append(end.tail, "\n[forkserver] "+r.Error...)
+		}
+		if r.LogError != "" {
+			fmt.Fprintf(e.out, "! step %s: %s\n", step.ID, r.LogError)
+		}
+		if run.event != endExited && r.ExitKnown && r.Exit == 0 {
 			fmt.Fprintf(e.out, "· step %s: an exit-0 result arrived after the %s; dropped\n", step.ID, map[endEvent]string{endDeadline: "timeout", endCancelled: "cancel"}[run.event])
 		}
 	}

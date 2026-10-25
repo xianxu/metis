@@ -344,3 +344,73 @@ def test_in_group_lingerer_is_stopped(server, tmp_path):
             os.kill(pid, signal.SIGKILL)
             pytest.fail("the in-group lingerer survived")
         time.sleep(0.01)
+
+
+def test_ready_line_declares_protocol(tmp_path):
+    env = dict(os.environ, METIS_FORKSERVER_PRELOAD="")
+    proc = subprocess.Popen([sys.executable, "-m", "metis.forkserver"], stdin=subprocess.PIPE,
+                            stdout=subprocess.PIPE, cwd=REPO, env=env, text=True)
+    try:
+        assert json.loads(proc.stdout.readline())["protocol"] == 2
+    finally:
+        proc.stdin.close()
+        proc.wait(timeout=30)
+
+
+def test_unopenable_log_never_launches(server, tmp_path):
+    """A log the server cannot open refuses before fork: no child, an explicit not-launched answer."""
+    _toy(tmp_path, "toy_marker", """
+    open("launched", "w").close()
+    """)
+    step = _mkstep(tmp_path, 1)
+    _request(server, _lifecycle_req(1, "toy_marker", step, log_path=str(step)))  # a directory
+    resp = _responses(server, 1)[1]
+    assert resp["launched"] is False and resp["exit_known"] is False and "error" in resp, resp
+    assert not (step / "launched").exists()
+
+
+class _FailingSink:
+    def write(self, b):
+        raise OSError(28, "No space left on device")
+
+    def flush(self):
+        pass
+
+    def close(self):
+        pass
+
+
+def test_log_sink_error_keeps_draining_and_reports(tmp_path):
+    """A sink error never stops consumption (the child is never SIGPIPEd): the tail keeps
+    filling, the first error is kept, and EOF on the owned pipe is still what confirms the join."""
+    from metis import forkserver as fs
+
+    log = fs._Log(str(tmp_path / "step.log"), 1 << 20, MARKER)
+    log.fh.close()
+    log.fh = _FailingSink()
+    r, w = os.pipe()
+    os.write(w, b"a" * 1000 + b"\nfinished-cleanly\n")
+    os.close(w)
+    wake_r, wake_w = os.pipe()
+    try:
+        assert fs._pump(r, log, wake_r) is True, "EOF observed: the join is confirmed"
+    finally:
+        for fd in (wake_r, wake_w):
+            os.close(fd)
+    assert "No space left" in log.error
+    assert log.tail.endswith(b"finished-cleanly\n")
+
+
+def test_pump_stopped_by_wake_is_not_eof(tmp_path):
+    """Stopping the reader (a holder outside the group keeps the pipe) is not a join."""
+    from metis import forkserver as fs
+
+    log = fs._Log(None, None, None)
+    r, w = os.pipe()  # the writer stays open: no EOF will come
+    wake_r, wake_w = os.pipe()
+    os.write(wake_w, b"x")
+    try:
+        assert fs._pump(r, log, wake_r) is False
+    finally:
+        for fd in (w, wake_r, wake_w):
+            os.close(fd)

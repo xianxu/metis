@@ -429,7 +429,14 @@ wrapped by **thin step-executables** honoring the contract above. Hermetic via *
   under the protocol lock while dropping the child from its table. Go never signals a forkserver
   pid: on a timeout or cancel it sends `{"cancel": id, "signal": "TERM"|"KILL"}`, and the server
   signals only an unreaped child's group, so a recycled pid is never hit. The response carries
-  `joined`, `log_truncated` and `runtime` (fork to exit). `runForked` shares the budget, policy,
+  `launched` (false: refused before fork, e.g. `step.log` would not open), `exit_known`,
+  `joined` (true only on EOF of the child's pipe), `log_truncated`, `log_error` (the first sink
+  error; output keeps flowing) and `runtime` (fork to exit, absent when the exit was not
+  observed). Every waiter exit path, an unexpected error included, ends and reaps its child and
+  answers. The ready line declares `protocol: 2`; Go refuses an older server there, before any
+  dispatch, so the step falls back to legacy rather than lose its log and cancel. Times in
+  `outcome.json` come only from observed events: an unobserved exit records no end, runtime or
+  exit code. `runForked` shares the budget, policy,
   `classifyOutcome` and `outcome.json` with the legacy path; once a request is dispatched it never
   falls back (a timeout, cancel, lost server or unanswered cancel is a step error, and the last two
   are `cleanup-unconfirmed` with the root marked broken). The ready wait is context-bounded: a run

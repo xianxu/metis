@@ -27,7 +27,6 @@ func TestClassifyOutcome_Table(t *testing.T) {
 		{"cancelled running", ran(endCancelled, -1, "TERM", true, ""), outcomeCancelled, "cancelled"},
 		{"cancelled before launch", stepEnding{event: endCancelled}, outcomeCancelled, "before launch"},
 		{"launch failed", stepEnding{event: endExited, launchErr: "permission denied"}, outcomeFailed, "start: permission denied"},
-		{"forked, log missing", stepEnding{event: endExited, launched: true, joined: true, logMissing: true, logPath: "s/step.log"}, outcomeFailed, "wrote no s/step.log"},
 		{"join unconfirmed beats exit 0", ran(endExited, 0, "", false, ""), outcomeCleanupUnconfirmed, "cleanup unconfirmed"},
 		{"join unconfirmed beats pending", ran(endDeadline, -1, "KILL", false, `["actor-1"]`), outcomeCleanupUnconfirmed, "cleanup unconfirmed"},
 		{"pending beats exit 0", ran(endExited, 0, "", true, `["actor-1"]`), outcomeResourcesUnretired, `["actor-1"]`},
@@ -67,5 +66,18 @@ func TestClassifyOutcome_RecordFields(t *testing.T) {
 	pre, _ := classifyOutcome(stepEnding{event: endCancelled})
 	if pre.Started != nil || pre.RuntimeSeconds != nil || pre.ExitCode != nil {
 		t.Errorf("a never-launched step has no times or exit code: %+v", pre)
+	}
+}
+
+// An unobserved exit (no reap, no server answer) records the launch time only: no end, runtime or
+// exit code is invented.
+func TestClassifyOutcome_UnobservedExitHasNoEndTimes(t *testing.T) {
+	t0 := time.Date(2026, 10, 25, 9, 0, 0, 0, time.UTC)
+	o, err := classifyOutcome(stepEnding{event: endDeadline, launched: true, signal: "KILL", started: t0, ended: t0.Add(time.Hour)})
+	if o.Outcome != outcomeCleanupUnconfirmed || err == nil {
+		t.Fatalf("outcome = %+v, %v", o, err)
+	}
+	if o.Started == nil || o.Ended != nil || o.RuntimeSeconds != nil || o.ExitCode != nil {
+		t.Errorf("record = %+v; want started only", o)
 	}
 }
