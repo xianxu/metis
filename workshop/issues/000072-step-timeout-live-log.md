@@ -41,7 +41,7 @@ Extend the existing execution owner with explicit step timeouts, persistent boun
 
 Durable plan: `workshop/plans/000072-step-timeout-live-log-plan.md` (full flow, M1 legacy and cancellation, M2 forkserver). Design decisions 1 to 9 there were approved by the TL (see Log).
 
-- [ ] M1 — policy, outcome, bounded live log, legacy path, cancellation
+- [x] M1 — policy, outcome, bounded live log, legacy path, cancellation
 - [ ] M2 — forkserver path
 
 ## Estimate
@@ -78,6 +78,8 @@ The thorough plan gives a +15% design buffer, and impl is 40% of the v2 ranges.
 
 ## Log
 
+
+- 2026-10-25: closed M1 — Round 1 findings fixed as classes: join confirmed from an owned pipe (escaper exit 0, exit 1 and timeout all cleanup-unconfirmed); start and log-create failures through classifyOutcome; unreadable pending file is unretired; runtime launch to exit (TestExecStep_RuntimeExcludesTermination); copier joined before log reads (-race x2 clean); atlas states the M1 forkserver limit and step.log residue. All TestExecStep_, ClassifyOutcome, PrioritySem tests pass.; review verdict: FIX-THEN-SHIP
 2026-10-23: Filed unclaimed for ariadne#577. Primary seam: cmd/metis/exec.go execStep.Execute, with forkexec.go and runcontrol.go lifecycle integration. No code changed.
 2026-10-23 (metis:1): Concurrent claims in this slot: #71, #75, #76 and #72 are open at once while #75 waits on the operator CI pin (metis#70). Active-time attribution across them is approximate until ariadne#580 lands.
 2026-10-23 (metis:1): The TL (ops:0) approved the plan with decision 2 as written: the timeout counts from launch, not step entry, with a cancellable leaf-budget acquire. All other decisions stand as written. Code starts after #75 lands (its suite needs make test).
