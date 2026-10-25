@@ -157,7 +157,11 @@ func (e execStep) runLegacy(ctx context.Context, step experiment.Step, exe, step
 
 // awaitDrain confirms the join after the process exited: the pipe drains within joinBound, or
 // metis stops what is left of the process group it created (TERM, grace, KILL) and waits the
-// bound again. A holder that left the group (setsid) survives this, and the join stays
+// bound again. Precondition for signalling -pid after Wait reaped the leader: POSIX reserves a
+// group id while any member lives, so the signal reaches exactly the in-group holders keeping
+// the pipe open; with none left, the group is empty and the id is free, and only a recycle of
+// that pid as a new group leader within grace plus the bound could misdirect it (accepted; the
+// forkserver avoids even that by reaping only after escalation). A holder that left the group (setsid) survives this, and the join stays
 // unconfirmed. sig records any signal sent here.
 func (e execStep) awaitDrain(pid int, drained <-chan struct{}, sig *string) bool {
 	wait := func(d time.Duration) bool {
@@ -189,7 +193,8 @@ type childExit struct {
 	at  time.Time
 }
 
-// terminate ends the child's process group: TERM, then KILL after grace. It returns the last
+// terminate ends the child's process group: TERM, then KILL after grace. The leader is unreaped
+// here unless its exit raced the deadline (then awaitDrain's precondition note applies). It returns the last
 // signal sent, the exit (when it came), and whether the process was confirmed exited. Only the
 // group metis created is signalled; a descendant that left it (setsid) is reported, not chased.
 func (e execStep) terminate(pid int, exited <-chan childExit) (string, childExit, bool) {

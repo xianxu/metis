@@ -3833,6 +3833,771 @@ rounds:
       isolation: checkout
       reviewed: e4eabd172e5c12568306341ea9994de46ce58211
       blocked: false
+    - reviewer_runs:
+        - version: 1
+          intent:
+            disposable_root: true
+            id: 41c48e30-d036-40e9-8983-cf43d38ea81e
+            repository: github.com/xianxu/metis
+            issue_id: "000072"
+            recipe: milestone-review
+            round: 6
+            attempt: 1
+            agent: claude
+            root: /Volumes/TestScratch/review-checkouts/d04ee47d1cd0a24b
+            reviewed_head: 9d1da896717d519493edd1715ac9eab792bc2f7d
+            slot: metis:1
+            requested_at: "2026-10-25T17:37:19.770709Z"
+          phase: finished
+          pid: 87555
+          started_at: "2026-10-25T17:37:19.890254Z"
+          finished_at: "2026-10-25T17:43:47.558501Z"
+          session_id: 7c48f5ff-98c4-4a2f-82ad-0fe2c3b01514
+          outcome: returned
+      actual_inputs:
+        version: 4
+        method: active-time-v3-branch-v1
+        repository: github.com/xianxu/metis
+        code_head: 9d1da896717d519493edd1715ac9eab792bc2f7d
+        tracker_head: ccc98080ace713fc4a6bb963cbffe21baadc28e4
+        branch_point: 99ccccb46a2707de6fbfe1be44c32263f0e636cf
+        since: "2026-10-23T19:38:26-07:00"
+        until: "2026-10-25T10:35:05-07:00"
+        brain_root: /Users/xianxu/workspace/brain
+        gap_minutes: 15
+        commit_weight: 1
+        include_assistant: true
+        engagements:
+            - start: "2026-10-23T19:38:26-07:00"
+              end: "2026-10-25T10:35:05-07:00"
+              began: "2026-10-23T19:38:26-07:00"
+              roots:
+                - /Users/xianxu/workspace/worktree/metis-slot1/metis
+        sources:
+            - harness: claude
+              id: 0869d57a-be29-46b9-99c9-b00decfa590d
+              slot: metis:1
+              cwd: /Users/xianxu/workspace/worktree/metis-slot1/metis
+              digest: 25cca44740071ddc58ff078815b02b035a9d6573b3bf4dea74fcfd2f87452d7f
+              started: "2026-10-24T02:44:26.641Z"
+              spawned: false
+              bytes: 596802
+              windows:
+                - start: "2026-10-24T02:44:26.641Z"
+                  end: "2026-10-24T02:48:39Z"
+                - start: "2026-10-25T15:43:58Z"
+                  end: "2026-10-25T15:44:08Z"
+                - start: "2026-10-25T16:01:09Z"
+                  end: "2026-10-25T10:35:05-07:00"
+              dispatch_windows:
+                - start: "2026-10-24T02:44:26.641Z"
+                  end: "2026-10-25T10:35:05-07:00"
+            - harness: claude
+              id: 551b999c-0156-4396-815b-ab3e30b9f070
+              slot: metis:1
+              cwd: /Users/xianxu/workspace/worktree/metis-slot1/metis
+              digest: 9ceca154fa151db8f638c50592ab002b6765dd674d72152abbe1b1d60b58e236
+              started: "2026-10-24T02:47:37.483Z"
+              spawned: false
+              bytes: 367701
+              windows:
+                - start: "2026-10-24T02:47:37.483Z"
+                  end: "2026-10-24T02:48:39Z"
+                - start: "2026-10-25T15:43:58Z"
+                  end: "2026-10-25T15:44:08Z"
+                - start: "2026-10-25T16:01:09Z"
+                  end: "2026-10-25T10:35:05-07:00"
+              dispatch_windows:
+                - start: "2026-10-24T02:47:37.483Z"
+                  end: "2026-10-25T10:35:05-07:00"
+            - harness: claude
+              id: 621e2c42-a080-4dc1-9165-83040e197e38
+              slot: metis:1
+              cwd: /Users/xianxu/workspace/worktree/metis-slot1/metis
+              digest: 6dd0c671a876f05b9f7f2a76f862df46740176174373d49dcae7283934a41e4d
+              started: "2026-10-24T00:13:14.303Z"
+              spawned: false
+              bytes: 10261651
+              windows:
+                - start: "2026-10-24T02:38:33Z"
+                  end: "2026-10-24T02:48:39Z"
+                - start: "2026-10-25T15:43:58Z"
+                  end: "2026-10-25T15:44:08Z"
+                - start: "2026-10-25T16:01:09Z"
+                  end: "2026-10-25T10:35:05-07:00"
+              dispatch_windows:
+                - start: "2026-10-23T19:38:26-07:00"
+                  end: "2026-10-25T10:35:05-07:00"
+            - harness: claude
+              id: e26c5e7a-df9a-4671-86ec-e5ceff7a6ac1
+              slot: metis:1
+              cwd: /Users/xianxu/workspace/worktree/metis-slot1/metis
+              digest: b3d18eedd64bb06d01d901e06ac0d158137882cedd11db2dee054cfaa62ecc04
+              started: "2026-10-24T02:47:22.513Z"
+              spawned: false
+              bytes: 493002
+              windows:
+                - start: "2026-10-24T02:47:22.513Z"
+                  end: "2026-10-24T02:48:39Z"
+                - start: "2026-10-25T15:43:58Z"
+                  end: "2026-10-25T15:44:08Z"
+                - start: "2026-10-25T16:01:09Z"
+                  end: "2026-10-25T10:35:05-07:00"
+              dispatch_windows:
+                - start: "2026-10-24T02:47:22.513Z"
+                  end: "2026-10-25T10:35:05-07:00"
+            - harness: claude
+              id: f2d4b646-eda5-4c47-8d97-ddd84ac73472
+              slot: metis:1
+              cwd: /Users/xianxu/workspace/worktree/metis-slot1/metis
+              digest: d98d7cc2b69515640d3b1b842393619ed2847dd5d37675a5fe27bc6b0b169e98
+              started: "2026-10-24T02:46:00.091Z"
+              spawned: false
+              bytes: 500360
+              windows:
+                - start: "2026-10-24T02:46:00.091Z"
+                  end: "2026-10-24T02:48:39Z"
+                - start: "2026-10-25T15:43:58Z"
+                  end: "2026-10-25T15:44:08Z"
+                - start: "2026-10-25T16:01:09Z"
+                  end: "2026-10-25T10:35:05-07:00"
+              dispatch_windows:
+                - start: "2026-10-24T02:46:00.091Z"
+                  end: "2026-10-25T10:35:05-07:00"
+        excluded_brain_sessions: 1
+        excluded_brain_minutes: 60.41913333333334
+        cuts:
+            - boundary: M1
+              dispatched: "2026-10-25T09:15:41-07:00"
+              finalized: "2026-10-25T09:21:36-07:00"
+              finalizing: false
+            - boundary: M1
+              dispatched: "2026-10-25T09:25:20-07:00"
+              finalized: "2026-10-25T09:29:42-07:00"
+              finalizing: true
+            - boundary: M2
+              dispatched: "2026-10-25T09:47:44-07:00"
+              finalized: "2026-10-25T09:53:07-07:00"
+              finalizing: false
+            - boundary: M2
+              dispatched: "2026-10-25T10:00:56-07:00"
+              finalized: "2026-10-25T10:09:12-07:00"
+              finalizing: false
+            - boundary: M2
+              dispatched: "2026-10-25T10:20:41-07:00"
+              finalized: "2026-10-25T10:33:56-07:00"
+              finalizing: true
+        branches:
+            - root: /Users/xianxu/workspace/worktree/metis-slot1/metis
+              path: /Users/xianxu/workspace/metis/.git/worktrees/metis/logs/HEAD
+              head: 9d1da896717d519493edd1715ac9eab792bc2f7d
+              branch: 000072-step-timeout-live-log
+              digest: 7788a713cb1a5e6dedcccb30701a5fc747f5640d740395d7f1cfef2f8619abfd
+              bytes: 23359
+              intervals:
+                - source_index: 0
+                  start: "2026-10-24T02:44:26.641Z"
+                  end: "2026-10-24T02:48:39Z"
+                  kind: branch
+                - source_index: 0
+                  start: "2026-10-24T02:48:39Z"
+                  end: "2026-10-24T02:48:51Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source_index: 0
+                  start: "2026-10-24T02:48:51Z"
+                  end: "2026-10-24T02:53:21Z"
+                  branch: 000073-repeated-run-ledger
+                  kind: foreign-branch
+                - source_index: 0
+                  start: "2026-10-24T02:53:21Z"
+                  end: "2026-10-24T02:53:32Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source_index: 0
+                  start: "2026-10-24T02:53:32Z"
+                  end: "2026-10-24T02:53:48Z"
+                  branch: 000074-manual-grading-step
+                  kind: foreign-branch
+                - source_index: 0
+                  start: "2026-10-24T02:53:48Z"
+                  end: "2026-10-24T02:53:49Z"
+                  branch: 000073-repeated-run-ledger
+                  kind: foreign-branch
+                - source_index: 0
+                  start: "2026-10-24T02:53:49Z"
+                  end: "2026-10-24T02:55:54Z"
+                  branch: 000074-manual-grading-step
+                  kind: foreign-branch
+                - source_index: 0
+                  start: "2026-10-24T02:55:54Z"
+                  end: "2026-10-24T03:00:52Z"
+                  branch: 000073-repeated-run-ledger
+                  kind: foreign-branch
+                - source_index: 0
+                  start: "2026-10-24T03:00:52Z"
+                  end: "2026-10-25T11:16:02Z"
+                  branch: 000074-manual-grading-step
+                  kind: foreign-branch
+                - source_index: 0
+                  start: "2026-10-25T11:16:02Z"
+                  end: "2026-10-25T11:16:32Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source_index: 0
+                  start: "2026-10-25T11:16:32Z"
+                  end: "2026-10-25T14:40:39Z"
+                  branch: 000070-ci-weave-pin
+                  kind: foreign-branch
+                - source_index: 0
+                  start: "2026-10-25T14:40:39Z"
+                  end: "2026-10-25T14:41:01Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source_index: 0
+                  start: "2026-10-25T14:41:01Z"
+                  end: "2026-10-25T14:44:45Z"
+                  branch: 000075-make-test-target-offline-go-pytest-suite-for-local-check
+                  kind: foreign-branch
+                - source_index: 0
+                  start: "2026-10-25T14:44:45Z"
+                  end: "2026-10-25T14:45:14Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source_index: 0
+                  start: "2026-10-25T14:45:14Z"
+                  end: "2026-10-25T14:54:53Z"
+                  branch: 000071-never-cache-steps
+                  kind: foreign-branch
+                - source_index: 0
+                  start: "2026-10-25T14:54:53Z"
+                  end: "2026-10-25T14:55:04Z"
+                  branch: 000076-canonicalize-metis-dir-step-paths-evalsymlinks
+                  kind: foreign-branch
+                - source_index: 0
+                  start: "2026-10-25T14:55:04Z"
+                  end: "2026-10-25T14:55:43Z"
+                  branch: 000071-never-cache-steps
+                  kind: foreign-branch
+                - source_index: 0
+                  start: "2026-10-25T14:55:43Z"
+                  end: "2026-10-25T14:56:09Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source_index: 0
+                  start: "2026-10-25T14:56:09Z"
+                  end: "2026-10-25T15:43:58Z"
+                  branch: 000076-canonicalize-metis-dir-step-paths-evalsymlinks
+                  kind: foreign-branch
+                - source_index: 0
+                  start: "2026-10-25T15:43:58Z"
+                  end: "2026-10-25T15:44:08Z"
+                  kind: branch
+                - source_index: 0
+                  start: "2026-10-25T15:44:08Z"
+                  end: "2026-10-25T16:00:45Z"
+                  branch: 000076-canonicalize-metis-dir-step-paths-evalsymlinks
+                  kind: foreign-branch
+                - source_index: 0
+                  start: "2026-10-25T16:00:45Z"
+                  end: "2026-10-25T16:01:09Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source_index: 0
+                  start: "2026-10-25T16:01:09Z"
+                  end: "2026-10-25T10:35:05-07:00"
+                  kind: branch
+                - source_index: 1
+                  start: "2026-10-24T02:47:37.483Z"
+                  end: "2026-10-24T02:48:39Z"
+                  kind: branch
+                - source_index: 1
+                  start: "2026-10-24T02:48:39Z"
+                  end: "2026-10-24T02:48:51Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source_index: 1
+                  start: "2026-10-24T02:48:51Z"
+                  end: "2026-10-24T02:53:21Z"
+                  branch: 000073-repeated-run-ledger
+                  kind: foreign-branch
+                - source_index: 1
+                  start: "2026-10-24T02:53:21Z"
+                  end: "2026-10-24T02:53:32Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source_index: 1
+                  start: "2026-10-24T02:53:32Z"
+                  end: "2026-10-24T02:53:48Z"
+                  branch: 000074-manual-grading-step
+                  kind: foreign-branch
+                - source_index: 1
+                  start: "2026-10-24T02:53:48Z"
+                  end: "2026-10-24T02:53:49Z"
+                  branch: 000073-repeated-run-ledger
+                  kind: foreign-branch
+                - source_index: 1
+                  start: "2026-10-24T02:53:49Z"
+                  end: "2026-10-24T02:55:54Z"
+                  branch: 000074-manual-grading-step
+                  kind: foreign-branch
+                - source_index: 1
+                  start: "2026-10-24T02:55:54Z"
+                  end: "2026-10-24T03:00:52Z"
+                  branch: 000073-repeated-run-ledger
+                  kind: foreign-branch
+                - source_index: 1
+                  start: "2026-10-24T03:00:52Z"
+                  end: "2026-10-25T11:16:02Z"
+                  branch: 000074-manual-grading-step
+                  kind: foreign-branch
+                - source_index: 1
+                  start: "2026-10-25T11:16:02Z"
+                  end: "2026-10-25T11:16:32Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source_index: 1
+                  start: "2026-10-25T11:16:32Z"
+                  end: "2026-10-25T14:40:39Z"
+                  branch: 000070-ci-weave-pin
+                  kind: foreign-branch
+                - source_index: 1
+                  start: "2026-10-25T14:40:39Z"
+                  end: "2026-10-25T14:41:01Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source_index: 1
+                  start: "2026-10-25T14:41:01Z"
+                  end: "2026-10-25T14:44:45Z"
+                  branch: 000075-make-test-target-offline-go-pytest-suite-for-local-check
+                  kind: foreign-branch
+                - source_index: 1
+                  start: "2026-10-25T14:44:45Z"
+                  end: "2026-10-25T14:45:14Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source_index: 1
+                  start: "2026-10-25T14:45:14Z"
+                  end: "2026-10-25T14:54:53Z"
+                  branch: 000071-never-cache-steps
+                  kind: foreign-branch
+                - source_index: 1
+                  start: "2026-10-25T14:54:53Z"
+                  end: "2026-10-25T14:55:04Z"
+                  branch: 000076-canonicalize-metis-dir-step-paths-evalsymlinks
+                  kind: foreign-branch
+                - source_index: 1
+                  start: "2026-10-25T14:55:04Z"
+                  end: "2026-10-25T14:55:43Z"
+                  branch: 000071-never-cache-steps
+                  kind: foreign-branch
+                - source_index: 1
+                  start: "2026-10-25T14:55:43Z"
+                  end: "2026-10-25T14:56:09Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source_index: 1
+                  start: "2026-10-25T14:56:09Z"
+                  end: "2026-10-25T15:43:58Z"
+                  branch: 000076-canonicalize-metis-dir-step-paths-evalsymlinks
+                  kind: foreign-branch
+                - source_index: 1
+                  start: "2026-10-25T15:43:58Z"
+                  end: "2026-10-25T15:44:08Z"
+                  kind: branch
+                - source_index: 1
+                  start: "2026-10-25T15:44:08Z"
+                  end: "2026-10-25T16:00:45Z"
+                  branch: 000076-canonicalize-metis-dir-step-paths-evalsymlinks
+                  kind: foreign-branch
+                - source_index: 1
+                  start: "2026-10-25T16:00:45Z"
+                  end: "2026-10-25T16:01:09Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source_index: 1
+                  start: "2026-10-25T16:01:09Z"
+                  end: "2026-10-25T10:35:05-07:00"
+                  kind: branch
+                - source_index: 2
+                  start: "2026-10-23T19:38:26-07:00"
+                  end: "2026-10-24T02:38:33Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source_index: 2
+                  start: "2026-10-24T02:38:33Z"
+                  end: "2026-10-24T02:48:39Z"
+                  kind: branch
+                - source_index: 2
+                  start: "2026-10-24T02:48:39Z"
+                  end: "2026-10-24T02:48:51Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source_index: 2
+                  start: "2026-10-24T02:48:51Z"
+                  end: "2026-10-24T02:53:21Z"
+                  branch: 000073-repeated-run-ledger
+                  kind: foreign-branch
+                - source_index: 2
+                  start: "2026-10-24T02:53:21Z"
+                  end: "2026-10-24T02:53:32Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source_index: 2
+                  start: "2026-10-24T02:53:32Z"
+                  end: "2026-10-24T02:53:48Z"
+                  branch: 000074-manual-grading-step
+                  kind: foreign-branch
+                - source_index: 2
+                  start: "2026-10-24T02:53:48Z"
+                  end: "2026-10-24T02:53:49Z"
+                  branch: 000073-repeated-run-ledger
+                  kind: foreign-branch
+                - source_index: 2
+                  start: "2026-10-24T02:53:49Z"
+                  end: "2026-10-24T02:55:54Z"
+                  branch: 000074-manual-grading-step
+                  kind: foreign-branch
+                - source_index: 2
+                  start: "2026-10-24T02:55:54Z"
+                  end: "2026-10-24T03:00:52Z"
+                  branch: 000073-repeated-run-ledger
+                  kind: foreign-branch
+                - source_index: 2
+                  start: "2026-10-24T03:00:52Z"
+                  end: "2026-10-25T11:16:02Z"
+                  branch: 000074-manual-grading-step
+                  kind: foreign-branch
+                - source_index: 2
+                  start: "2026-10-25T11:16:02Z"
+                  end: "2026-10-25T11:16:32Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source_index: 2
+                  start: "2026-10-25T11:16:32Z"
+                  end: "2026-10-25T14:40:39Z"
+                  branch: 000070-ci-weave-pin
+                  kind: foreign-branch
+                - source_index: 2
+                  start: "2026-10-25T14:40:39Z"
+                  end: "2026-10-25T14:41:01Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source_index: 2
+                  start: "2026-10-25T14:41:01Z"
+                  end: "2026-10-25T14:44:45Z"
+                  branch: 000075-make-test-target-offline-go-pytest-suite-for-local-check
+                  kind: foreign-branch
+                - source_index: 2
+                  start: "2026-10-25T14:44:45Z"
+                  end: "2026-10-25T14:45:14Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source_index: 2
+                  start: "2026-10-25T14:45:14Z"
+                  end: "2026-10-25T14:54:53Z"
+                  branch: 000071-never-cache-steps
+                  kind: foreign-branch
+                - source_index: 2
+                  start: "2026-10-25T14:54:53Z"
+                  end: "2026-10-25T14:55:04Z"
+                  branch: 000076-canonicalize-metis-dir-step-paths-evalsymlinks
+                  kind: foreign-branch
+                - source_index: 2
+                  start: "2026-10-25T14:55:04Z"
+                  end: "2026-10-25T14:55:43Z"
+                  branch: 000071-never-cache-steps
+                  kind: foreign-branch
+                - source_index: 2
+                  start: "2026-10-25T14:55:43Z"
+                  end: "2026-10-25T14:56:09Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source_index: 2
+                  start: "2026-10-25T14:56:09Z"
+                  end: "2026-10-25T15:43:58Z"
+                  branch: 000076-canonicalize-metis-dir-step-paths-evalsymlinks
+                  kind: foreign-branch
+                - source_index: 2
+                  start: "2026-10-25T15:43:58Z"
+                  end: "2026-10-25T15:44:08Z"
+                  kind: branch
+                - source_index: 2
+                  start: "2026-10-25T15:44:08Z"
+                  end: "2026-10-25T16:00:45Z"
+                  branch: 000076-canonicalize-metis-dir-step-paths-evalsymlinks
+                  kind: foreign-branch
+                - source_index: 2
+                  start: "2026-10-25T16:00:45Z"
+                  end: "2026-10-25T16:01:09Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source_index: 2
+                  start: "2026-10-25T16:01:09Z"
+                  end: "2026-10-25T10:35:05-07:00"
+                  kind: branch
+                - source_index: 3
+                  start: "2026-10-24T02:47:22.513Z"
+                  end: "2026-10-24T02:48:39Z"
+                  kind: branch
+                - source_index: 3
+                  start: "2026-10-24T02:48:39Z"
+                  end: "2026-10-24T02:48:51Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source_index: 3
+                  start: "2026-10-24T02:48:51Z"
+                  end: "2026-10-24T02:53:21Z"
+                  branch: 000073-repeated-run-ledger
+                  kind: foreign-branch
+                - source_index: 3
+                  start: "2026-10-24T02:53:21Z"
+                  end: "2026-10-24T02:53:32Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source_index: 3
+                  start: "2026-10-24T02:53:32Z"
+                  end: "2026-10-24T02:53:48Z"
+                  branch: 000074-manual-grading-step
+                  kind: foreign-branch
+                - source_index: 3
+                  start: "2026-10-24T02:53:48Z"
+                  end: "2026-10-24T02:53:49Z"
+                  branch: 000073-repeated-run-ledger
+                  kind: foreign-branch
+                - source_index: 3
+                  start: "2026-10-24T02:53:49Z"
+                  end: "2026-10-24T02:55:54Z"
+                  branch: 000074-manual-grading-step
+                  kind: foreign-branch
+                - source_index: 3
+                  start: "2026-10-24T02:55:54Z"
+                  end: "2026-10-24T03:00:52Z"
+                  branch: 000073-repeated-run-ledger
+                  kind: foreign-branch
+                - source_index: 3
+                  start: "2026-10-24T03:00:52Z"
+                  end: "2026-10-25T11:16:02Z"
+                  branch: 000074-manual-grading-step
+                  kind: foreign-branch
+                - source_index: 3
+                  start: "2026-10-25T11:16:02Z"
+                  end: "2026-10-25T11:16:32Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source_index: 3
+                  start: "2026-10-25T11:16:32Z"
+                  end: "2026-10-25T14:40:39Z"
+                  branch: 000070-ci-weave-pin
+                  kind: foreign-branch
+                - source_index: 3
+                  start: "2026-10-25T14:40:39Z"
+                  end: "2026-10-25T14:41:01Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source_index: 3
+                  start: "2026-10-25T14:41:01Z"
+                  end: "2026-10-25T14:44:45Z"
+                  branch: 000075-make-test-target-offline-go-pytest-suite-for-local-check
+                  kind: foreign-branch
+                - source_index: 3
+                  start: "2026-10-25T14:44:45Z"
+                  end: "2026-10-25T14:45:14Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source_index: 3
+                  start: "2026-10-25T14:45:14Z"
+                  end: "2026-10-25T14:54:53Z"
+                  branch: 000071-never-cache-steps
+                  kind: foreign-branch
+                - source_index: 3
+                  start: "2026-10-25T14:54:53Z"
+                  end: "2026-10-25T14:55:04Z"
+                  branch: 000076-canonicalize-metis-dir-step-paths-evalsymlinks
+                  kind: foreign-branch
+                - source_index: 3
+                  start: "2026-10-25T14:55:04Z"
+                  end: "2026-10-25T14:55:43Z"
+                  branch: 000071-never-cache-steps
+                  kind: foreign-branch
+                - source_index: 3
+                  start: "2026-10-25T14:55:43Z"
+                  end: "2026-10-25T14:56:09Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source_index: 3
+                  start: "2026-10-25T14:56:09Z"
+                  end: "2026-10-25T15:43:58Z"
+                  branch: 000076-canonicalize-metis-dir-step-paths-evalsymlinks
+                  kind: foreign-branch
+                - source_index: 3
+                  start: "2026-10-25T15:43:58Z"
+                  end: "2026-10-25T15:44:08Z"
+                  kind: branch
+                - source_index: 3
+                  start: "2026-10-25T15:44:08Z"
+                  end: "2026-10-25T16:00:45Z"
+                  branch: 000076-canonicalize-metis-dir-step-paths-evalsymlinks
+                  kind: foreign-branch
+                - source_index: 3
+                  start: "2026-10-25T16:00:45Z"
+                  end: "2026-10-25T16:01:09Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source_index: 3
+                  start: "2026-10-25T16:01:09Z"
+                  end: "2026-10-25T10:35:05-07:00"
+                  kind: branch
+                - source_index: 4
+                  start: "2026-10-24T02:46:00.091Z"
+                  end: "2026-10-24T02:48:39Z"
+                  kind: branch
+                - source_index: 4
+                  start: "2026-10-24T02:48:39Z"
+                  end: "2026-10-24T02:48:51Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source_index: 4
+                  start: "2026-10-24T02:48:51Z"
+                  end: "2026-10-24T02:53:21Z"
+                  branch: 000073-repeated-run-ledger
+                  kind: foreign-branch
+                - source_index: 4
+                  start: "2026-10-24T02:53:21Z"
+                  end: "2026-10-24T02:53:32Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source_index: 4
+                  start: "2026-10-24T02:53:32Z"
+                  end: "2026-10-24T02:53:48Z"
+                  branch: 000074-manual-grading-step
+                  kind: foreign-branch
+                - source_index: 4
+                  start: "2026-10-24T02:53:48Z"
+                  end: "2026-10-24T02:53:49Z"
+                  branch: 000073-repeated-run-ledger
+                  kind: foreign-branch
+                - source_index: 4
+                  start: "2026-10-24T02:53:49Z"
+                  end: "2026-10-24T02:55:54Z"
+                  branch: 000074-manual-grading-step
+                  kind: foreign-branch
+                - source_index: 4
+                  start: "2026-10-24T02:55:54Z"
+                  end: "2026-10-24T03:00:52Z"
+                  branch: 000073-repeated-run-ledger
+                  kind: foreign-branch
+                - source_index: 4
+                  start: "2026-10-24T03:00:52Z"
+                  end: "2026-10-25T11:16:02Z"
+                  branch: 000074-manual-grading-step
+                  kind: foreign-branch
+                - source_index: 4
+                  start: "2026-10-25T11:16:02Z"
+                  end: "2026-10-25T11:16:32Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source_index: 4
+                  start: "2026-10-25T11:16:32Z"
+                  end: "2026-10-25T14:40:39Z"
+                  branch: 000070-ci-weave-pin
+                  kind: foreign-branch
+                - source_index: 4
+                  start: "2026-10-25T14:40:39Z"
+                  end: "2026-10-25T14:41:01Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source_index: 4
+                  start: "2026-10-25T14:41:01Z"
+                  end: "2026-10-25T14:44:45Z"
+                  branch: 000075-make-test-target-offline-go-pytest-suite-for-local-check
+                  kind: foreign-branch
+                - source_index: 4
+                  start: "2026-10-25T14:44:45Z"
+                  end: "2026-10-25T14:45:14Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source_index: 4
+                  start: "2026-10-25T14:45:14Z"
+                  end: "2026-10-25T14:54:53Z"
+                  branch: 000071-never-cache-steps
+                  kind: foreign-branch
+                - source_index: 4
+                  start: "2026-10-25T14:54:53Z"
+                  end: "2026-10-25T14:55:04Z"
+                  branch: 000076-canonicalize-metis-dir-step-paths-evalsymlinks
+                  kind: foreign-branch
+                - source_index: 4
+                  start: "2026-10-25T14:55:04Z"
+                  end: "2026-10-25T14:55:43Z"
+                  branch: 000071-never-cache-steps
+                  kind: foreign-branch
+                - source_index: 4
+                  start: "2026-10-25T14:55:43Z"
+                  end: "2026-10-25T14:56:09Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source_index: 4
+                  start: "2026-10-25T14:56:09Z"
+                  end: "2026-10-25T15:43:58Z"
+                  branch: 000076-canonicalize-metis-dir-step-paths-evalsymlinks
+                  kind: foreign-branch
+                - source_index: 4
+                  start: "2026-10-25T15:43:58Z"
+                  end: "2026-10-25T15:44:08Z"
+                  kind: branch
+                - source_index: 4
+                  start: "2026-10-25T15:44:08Z"
+                  end: "2026-10-25T16:00:45Z"
+                  branch: 000076-canonicalize-metis-dir-step-paths-evalsymlinks
+                  kind: foreign-branch
+                - source_index: 4
+                  start: "2026-10-25T16:00:45Z"
+                  end: "2026-10-25T16:01:09Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source_index: 4
+                  start: "2026-10-25T16:01:09Z"
+                  end: "2026-10-25T10:35:05-07:00"
+                  kind: branch
+      "n": 6
+      timestamp: "2026-10-25T10:43:53-07:00"
+      dispatched: "2026-10-25T10:37:19-07:00"
+      agent: claude
+      reviewer: claude (anthropic; author anthropic)
+      dispose:
+        - id: BR-5
+          disposition: addressed
+          note: steplifecycle.go:140 uses the Wait time; mutation stamping ended after awaitDrain fails TestExecStep_EscapedGrandchildIsCleanupUnconfirmed (runtime >= joinBound).
+          round: 6
+        - id: BR-8
+          disposition: addressed
+          note: awaitDrain TERM/grace/KILLs the group after a normal exit; disabling it fails TestExecStep_InGroupLingererIsStopped.
+          round: 6
+        - id: BR-9
+          disposition: addressed
+          note: atlas/experiment.md METIS_PENDING_RESOURCES entry states leave-the-group and detach-from-stdio, and the EPIPE consequence.
+          round: 6
+        - id: BR-18
+          disposition: not-addressed
+          note: 'No regression test (reverting forkserver.py to 2ab03a3 keeps 20/20 green); probe: watcher.start failure answers but never signals a TERM-ignoring child (end_group gated on watcher.is_alive), child left running.'
+          round: 6
+        - id: BR-19
+          disposition: addressed
+          note: Run against fd69993 forkserver the test now fails at the lock.acquire(timeout=1) assertion instead of hanging.
+          round: 6
+      findings:
+        - kind: defect
+          id: BR-20
+          severity: Minor
+          title: Legacy path signals -pid after cmd.Wait reaped the leader, contradicting the lessons.md rule added in this range
+          detail: steplifecycle.go:174-183 (awaitDrain) and 195-208 (terminate, when exit and deadline coincide) signal the group after its leader is reaped. Safe while any member lives (pgid reserved), unsafe only on pid wraparound within grace plus bound. Document the precondition at the call site and scope the lesson to the forkserver.
+          family: group-signal-after-reap
+          round: 6
+      recipe: milestone-review
+      isolation: checkout
+      reviewed: 9d1da896717d519493edd1715ac9eab792bc2f7d
+      blocked: false
 ---
 
 # Gate ledger — metis#72 (boundary-review)
@@ -3929,10 +4694,22 @@ later rounds disposed of them. Generated — edit the gate, not this file.
 - **BR-19** [Minor] `forked-path-test-gaps` (kind: defect) test_exit_watcher_failure_falls_back_and_still_reaps takes the protocol lock without a bound, so a regression hangs the suite
   Rule: every forkserver test that takes the lock or waits on a child is bounded (lock.acquire(timeout=...), join timeouts). Run against the round-3 forkserver.py (fd69993), this test hung until killed instead of failing.
 
+## Round 6 — 2026-10-25T10:43:53-07:00 (claude) — passed
+
+### Disposed
+
+- BR-5 — addressed — steplifecycle.go:140 uses the Wait time; mutation stamping ended after awaitDrain fails TestExecStep_EscapedGrandchildIsCleanupUnconfirmed (runtime >= joinBound).
+- BR-8 — addressed — awaitDrain TERM/grace/KILLs the group after a normal exit; disabling it fails TestExecStep_InGroupLingererIsStopped.
+- BR-9 — addressed — atlas/experiment.md METIS_PENDING_RESOURCES entry states leave-the-group and detach-from-stdio, and the EPIPE consequence.
+- BR-18 — not-addressed — No regression test (reverting forkserver.py to 2ab03a3 keeps 20/20 green); probe: watcher.start failure answers but never signals a TERM-ignoring child (end_group gated on watcher.is_alive), child left running.
+- BR-19 — addressed — Run against fd69993 forkserver the test now fails at the lock.acquire(timeout=1) assertion instead of hanging.
+
+### Raised
+
+- **BR-20** [Minor] `group-signal-after-reap` (kind: defect) Legacy path signals -pid after cmd.Wait reaped the leader, contradicting the lessons.md rule added in this range
+  steplifecycle.go:174-183 (awaitDrain) and 195-208 (terminate, when exit and deadline coincide) signal the group after its leader is reaped. Safe while any member lives (pgid reserved), unsafe only on pid wraparound within grace plus bound. Document the precondition at the call site and scope the lesson to the forkserver.
+
 ## Open findings
 
-- **BR-5** [Minor] `runtime-vs-wait-accounting` (kind: defect) runtime_seconds includes termination time, not launch-to-exit as plan decision 7 states
-- **BR-8** [Minor] `owned-process-left-running` (kind: defect) Normal exit with an in-group descendant holding stdout leaves that owned process running
-- **BR-9** [Minor] `docs-claim-exceeds-code` (kind: defect) Atlas promise that metis never kills external resources omits the stdio precondition
 - **BR-18** [Minor] `owned-process-left-running` (kind: defect) Forkserver waiter can reap the leader before group escalation, or skip the reap, on rare error paths
-- **BR-19** [Minor] `forked-path-test-gaps` (kind: defect) test_exit_watcher_failure_falls_back_and_still_reaps takes the protocol lock without a bound, so a regression hangs the suite
+- **BR-20** [Minor] `group-signal-after-reap` (kind: defect) Legacy path signals -pid after cmd.Wait reaped the leader, contradicting the lessons.md rule added in this range

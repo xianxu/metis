@@ -522,3 +522,31 @@ def test_exit_watcher_failure_falls_back_and_still_reaps(monkeypatch):
         assert resp["joined"] is False and "injected waiter failure" in resp["error"], resp
     finally:
         _cleanup(fs, pid)
+
+
+# See the note above test_waiter_failure_after_exit_answers_unjoined_and_reaps.
+@pytest.mark.filterwarnings("ignore:This process .* is multi-threaded:DeprecationWarning")
+def test_watcher_start_failure_still_ends_the_child(monkeypatch):
+    """BR-18: if the exit watcher cannot even start, the waiter still escalates (TERM, KILL) on
+    the child it owns and answers; the child does not keep running."""
+    from metis import forkserver as fs
+
+    monkeypatch.setattr(fs, "_start_watcher", _boom)
+    pid, r = _fork_quiet_child("stubborn")
+    try:
+        t, lock, out = _run_waiter(fs, pid, r)
+        t.join(timeout=5)
+        assert not t.is_alive(), "the waiter must finish within its bounds"
+        resp = json.loads(out.getvalue())
+        assert resp["joined"] is False and "injected waiter failure" in resp["error"], resp
+        deadline = time.monotonic() + 5
+        while True:  # KILLed by the escalation; reaped by the late reaper
+            try:
+                if os.waitpid(pid, os.WNOHANG)[0]:
+                    break
+            except ChildProcessError:
+                break
+            assert time.monotonic() < deadline, "the stubborn child is still running"
+            time.sleep(0.02)
+    finally:
+        _cleanup(fs, pid)

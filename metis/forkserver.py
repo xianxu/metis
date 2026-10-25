@@ -273,7 +273,6 @@ def _wait(req: dict, pid: int, rfd: int, log: _Log, lock: threading.Lock, out) -
     resp = {"id": req_id, "launched": True, "exit_known": False, "joined": False,
             "log_truncated": False, "log_error": "", "output": ""}
     reader = threading.Thread(target=read, daemon=True)
-    watcher = threading.Thread(target=watch, daemon=True)
 
     def guarded(stage) -> None:
         """Run one stage; a failure is recorded and never skips the stages after it."""
@@ -284,12 +283,12 @@ def _wait(req: dict, pid: int, rfd: int, log: _Log, lock: threading.Lock, out) -
 
     def run() -> None:
         reader.start()
-        watcher.start()
+        _start_watcher(watch)
         exited.wait()
         _drain_join(req_id, lock, drained, grace, join)
 
     def end_group() -> None:
-        if not exited.is_set() and watcher.is_alive():  # exit never observed: end it, on the exit
+        if not exited.is_set():  # exit never observed (even if the watcher never ran): end it
             _escalate(req_id, lock, exited, grace, join)
 
     def stop_reader() -> None:
@@ -333,6 +332,11 @@ def _wait(req: dict, pid: int, rfd: int, log: _Log, lock: threading.Lock, out) -
         resp["error"] = error
         resp["joined"] = False
     _respond(lock, out, resp)
+
+
+def _start_watcher(watch) -> None:
+    """Start the exit-watcher thread (a seam: a start failure must still end the child)."""
+    threading.Thread(target=watch, daemon=True).start()
 
 
 def _late_reap(req_id, pid: int, lock: threading.Lock) -> None:
