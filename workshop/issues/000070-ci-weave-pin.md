@@ -16,6 +16,7 @@ claimant:
     workspace: metis:1
     worktree: /Users/xianxu/workspace/worktree/metis-slot1/metis
     repository: github.com/xianxu/metis
+flow: {kind: quick, provenance: inferred, spec: "a651e122", done: "a4d38aa0"}
 ---
 
 # CI: build weave from a pinned ariadne commit
