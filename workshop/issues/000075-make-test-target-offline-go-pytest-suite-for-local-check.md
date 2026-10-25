@@ -1,12 +1,21 @@
 ---
 id: 000075
-status: open
+status: codecomplete
 deps: []
 github_issue:
 created: 2026-10-23
 updated: 2026-10-23
 estimate_hours:
-card_mirror: '9ceeeadc6e3de9d26c7b267cd84040de2c49057c' # card fields mirrored from issue-cards; edit via sdlc
+card_mirror: '48702cf79f636dfb49a98f75d5f62b5ca474975e' # card fields mirrored from issue-cards; edit via sdlc
+started: 2026-10-23T17:24:43-07:00
+claimant:
+    operator: Xian Xu
+    machine: 4716879978a7b90f6b583da1716fd0e9
+    machine_name: MacBook Pro
+    workspace: metis:1
+    worktree: /Users/xianxu/workspace/worktree/metis-slot1/metis
+    repository: github.com/xianxu/metis
+actual_hours: 0.37
 ---
 
 # make test target: offline Go + pytest suite for local-check
@@ -27,8 +36,16 @@ Add a `test` target to the metis Makefile that runs the full suite: `go test ./.
 
 ## Plan
 
-- [ ] Add `test` and `test-deps` targets in `Makefile` (with a comment on the offline contract).
-- [ ] Verify: in a fresh clone with no `.venv`, with the network denied (default sandbox), `make test` passes; `sdlc local-check run --name suite` records.
+- [x] Add `test` and `test-deps` targets in `Makefile` (with a comment on the offline contract).
+- [x] Verify: in a fresh clone with no `.venv`, with the network denied (default sandbox), `make test` passes; `sdlc local-check run --name suite` records.
 
 ## Log
 
+
+- 2026-10-23: closed — Recorded sdlc-local/suite passed on aad6f5c (local-check --pre-close chose suite: go test ./... all ok via the per-run SDLC_DEP_SUBSTRATE modfile, pytest 137 passed, offline). BR-1 fixed (private mktemp dir, trap cleanup, verified removed); quoting and Revisions minors fixed.; review verdict: SHIP
+2026-10-23 (metis:1): In a fresh clone with no .venv and the network denied (default sandbox, no allowed domains), `make test` passed: go test ./... ok, then pytest 137 passed with the venv built offline from the uv cache.
+2026-10-23 (metis:1): The first recorded suite on 8e8b3c96 failed in Go setup: the local-check checkout (/Volumes/TestScratch/local-checks/sdlc-local-*) has no sibling ../ariadne for go.mod's replace. Fix: when ../ariadne is absent and sdlc exports SDLC_DEP_SUBSTRATE, test with -modfile pointing at a throwaway go.mod copy whose replace targets that path. Rejected a temp go.work: it matches `use` against the cwd, so a symlinked cwd (/tmp vs /private/tmp) breaks it. Verified in a clone without ../ariadne, network denied: Go all ok, pytest 137 passed.
+
+## Revisions
+
+- 2026-10-23 (metis:1), reason: the first recorded suite showed local-check checkouts lack the sibling `../ariadne` that go.mod's replace needs (Done-when #3). Delta to Spec and Plan item 1: when `../ariadne/go.mod` is absent and sdlc exports `SDLC_DEP_SUBSTRATE`, `make test` runs the Go suite with `-modfile` pointing at a private per-run copy of go.mod and go.sum (made with `mktemp -d`, removed on exit), whose `replace` targets the substrate. Slots and clones are unchanged. Close review round 1 (BR-1): the per-run private dir replaces a fixed shared temp path, which concurrent runs could collide on and nothing removed.
