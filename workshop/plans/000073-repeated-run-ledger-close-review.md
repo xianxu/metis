@@ -307,3 +307,74 @@ findings:
 ```
 
 <!-- sdlc-review-usage [{"version":1,"intent":{"disposable_root":true,"id":"676459ec-cc77-4407-b291-67b81aacbc02","repository":"github.com/xianxu/metis","issue_id":"000073","recipe":"milestone-review","round":2,"attempt":1,"agent":"claude","root":"/Volumes/TestScratch/review-checkouts/87a447b75cdbcf00","reviewed_head":"5cfad8dbf163f703dbac0ecbeff6bc022551d496","slot":"metis:1","requested_at":"2026-10-25T20:42:27.697285Z"},"phase":"finished","pid":68759,"started_at":"2026-10-25T20:42:27.857229Z","finished_at":"2026-10-25T20:49:00.280171Z","session_id":"b719b4e9-8cc4-4bc5-a301-a55b1fbb7abc","outcome":"returned"}] -->
+
+---
+
+## Re-review — 2026-10-25T13:52:11-07:00 (SHIP)
+
+| field | value |
+|-------|-------|
+| issue | 73 — Repeat-shaped run records and ledger rows without CV folds |
+| repo | metis |
+| issue file | workshop/issues/000073-repeated-run-ledger.md |
+| boundary | whole-issue close |
+| milestone | — |
+| window | 6dd9bb55c76dd25a67e9f59aa406e206896e4672..214f1d00904e90d35acfb6e4dc6ef0fcb5b31521 |
+| command | sdlc close --issue 73 |
+| reviewer | claude (anthropic; author anthropic) |
+| isolation | fenced |
+| timestamp | 2026-10-25T13:52:11-07:00 |
+| verdict | SHIP |
+
+## Review
+
+Running the repeat tests against the pinned dependency; fixing the workspace Go version.
+
+The git-backed e2e tests can't run here: the sandbox refuses `git init` in the test temp dir. I'm checking the fix statically instead.
+
+```verdict
+verdict: SHIP
+confidence: medium
+```
+
+Both open findings from the earlier rounds are fixed, and this window adds no new defects. For BR-9, the `--repeat` branch now gets the point address directly from `pointAddressOf` and refuses if that fails (`cmd/metis/run.go:233-241`). Before, it used `singleRunID`'s address and a separate precondition, so a failed address could still name the claim dir with a timestamp. The rule for the family is now built into the code: a repeat's claim dir comes only from the address it just computed. That closes all three fallback cases: an untracked experiment, an unaddressable config, and any future reason the address can't be computed. For BR-10, both atlas passages now say `.se` appears only at n ≥ 2 and that `--repeat` needs a tracked or addressable experiment. I could not run the git-backed e2e tests: the sandbox refuses `git init` in the test temp dir ("outside the reviewer's directories (sdlc #339)"), and setting `TMPDIR` didn't change where the tests ran. So I checked the regression test by tracing the code instead (details below). That is why confidence is medium. Nothing blocks SHIP.
+
+1. **Strengths**
+   - `cmd/metis/run.go:236-241`: the refusal now comes from the same function that names the dir, so there is no separate precondition that can drift from it.
+   - `cmd/metis/repeat_e2e_test.go:478-486` checks two things: the specific refusal message, and that no dir was claimed. The second check is what proves the claim is never spent.
+   - The atlas edits (`atlas/experiment.md:157-159,180-182`, `atlas/index.md:44-45`) match the code: the claim-release behaviour, the se-at-n≥2 rule (`pkg/ledger/ledger.go:486` per BR-4), and the untracked refusal.
+
+2. **Critical:** none.
+
+3. **Important:** none.
+
+4. **Minor:** in the repeat path, `singleRunID` (`run.go:222`) still computes the point address once, and the result is then thrown away. It's harmless; it isn't worth raising as a finding.
+
+5. **Test coverage notes**
+   - `TestRepeat_RefusesUnaddressableConfig` reaches the fix: `.nan` is valid YAML, and nothing in `pkg/experiment` or `cmd/metis` rejects a non-finite value before `pointAddressOf`. `record.CanonicalHash` then errors on it (`pkg/record/address.go:19-24`).
+   - The message the test expects ("needs a point address") exists only in the new code. Under the old code the run claims `run-<ts>.r-1` and fails later, so the test would go red.
+   - I tried to revert the fix and run the test, but that run hit the same `git init` refusal, so the red result is inferred from the code, not observed. `pkg/record` tests pass, and `go vet ./cmd/metis/` builds cleanly against the pinned ariadne.
+
+6. **Architecture (interdiff only)**
+   - **ARCH-DRY: pass.** One function names the dir; the hand-written precondition is gone.
+   - **ARCH-PURE: pass.** No new IO mixed into logic.
+   - **ARCH-PURPOSE: pass.** BR-9 was fixed at the level of the rule, not just the site it named, and BR-10 was fixed in both atlas passages in the same round.
+   - **ARCH-EVOLVE: pass.** No persisted format changes in this window.
+
+   There is no conflict resolution to judge. The issue file changes only status, log and card metadata; `## Spec`, `## Revisions` and `## Done when` are untouched, so scope did not change.
+
+7. **Plan revision recommendations:** none.
+
+```findings
+dispose:
+  - id: BR-9
+    disposition: addressed
+    note: |
+      run.go:233-241 gets the address via pointAddressOf and refuses on error; the claim dir uses only that address (rule fixed, not the instance); TestRepeat_RefusesUnaddressableConfig reaches it via .nan (verified by tracing; the sandbox's git-init refusal stopped the e2e run).
+  - id: BR-10
+    disposition: addressed
+    note: |
+      atlas/experiment.md:157-159,180-182 and atlas/index.md:44-45 now state se only at n>=2 (matches ledger.go:486) and that --repeat needs a tracked/addressable experiment.
+```
+
+<!-- sdlc-review-usage [{"version":1,"intent":{"disposable_root":true,"id":"ffc21355-9c95-407d-98d0-6e9ecaabe208","repository":"github.com/xianxu/metis","issue_id":"000073","recipe":"fix-review","round":3,"attempt":1,"agent":"claude","root":"/Volumes/TestScratch/review-checkouts/20be9ef6bc3cbbcd","reviewed_head":"214f1d00904e90d35acfb6e4dc6ef0fcb5b31521","slot":"metis:1","requested_at":"2026-10-25T20:51:00.096497Z"},"phase":"finished","pid":80457,"started_at":"2026-10-25T20:51:00.19467Z","finished_at":"2026-10-25T20:52:09.615269Z","session_id":"20ad1185-b0f7-44a7-b0dc-de8206c18dab","outcome":"returned"}] -->

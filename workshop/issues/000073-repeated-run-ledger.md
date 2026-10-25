@@ -84,6 +84,8 @@ Design hours are near zero because the TL approved the plan, and it cleared 2 pl
 ## Log
 
 
+
+- 2026-10-25: closed — Round 2 advisories fixed: the repeat path mints the point address itself (pointAddressOf) and refuses on failure, so no fallback can name the claimed dir (new TestRepeat_RefusesUnaddressableConfig); the atlas states se only from n >= 2 and the untracked/unaddressable refusal. Targeted cmd/metis repeat/publish tests pass. (fixed-then-ship); review verdict: SHIP
 - 2026-10-25: closed — Recorded suite sdlc-local/suite passed on 5cfad8db after the close review round 1 fixes. Targeted: pkg/ledger (legacy byte-identical round-trip, unknown columns, Append/Publish kinds, repeat family mean/se/n with no se below n=2, Publish label validation and Extra kept), cmd/metis repeat_e2e_test (distinct repeat samples, label reuse refuses, code edit splits families, interrupted publication recovers, conflict and invalid/misplaced label refuse, untracked experiment refuses --repeat, fingerprint cohorts use their own records (mutation checked), validation failure releases the claim, plain row replace, parallel publishers and claim race).; review verdict: FIX-THEN-SHIP
 2026-10-23: Filed unclaimed for the ariadne#577 re-plan. Seams: cmd/metis/run.go, sweep.go, ledger.go and pkg/ledger dedupKey. No implementation changed.
 2026-10-23 (metis:1): Concurrent claims in this slot: #71, #75, #76, #72 and #73 are open at once while #75 waits on the operator CI pin (metis#70). Active-time attribution across them is approximate until ariadne#580 lands.

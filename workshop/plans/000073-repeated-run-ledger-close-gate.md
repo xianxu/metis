@@ -1440,6 +1440,699 @@ rounds:
       isolation: fenced
       reviewed: 5cfad8dbf163f703dbac0ecbeff6bc022551d496
       blocked: false
+    - reviewer_runs:
+        - version: 1
+          intent:
+            disposable_root: true
+            id: ffc21355-9c95-407d-98d0-6e9ecaabe208
+            repository: github.com/xianxu/metis
+            issue_id: "000073"
+            recipe: fix-review
+            round: 3
+            attempt: 1
+            agent: claude
+            root: /Volumes/TestScratch/review-checkouts/20be9ef6bc3cbbcd
+            reviewed_head: 214f1d00904e90d35acfb6e4dc6ef0fcb5b31521
+            slot: metis:1
+            requested_at: "2026-10-25T20:51:00.096497Z"
+          phase: finished
+          pid: 80457
+          started_at: "2026-10-25T20:51:00.19467Z"
+          finished_at: "2026-10-25T20:52:09.615269Z"
+          session_id: 20ad1185-b0f7-44a7-b0dc-de8206c18dab
+          outcome: returned
+      actual_inputs:
+        version: 4
+        method: active-time-v3-branch-queue-v1
+        repository: github.com/xianxu/metis
+        code_head: 214f1d00904e90d35acfb6e4dc6ef0fcb5b31521
+        tracker_head: 1e60847d5fae9dbcf47f2b5dfb9189ba014ad8e7
+        branch_point: 23335ebc28bf331b8c54a98b1da16fcdd8500ec4
+        since: "2026-10-23T19:48:43-07:00"
+        until: "2026-10-25T13:50:02-07:00"
+        brain_root: /Users/xianxu/workspace/brain
+        gap_minutes: 15
+        commit_weight: 1
+        include_assistant: true
+        engagements:
+            - start: "2026-10-23T19:48:43-07:00"
+              end: "2026-10-25T13:50:02-07:00"
+              began: "2026-10-23T19:48:43-07:00"
+              roots:
+                - /Users/xianxu/workspace/worktree/metis-slot1/metis
+        sources:
+            - harness: claude
+              id: 621e2c42-a080-4dc1-9165-83040e197e38
+              slot: metis:1
+              cwd: /Users/xianxu/workspace/worktree/metis-slot1/metis
+              digest: dd167a4091edc270dbc5a3cc8386bd59981b1b9effb3e5443d93dedbff0f1350
+              started: "2026-10-24T00:13:14.303Z"
+              spawned: false
+              bytes: 13616512
+              windows:
+                - start: "2026-10-23T19:48:51-07:00"
+                  end: "2026-10-24T02:53:21Z"
+                - start: "2026-10-24T02:53:48Z"
+                  end: "2026-10-24T02:53:49Z"
+                - start: "2026-10-24T02:55:54Z"
+                  end: "2026-10-24T03:00:52Z"
+                - start: "2026-10-25T19:15:40Z"
+                  end: "2026-10-25T13:50:02-07:00"
+              dispatch_windows:
+                - start: "2026-10-23T19:48:43-07:00"
+                  end: "2026-10-25T13:50:02-07:00"
+        queue_waits:
+            - attempt_id: 77a9dacaf3126ff0ea20f2cdf4ecebe6
+              slot: metis:1
+              record_digest: 380f2985a19a05b18cadc514e7062b43b01cf4d6fc2840aa877e5797f56e43b9
+              start: "2026-10-25T19:31:17.127415Z"
+              end: "2026-10-25T20:01:38.611877Z"
+              queue_seconds: 1821.484462
+              raw_seconds: 1821.484462
+              exact: true
+            - attempt_id: 21de167aed453e91d2652ec98f0d7117
+              slot: metis:1
+              record_digest: 74f756a8976f8dab90d194becf6bcd95921162fa0726ffe3d0a43a59edf70a30
+              start: "2026-10-25T20:16:59.703808Z"
+              end: "2026-10-25T20:39:44.818643Z"
+              queue_seconds: 1365.114835
+              raw_seconds: 1365.114835
+              exact: true
+        excluded_brain_sessions: 1
+        excluded_brain_minutes: 60.41913333333334
+        cuts:
+            - dispatched: "2026-10-25T13:04:11-07:00"
+              finalized: "2026-10-25T13:13:30-07:00"
+              finalizing: false
+            - dispatched: "2026-10-25T13:42:27-07:00"
+              finalized: "2026-10-25T13:49:03-07:00"
+              finalizing: true
+        branches:
+            - root: /Users/xianxu/workspace/worktree/metis-slot1/metis
+              path: /Users/xianxu/workspace/metis/.git/worktrees/metis/logs/HEAD
+              head: 214f1d00904e90d35acfb6e4dc6ef0fcb5b31521
+              branch: 000073-repeated-run-ledger
+              digest: 3d639d67600222e3946f75f91c92516bd4372aecb09e76f204e3c30acdeaab38
+              bytes: 26735
+              intervals:
+                - source: claude/0869d57a-be29-46b9-99c9-b00decfa590d
+                  start: "2026-10-23T19:48:43-07:00"
+                  end: "2026-10-23T19:48:51-07:00"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source: claude/0869d57a-be29-46b9-99c9-b00decfa590d
+                  start: "2026-10-23T19:48:51-07:00"
+                  end: "2026-10-24T02:53:21Z"
+                  kind: branch
+                - source: claude/0869d57a-be29-46b9-99c9-b00decfa590d
+                  start: "2026-10-24T02:53:21Z"
+                  end: "2026-10-24T02:53:32Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source: claude/0869d57a-be29-46b9-99c9-b00decfa590d
+                  start: "2026-10-24T02:53:32Z"
+                  end: "2026-10-24T02:53:48Z"
+                  branch: 000074-manual-grading-step
+                  kind: foreign-branch
+                - source: claude/0869d57a-be29-46b9-99c9-b00decfa590d
+                  start: "2026-10-24T02:53:48Z"
+                  end: "2026-10-24T02:53:49Z"
+                  kind: branch
+                - source: claude/0869d57a-be29-46b9-99c9-b00decfa590d
+                  start: "2026-10-24T02:53:49Z"
+                  end: "2026-10-24T02:55:54Z"
+                  branch: 000074-manual-grading-step
+                  kind: foreign-branch
+                - source: claude/0869d57a-be29-46b9-99c9-b00decfa590d
+                  start: "2026-10-24T02:55:54Z"
+                  end: "2026-10-24T03:00:52Z"
+                  kind: branch
+                - source: claude/0869d57a-be29-46b9-99c9-b00decfa590d
+                  start: "2026-10-24T03:00:52Z"
+                  end: "2026-10-25T11:16:02Z"
+                  branch: 000074-manual-grading-step
+                  kind: foreign-branch
+                - source: claude/0869d57a-be29-46b9-99c9-b00decfa590d
+                  start: "2026-10-25T11:16:02Z"
+                  end: "2026-10-25T11:16:32Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source: claude/0869d57a-be29-46b9-99c9-b00decfa590d
+                  start: "2026-10-25T11:16:32Z"
+                  end: "2026-10-25T14:40:39Z"
+                  branch: 000070-ci-weave-pin
+                  kind: foreign-branch
+                - source: claude/0869d57a-be29-46b9-99c9-b00decfa590d
+                  start: "2026-10-25T14:40:39Z"
+                  end: "2026-10-25T14:41:01Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source: claude/0869d57a-be29-46b9-99c9-b00decfa590d
+                  start: "2026-10-25T14:41:01Z"
+                  end: "2026-10-25T14:44:45Z"
+                  branch: 000075-make-test-target-offline-go-pytest-suite-for-local-check
+                  kind: foreign-branch
+                - source: claude/0869d57a-be29-46b9-99c9-b00decfa590d
+                  start: "2026-10-25T14:44:45Z"
+                  end: "2026-10-25T14:45:14Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source: claude/0869d57a-be29-46b9-99c9-b00decfa590d
+                  start: "2026-10-25T14:45:14Z"
+                  end: "2026-10-25T14:54:53Z"
+                  branch: 000071-never-cache-steps
+                  kind: foreign-branch
+                - source: claude/0869d57a-be29-46b9-99c9-b00decfa590d
+                  start: "2026-10-25T14:54:53Z"
+                  end: "2026-10-25T14:55:04Z"
+                  branch: 000076-canonicalize-metis-dir-step-paths-evalsymlinks
+                  kind: foreign-branch
+                - source: claude/0869d57a-be29-46b9-99c9-b00decfa590d
+                  start: "2026-10-25T14:55:04Z"
+                  end: "2026-10-25T14:55:43Z"
+                  branch: 000071-never-cache-steps
+                  kind: foreign-branch
+                - source: claude/0869d57a-be29-46b9-99c9-b00decfa590d
+                  start: "2026-10-25T14:55:43Z"
+                  end: "2026-10-25T14:56:09Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source: claude/0869d57a-be29-46b9-99c9-b00decfa590d
+                  start: "2026-10-25T14:56:09Z"
+                  end: "2026-10-25T15:43:58Z"
+                  branch: 000076-canonicalize-metis-dir-step-paths-evalsymlinks
+                  kind: foreign-branch
+                - source: claude/0869d57a-be29-46b9-99c9-b00decfa590d
+                  start: "2026-10-25T15:43:58Z"
+                  end: "2026-10-25T15:44:08Z"
+                  branch: 000072-step-timeout-live-log
+                  kind: foreign-branch
+                - source: claude/0869d57a-be29-46b9-99c9-b00decfa590d
+                  start: "2026-10-25T15:44:08Z"
+                  end: "2026-10-25T16:00:45Z"
+                  branch: 000076-canonicalize-metis-dir-step-paths-evalsymlinks
+                  kind: foreign-branch
+                - source: claude/0869d57a-be29-46b9-99c9-b00decfa590d
+                  start: "2026-10-25T16:00:45Z"
+                  end: "2026-10-25T16:01:09Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source: claude/0869d57a-be29-46b9-99c9-b00decfa590d
+                  start: "2026-10-25T16:01:09Z"
+                  end: "2026-10-25T19:15:02Z"
+                  branch: 000072-step-timeout-live-log
+                  kind: foreign-branch
+                - source: claude/0869d57a-be29-46b9-99c9-b00decfa590d
+                  start: "2026-10-25T19:15:02Z"
+                  end: "2026-10-25T19:15:40Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source: claude/0869d57a-be29-46b9-99c9-b00decfa590d
+                  start: "2026-10-25T19:15:40Z"
+                  end: "2026-10-25T13:50:02-07:00"
+                  kind: branch
+                - source: claude/551b999c-0156-4396-815b-ab3e30b9f070
+                  start: "2026-10-23T19:48:43-07:00"
+                  end: "2026-10-23T19:48:51-07:00"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source: claude/551b999c-0156-4396-815b-ab3e30b9f070
+                  start: "2026-10-23T19:48:51-07:00"
+                  end: "2026-10-24T02:53:21Z"
+                  kind: branch
+                - source: claude/551b999c-0156-4396-815b-ab3e30b9f070
+                  start: "2026-10-24T02:53:21Z"
+                  end: "2026-10-24T02:53:32Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source: claude/551b999c-0156-4396-815b-ab3e30b9f070
+                  start: "2026-10-24T02:53:32Z"
+                  end: "2026-10-24T02:53:48Z"
+                  branch: 000074-manual-grading-step
+                  kind: foreign-branch
+                - source: claude/551b999c-0156-4396-815b-ab3e30b9f070
+                  start: "2026-10-24T02:53:48Z"
+                  end: "2026-10-24T02:53:49Z"
+                  kind: branch
+                - source: claude/551b999c-0156-4396-815b-ab3e30b9f070
+                  start: "2026-10-24T02:53:49Z"
+                  end: "2026-10-24T02:55:54Z"
+                  branch: 000074-manual-grading-step
+                  kind: foreign-branch
+                - source: claude/551b999c-0156-4396-815b-ab3e30b9f070
+                  start: "2026-10-24T02:55:54Z"
+                  end: "2026-10-24T03:00:52Z"
+                  kind: branch
+                - source: claude/551b999c-0156-4396-815b-ab3e30b9f070
+                  start: "2026-10-24T03:00:52Z"
+                  end: "2026-10-25T11:16:02Z"
+                  branch: 000074-manual-grading-step
+                  kind: foreign-branch
+                - source: claude/551b999c-0156-4396-815b-ab3e30b9f070
+                  start: "2026-10-25T11:16:02Z"
+                  end: "2026-10-25T11:16:32Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source: claude/551b999c-0156-4396-815b-ab3e30b9f070
+                  start: "2026-10-25T11:16:32Z"
+                  end: "2026-10-25T14:40:39Z"
+                  branch: 000070-ci-weave-pin
+                  kind: foreign-branch
+                - source: claude/551b999c-0156-4396-815b-ab3e30b9f070
+                  start: "2026-10-25T14:40:39Z"
+                  end: "2026-10-25T14:41:01Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source: claude/551b999c-0156-4396-815b-ab3e30b9f070
+                  start: "2026-10-25T14:41:01Z"
+                  end: "2026-10-25T14:44:45Z"
+                  branch: 000075-make-test-target-offline-go-pytest-suite-for-local-check
+                  kind: foreign-branch
+                - source: claude/551b999c-0156-4396-815b-ab3e30b9f070
+                  start: "2026-10-25T14:44:45Z"
+                  end: "2026-10-25T14:45:14Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source: claude/551b999c-0156-4396-815b-ab3e30b9f070
+                  start: "2026-10-25T14:45:14Z"
+                  end: "2026-10-25T14:54:53Z"
+                  branch: 000071-never-cache-steps
+                  kind: foreign-branch
+                - source: claude/551b999c-0156-4396-815b-ab3e30b9f070
+                  start: "2026-10-25T14:54:53Z"
+                  end: "2026-10-25T14:55:04Z"
+                  branch: 000076-canonicalize-metis-dir-step-paths-evalsymlinks
+                  kind: foreign-branch
+                - source: claude/551b999c-0156-4396-815b-ab3e30b9f070
+                  start: "2026-10-25T14:55:04Z"
+                  end: "2026-10-25T14:55:43Z"
+                  branch: 000071-never-cache-steps
+                  kind: foreign-branch
+                - source: claude/551b999c-0156-4396-815b-ab3e30b9f070
+                  start: "2026-10-25T14:55:43Z"
+                  end: "2026-10-25T14:56:09Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source: claude/551b999c-0156-4396-815b-ab3e30b9f070
+                  start: "2026-10-25T14:56:09Z"
+                  end: "2026-10-25T15:43:58Z"
+                  branch: 000076-canonicalize-metis-dir-step-paths-evalsymlinks
+                  kind: foreign-branch
+                - source: claude/551b999c-0156-4396-815b-ab3e30b9f070
+                  start: "2026-10-25T15:43:58Z"
+                  end: "2026-10-25T15:44:08Z"
+                  branch: 000072-step-timeout-live-log
+                  kind: foreign-branch
+                - source: claude/551b999c-0156-4396-815b-ab3e30b9f070
+                  start: "2026-10-25T15:44:08Z"
+                  end: "2026-10-25T16:00:45Z"
+                  branch: 000076-canonicalize-metis-dir-step-paths-evalsymlinks
+                  kind: foreign-branch
+                - source: claude/551b999c-0156-4396-815b-ab3e30b9f070
+                  start: "2026-10-25T16:00:45Z"
+                  end: "2026-10-25T16:01:09Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source: claude/551b999c-0156-4396-815b-ab3e30b9f070
+                  start: "2026-10-25T16:01:09Z"
+                  end: "2026-10-25T19:15:02Z"
+                  branch: 000072-step-timeout-live-log
+                  kind: foreign-branch
+                - source: claude/551b999c-0156-4396-815b-ab3e30b9f070
+                  start: "2026-10-25T19:15:02Z"
+                  end: "2026-10-25T19:15:40Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source: claude/551b999c-0156-4396-815b-ab3e30b9f070
+                  start: "2026-10-25T19:15:40Z"
+                  end: "2026-10-25T13:50:02-07:00"
+                  kind: branch
+                - source_index: 0
+                  start: "2026-10-23T19:48:43-07:00"
+                  end: "2026-10-23T19:48:51-07:00"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source_index: 0
+                  start: "2026-10-23T19:48:51-07:00"
+                  end: "2026-10-24T02:53:21Z"
+                  kind: branch
+                - source_index: 0
+                  start: "2026-10-24T02:53:21Z"
+                  end: "2026-10-24T02:53:32Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source_index: 0
+                  start: "2026-10-24T02:53:32Z"
+                  end: "2026-10-24T02:53:48Z"
+                  branch: 000074-manual-grading-step
+                  kind: foreign-branch
+                - source_index: 0
+                  start: "2026-10-24T02:53:48Z"
+                  end: "2026-10-24T02:53:49Z"
+                  kind: branch
+                - source_index: 0
+                  start: "2026-10-24T02:53:49Z"
+                  end: "2026-10-24T02:55:54Z"
+                  branch: 000074-manual-grading-step
+                  kind: foreign-branch
+                - source_index: 0
+                  start: "2026-10-24T02:55:54Z"
+                  end: "2026-10-24T03:00:52Z"
+                  kind: branch
+                - source_index: 0
+                  start: "2026-10-24T03:00:52Z"
+                  end: "2026-10-25T11:16:02Z"
+                  branch: 000074-manual-grading-step
+                  kind: foreign-branch
+                - source_index: 0
+                  start: "2026-10-25T11:16:02Z"
+                  end: "2026-10-25T11:16:32Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source_index: 0
+                  start: "2026-10-25T11:16:32Z"
+                  end: "2026-10-25T14:40:39Z"
+                  branch: 000070-ci-weave-pin
+                  kind: foreign-branch
+                - source_index: 0
+                  start: "2026-10-25T14:40:39Z"
+                  end: "2026-10-25T14:41:01Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source_index: 0
+                  start: "2026-10-25T14:41:01Z"
+                  end: "2026-10-25T14:44:45Z"
+                  branch: 000075-make-test-target-offline-go-pytest-suite-for-local-check
+                  kind: foreign-branch
+                - source_index: 0
+                  start: "2026-10-25T14:44:45Z"
+                  end: "2026-10-25T14:45:14Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source_index: 0
+                  start: "2026-10-25T14:45:14Z"
+                  end: "2026-10-25T14:54:53Z"
+                  branch: 000071-never-cache-steps
+                  kind: foreign-branch
+                - source_index: 0
+                  start: "2026-10-25T14:54:53Z"
+                  end: "2026-10-25T14:55:04Z"
+                  branch: 000076-canonicalize-metis-dir-step-paths-evalsymlinks
+                  kind: foreign-branch
+                - source_index: 0
+                  start: "2026-10-25T14:55:04Z"
+                  end: "2026-10-25T14:55:43Z"
+                  branch: 000071-never-cache-steps
+                  kind: foreign-branch
+                - source_index: 0
+                  start: "2026-10-25T14:55:43Z"
+                  end: "2026-10-25T14:56:09Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source_index: 0
+                  start: "2026-10-25T14:56:09Z"
+                  end: "2026-10-25T15:43:58Z"
+                  branch: 000076-canonicalize-metis-dir-step-paths-evalsymlinks
+                  kind: foreign-branch
+                - source_index: 0
+                  start: "2026-10-25T15:43:58Z"
+                  end: "2026-10-25T15:44:08Z"
+                  branch: 000072-step-timeout-live-log
+                  kind: foreign-branch
+                - source_index: 0
+                  start: "2026-10-25T15:44:08Z"
+                  end: "2026-10-25T16:00:45Z"
+                  branch: 000076-canonicalize-metis-dir-step-paths-evalsymlinks
+                  kind: foreign-branch
+                - source_index: 0
+                  start: "2026-10-25T16:00:45Z"
+                  end: "2026-10-25T16:01:09Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source_index: 0
+                  start: "2026-10-25T16:01:09Z"
+                  end: "2026-10-25T19:15:02Z"
+                  branch: 000072-step-timeout-live-log
+                  kind: foreign-branch
+                - source_index: 0
+                  start: "2026-10-25T19:15:02Z"
+                  end: "2026-10-25T19:15:40Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source_index: 0
+                  start: "2026-10-25T19:15:40Z"
+                  end: "2026-10-25T13:50:02-07:00"
+                  kind: branch
+                - source: claude/e26c5e7a-df9a-4671-86ec-e5ceff7a6ac1
+                  start: "2026-10-23T19:48:43-07:00"
+                  end: "2026-10-23T19:48:51-07:00"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source: claude/e26c5e7a-df9a-4671-86ec-e5ceff7a6ac1
+                  start: "2026-10-23T19:48:51-07:00"
+                  end: "2026-10-24T02:53:21Z"
+                  kind: branch
+                - source: claude/e26c5e7a-df9a-4671-86ec-e5ceff7a6ac1
+                  start: "2026-10-24T02:53:21Z"
+                  end: "2026-10-24T02:53:32Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source: claude/e26c5e7a-df9a-4671-86ec-e5ceff7a6ac1
+                  start: "2026-10-24T02:53:32Z"
+                  end: "2026-10-24T02:53:48Z"
+                  branch: 000074-manual-grading-step
+                  kind: foreign-branch
+                - source: claude/e26c5e7a-df9a-4671-86ec-e5ceff7a6ac1
+                  start: "2026-10-24T02:53:48Z"
+                  end: "2026-10-24T02:53:49Z"
+                  kind: branch
+                - source: claude/e26c5e7a-df9a-4671-86ec-e5ceff7a6ac1
+                  start: "2026-10-24T02:53:49Z"
+                  end: "2026-10-24T02:55:54Z"
+                  branch: 000074-manual-grading-step
+                  kind: foreign-branch
+                - source: claude/e26c5e7a-df9a-4671-86ec-e5ceff7a6ac1
+                  start: "2026-10-24T02:55:54Z"
+                  end: "2026-10-24T03:00:52Z"
+                  kind: branch
+                - source: claude/e26c5e7a-df9a-4671-86ec-e5ceff7a6ac1
+                  start: "2026-10-24T03:00:52Z"
+                  end: "2026-10-25T11:16:02Z"
+                  branch: 000074-manual-grading-step
+                  kind: foreign-branch
+                - source: claude/e26c5e7a-df9a-4671-86ec-e5ceff7a6ac1
+                  start: "2026-10-25T11:16:02Z"
+                  end: "2026-10-25T11:16:32Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source: claude/e26c5e7a-df9a-4671-86ec-e5ceff7a6ac1
+                  start: "2026-10-25T11:16:32Z"
+                  end: "2026-10-25T14:40:39Z"
+                  branch: 000070-ci-weave-pin
+                  kind: foreign-branch
+                - source: claude/e26c5e7a-df9a-4671-86ec-e5ceff7a6ac1
+                  start: "2026-10-25T14:40:39Z"
+                  end: "2026-10-25T14:41:01Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source: claude/e26c5e7a-df9a-4671-86ec-e5ceff7a6ac1
+                  start: "2026-10-25T14:41:01Z"
+                  end: "2026-10-25T14:44:45Z"
+                  branch: 000075-make-test-target-offline-go-pytest-suite-for-local-check
+                  kind: foreign-branch
+                - source: claude/e26c5e7a-df9a-4671-86ec-e5ceff7a6ac1
+                  start: "2026-10-25T14:44:45Z"
+                  end: "2026-10-25T14:45:14Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source: claude/e26c5e7a-df9a-4671-86ec-e5ceff7a6ac1
+                  start: "2026-10-25T14:45:14Z"
+                  end: "2026-10-25T14:54:53Z"
+                  branch: 000071-never-cache-steps
+                  kind: foreign-branch
+                - source: claude/e26c5e7a-df9a-4671-86ec-e5ceff7a6ac1
+                  start: "2026-10-25T14:54:53Z"
+                  end: "2026-10-25T14:55:04Z"
+                  branch: 000076-canonicalize-metis-dir-step-paths-evalsymlinks
+                  kind: foreign-branch
+                - source: claude/e26c5e7a-df9a-4671-86ec-e5ceff7a6ac1
+                  start: "2026-10-25T14:55:04Z"
+                  end: "2026-10-25T14:55:43Z"
+                  branch: 000071-never-cache-steps
+                  kind: foreign-branch
+                - source: claude/e26c5e7a-df9a-4671-86ec-e5ceff7a6ac1
+                  start: "2026-10-25T14:55:43Z"
+                  end: "2026-10-25T14:56:09Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source: claude/e26c5e7a-df9a-4671-86ec-e5ceff7a6ac1
+                  start: "2026-10-25T14:56:09Z"
+                  end: "2026-10-25T15:43:58Z"
+                  branch: 000076-canonicalize-metis-dir-step-paths-evalsymlinks
+                  kind: foreign-branch
+                - source: claude/e26c5e7a-df9a-4671-86ec-e5ceff7a6ac1
+                  start: "2026-10-25T15:43:58Z"
+                  end: "2026-10-25T15:44:08Z"
+                  branch: 000072-step-timeout-live-log
+                  kind: foreign-branch
+                - source: claude/e26c5e7a-df9a-4671-86ec-e5ceff7a6ac1
+                  start: "2026-10-25T15:44:08Z"
+                  end: "2026-10-25T16:00:45Z"
+                  branch: 000076-canonicalize-metis-dir-step-paths-evalsymlinks
+                  kind: foreign-branch
+                - source: claude/e26c5e7a-df9a-4671-86ec-e5ceff7a6ac1
+                  start: "2026-10-25T16:00:45Z"
+                  end: "2026-10-25T16:01:09Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source: claude/e26c5e7a-df9a-4671-86ec-e5ceff7a6ac1
+                  start: "2026-10-25T16:01:09Z"
+                  end: "2026-10-25T19:15:02Z"
+                  branch: 000072-step-timeout-live-log
+                  kind: foreign-branch
+                - source: claude/e26c5e7a-df9a-4671-86ec-e5ceff7a6ac1
+                  start: "2026-10-25T19:15:02Z"
+                  end: "2026-10-25T19:15:40Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source: claude/e26c5e7a-df9a-4671-86ec-e5ceff7a6ac1
+                  start: "2026-10-25T19:15:40Z"
+                  end: "2026-10-25T13:50:02-07:00"
+                  kind: branch
+                - source: claude/f2d4b646-eda5-4c47-8d97-ddd84ac73472
+                  start: "2026-10-23T19:48:43-07:00"
+                  end: "2026-10-23T19:48:51-07:00"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source: claude/f2d4b646-eda5-4c47-8d97-ddd84ac73472
+                  start: "2026-10-23T19:48:51-07:00"
+                  end: "2026-10-24T02:53:21Z"
+                  kind: branch
+                - source: claude/f2d4b646-eda5-4c47-8d97-ddd84ac73472
+                  start: "2026-10-24T02:53:21Z"
+                  end: "2026-10-24T02:53:32Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source: claude/f2d4b646-eda5-4c47-8d97-ddd84ac73472
+                  start: "2026-10-24T02:53:32Z"
+                  end: "2026-10-24T02:53:48Z"
+                  branch: 000074-manual-grading-step
+                  kind: foreign-branch
+                - source: claude/f2d4b646-eda5-4c47-8d97-ddd84ac73472
+                  start: "2026-10-24T02:53:48Z"
+                  end: "2026-10-24T02:53:49Z"
+                  kind: branch
+                - source: claude/f2d4b646-eda5-4c47-8d97-ddd84ac73472
+                  start: "2026-10-24T02:53:49Z"
+                  end: "2026-10-24T02:55:54Z"
+                  branch: 000074-manual-grading-step
+                  kind: foreign-branch
+                - source: claude/f2d4b646-eda5-4c47-8d97-ddd84ac73472
+                  start: "2026-10-24T02:55:54Z"
+                  end: "2026-10-24T03:00:52Z"
+                  kind: branch
+                - source: claude/f2d4b646-eda5-4c47-8d97-ddd84ac73472
+                  start: "2026-10-24T03:00:52Z"
+                  end: "2026-10-25T11:16:02Z"
+                  branch: 000074-manual-grading-step
+                  kind: foreign-branch
+                - source: claude/f2d4b646-eda5-4c47-8d97-ddd84ac73472
+                  start: "2026-10-25T11:16:02Z"
+                  end: "2026-10-25T11:16:32Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source: claude/f2d4b646-eda5-4c47-8d97-ddd84ac73472
+                  start: "2026-10-25T11:16:32Z"
+                  end: "2026-10-25T14:40:39Z"
+                  branch: 000070-ci-weave-pin
+                  kind: foreign-branch
+                - source: claude/f2d4b646-eda5-4c47-8d97-ddd84ac73472
+                  start: "2026-10-25T14:40:39Z"
+                  end: "2026-10-25T14:41:01Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source: claude/f2d4b646-eda5-4c47-8d97-ddd84ac73472
+                  start: "2026-10-25T14:41:01Z"
+                  end: "2026-10-25T14:44:45Z"
+                  branch: 000075-make-test-target-offline-go-pytest-suite-for-local-check
+                  kind: foreign-branch
+                - source: claude/f2d4b646-eda5-4c47-8d97-ddd84ac73472
+                  start: "2026-10-25T14:44:45Z"
+                  end: "2026-10-25T14:45:14Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source: claude/f2d4b646-eda5-4c47-8d97-ddd84ac73472
+                  start: "2026-10-25T14:45:14Z"
+                  end: "2026-10-25T14:54:53Z"
+                  branch: 000071-never-cache-steps
+                  kind: foreign-branch
+                - source: claude/f2d4b646-eda5-4c47-8d97-ddd84ac73472
+                  start: "2026-10-25T14:54:53Z"
+                  end: "2026-10-25T14:55:04Z"
+                  branch: 000076-canonicalize-metis-dir-step-paths-evalsymlinks
+                  kind: foreign-branch
+                - source: claude/f2d4b646-eda5-4c47-8d97-ddd84ac73472
+                  start: "2026-10-25T14:55:04Z"
+                  end: "2026-10-25T14:55:43Z"
+                  branch: 000071-never-cache-steps
+                  kind: foreign-branch
+                - source: claude/f2d4b646-eda5-4c47-8d97-ddd84ac73472
+                  start: "2026-10-25T14:55:43Z"
+                  end: "2026-10-25T14:56:09Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source: claude/f2d4b646-eda5-4c47-8d97-ddd84ac73472
+                  start: "2026-10-25T14:56:09Z"
+                  end: "2026-10-25T15:43:58Z"
+                  branch: 000076-canonicalize-metis-dir-step-paths-evalsymlinks
+                  kind: foreign-branch
+                - source: claude/f2d4b646-eda5-4c47-8d97-ddd84ac73472
+                  start: "2026-10-25T15:43:58Z"
+                  end: "2026-10-25T15:44:08Z"
+                  branch: 000072-step-timeout-live-log
+                  kind: foreign-branch
+                - source: claude/f2d4b646-eda5-4c47-8d97-ddd84ac73472
+                  start: "2026-10-25T15:44:08Z"
+                  end: "2026-10-25T16:00:45Z"
+                  branch: 000076-canonicalize-metis-dir-step-paths-evalsymlinks
+                  kind: foreign-branch
+                - source: claude/f2d4b646-eda5-4c47-8d97-ddd84ac73472
+                  start: "2026-10-25T16:00:45Z"
+                  end: "2026-10-25T16:01:09Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source: claude/f2d4b646-eda5-4c47-8d97-ddd84ac73472
+                  start: "2026-10-25T16:01:09Z"
+                  end: "2026-10-25T19:15:02Z"
+                  branch: 000072-step-timeout-live-log
+                  kind: foreign-branch
+                - source: claude/f2d4b646-eda5-4c47-8d97-ddd84ac73472
+                  start: "2026-10-25T19:15:02Z"
+                  end: "2026-10-25T19:15:40Z"
+                  branch: main-slot1
+                  kind: resting-excluded
+                - source: claude/f2d4b646-eda5-4c47-8d97-ddd84ac73472
+                  start: "2026-10-25T19:15:40Z"
+                  end: "2026-10-25T13:50:02-07:00"
+                  kind: branch
+      "n": 3
+      timestamp: "2026-10-25T13:52:12-07:00"
+      dispatched: "2026-10-25T13:51:00-07:00"
+      agent: claude
+      reviewer: claude (anthropic; author anthropic)
+      dispose:
+        - id: BR-9
+          disposition: addressed
+          note: run.go:233-241 gets the address via pointAddressOf and refuses on error; the claim dir uses only that address (rule fixed, not the instance); TestRepeat_RefusesUnaddressableConfig reaches it via .nan (verified by tracing; the sandbox's git-init refusal stopped the e2e run).
+          round: 3
+        - id: BR-10
+          disposition: addressed
+          note: atlas/experiment.md:157-159,180-182 and atlas/index.md:44-45 now state se only at n>=2 (matches ledger.go:486) and that --repeat needs a tracked/addressable experiment.
+          round: 3
+      recipe: fix-review
+      isolation: fenced
+      reviewed: 214f1d00904e90d35acfb6e4dc6ef0fcb5b31521
+      blocked: false
 ---
 
 # Gate ledger — metis#73 (boundary-review)
@@ -1488,7 +2181,13 @@ later rounds disposed of them. Generated — edit the gate, not this file.
 - **BR-10** [Minor] `atlas-matches-behavior` (kind: defect) The atlas still says every metric in a repeat family gets .se, and omits the rule that --repeat needs a tracked experiment
   atlas/experiment.md ("Every metric gets mean, .se and .n") and atlas/index.md ("every metric mean/se/n") contradict the BR-4 fix at pkg/ledger/ledger.go:486, which omits .se below n=2. The BR-2 refusal for an untracked experiment is not documented either. Update both atlas passages in the same round as the behavior fixes.
 
+## Round 3 — 2026-10-25T13:52:12-07:00 (claude) — passed
+
+### Disposed
+
+- BR-9 — addressed — run.go:233-241 gets the address via pointAddressOf and refuses on error; the claim dir uses only that address (rule fixed, not the instance); TestRepeat_RefusesUnaddressableConfig reaches it via .nan (verified by tracing; the sandbox's git-init refusal stopped the e2e run).
+- BR-10 — addressed — atlas/experiment.md:157-159,180-182 and atlas/index.md:44-45 now state se only at n>=2 (matches ledger.go:486) and that --repeat needs a tracked/addressable experiment.
+
 ## Open findings
 
-- **BR-9** [Minor] `repeat-claim-identity` (kind: defect) The --repeat guard checks shapeBlobHash, but the claim dir comes from singleRunID, which can still fall back to a timestamp
-- **BR-10** [Minor] `atlas-matches-behavior` (kind: defect) The atlas still says every metric in a repeat family gets .se, and omits the rule that --repeat needs a tracked experiment
+(none — every finding has been disposed)
