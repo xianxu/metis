@@ -252,6 +252,12 @@ identical on a non-Kaggle platform?* — if yes, it lives here.
   interface: `MemStore` is the in-memory fake for #2's tests, S3 slots in later (out of v1). No
   cache-keying/provenance/durable-retention here (→ #2/#3/#8). [metis#9]
 - [workflow/](workflow) — inherited ariadne workflow docs (symlink into the substrate).
+- **CI compiler pin** — `.sdlc/weave-compiler-ref` (authored, not weave-managed) names the exact
+  ariadne commit the seeded `merge-check.yml` builds weave from before bootstrap; a missing or
+  malformed pin, or a build whose provenance mismatches, fails CI with no fallback. Bump it only to
+  a ref ariadne lists in its `.sdlc/weave-compiler-refs`; it is local-gates configuration, so each
+  bump is its own operator-verified PR. See
+  [compiler compatibility](workflow/ci-merge-check.md#compiler-compatibility-459). [metis#70]
 
 **Roadmap (metis#1 — all milestones shipped):** M1 (experiment datatype), M2 (Go step-runner:
 `cmd/metis run` + pure `pkg/experiment` `Parse`/`Validate`/`TopoSort`, semantics enforced on

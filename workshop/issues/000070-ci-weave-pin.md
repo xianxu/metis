@@ -62,22 +62,22 @@ PATH-precedence tests live upstream (`scripts/test/portable-ci.test.sh`,
 `scripts/test/weave-compatibility.test.sh`). The only missing piece is the
 consumer-authored pin, whose absence is what fails CI today (PR #51).
 
-- [ ] Author `.sdlc/weave-compiler-ref` = `63d6bfd86509d97649e10d7a5dd1e9a06db17d21`
+- [x] Author `.sdlc/weave-compiler-ref` = `63d6bfd86509d97649e10d7a5dd1e9a06db17d21`
       plus a newline; it equals ariadne's own selected and only supported ref
       (`ariadne/.sdlc/weave-compiler-refs`).
-- [ ] Local evidence: run the workflow's own validator on the file; fetch that
+- [x] Local evidence: run the workflow's own validator on the file; fetch that
       SHA into a temp checkout, build `./cmd/weave` the workflow's way
       (CGO_ENABLED=0, GOTOOLCHAIN=local, -trimpath) and confirm
       `vcs.revision` equals the pin with `vcs.modified=false`; feed a malformed
       pin (short, uppercase, missing newline) to the validator and see it refuse.
-- [ ] Not manifest-managed: `construct/base.manifest` has no `.sdlc` entry; run
+- [x] Not manifest-managed: `construct/base.manifest` has no `.sdlc` entry; run
       `weave refresh` and confirm the pin survives byte-identical.
 - [ ] Open the PR; real CI is the cold-checkout acceptance (the regenerated
       vocabulary and sidecars, with no authored-replacement refusal). The
       `local-gates-guard` check is expected to fail until the operator verifies
       and applies `local-gates-verified`. Report the PR, compiler identity and CI
       result to the hub. Never apply the label.
-- [ ] Atlas: note the pin and its bump procedure (operator-verified,
+- [x] Atlas: note the pin and its bump procedure (operator-verified,
       a supported ariadne ref) in the atlas CI entry.
 
 Out of scope: workflow edits (the seeded template is upstream's), and the
@@ -95,3 +95,15 @@ operator own implementation and acceptance.
 this slot (#71, #72, #73, #74, #76; ariadne#580 fixes active-time attribution).
 The seeded workflow already carries the template, so the plan is the pin file
 plus verification.
+
+2026-10-25 metis:1: pin authored (`63d6bfd86509d97649e10d7a5dd1e9a06db17d21`).
+Evidence: the workflow's own validator (copied verbatim) accepts it and refuses
+short, uppercase, no-newline, extra-line and missing pins (exit 1, its error).
+Fetched that SHA from github.com into a temp checkout (HEAD verified), built
+`./cmd/weave` with CGO_ENABLED=0 and -trimpath (local go1.27.3; CI selects
+go 1.26.3 from the pin's go.mod): `vcs.revision` equals the pin and
+`vcs.modified=false`. Unmanaged: neither metis's nor ariadne's manifests name any
+`.sdlc` path, and ariadne's `portable-ci.test.sh` asserts the pin is never
+generated. `weave refresh` refuses a branch ahead of main, and `weave compile`
+stopped in the sandbox at `.claude/settings.json` (not retried outside, per
+the hub); the pin stayed byte-identical (sha1 7a28a3fa) across that run.
