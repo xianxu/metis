@@ -102,10 +102,30 @@ broken-graph surfaces layergraph's actionable error rather than degrading silent
   `execStep.stepEnv`, the one builder both executors share, resolves symlinks via `physicalPath`
   (deepest existing ancestor, so a not-yet-created dir works) for every caller, run, blend and the
   sealed sweep alike, so exp-relative reads and the read root share one form (metis#76).
+  `METIS_PENDING_RESOURCES` (metis#72) names `<stepDir>/pending-resources.json`: a step that
+  starts independently managed resources (Couch actors) lists them there and removes the file
+  once they are retired. metis never kills them; it only refuses to call the step a success.
+- **Execution policy (metis#72):** `with: {exec: {timeout: "90m"}}`, a closed sub-map beside
+  `with.cache`, parsed by `experiment.ParseExecPolicy` and refused by `Validate` before any step
+  runs. The timeout bounds the child's runtime from launch (a leaf-budget wait is not counted);
+  there is no default. A step runs as its own process group. On its timeout, or on SIGINT/SIGTERM
+  to metis (`main`'s signal context; a second signal exits hard), the group gets TERM, then KILL
+  after a 10s grace, then a 5s bounded join. A step queued for a budget slot when the run is
+  cancelled never launches (`leafBudget.acquire(ctx, …)`).
+- **Live log and outcome (metis#72):** child stdout+stderr stream into `step.log` as they arrive
+  (`boundedLog`: capped at 64 MiB with one truncation marker, the rest drained so the child never
+  blocks; a 64 KiB tail feeds the failure message). Every executed step writes `outcome.json`
+  (`ok | failed | timed-out | cancelled | cleanup-unconfirmed | resources-unretired`, exit code,
+  signal, start/end, `runtime_seconds`, `log_truncated`, pending resources), decided in one place,
+  `classifyOutcome` (precedence: cleanup-unconfirmed > resources-unretired > timed-out/cancelled/
+  failed > ok). Only `ok` is success; nothing else is retried or published. The first terminal
+  event wins: an exit landing during termination never overrides a timeout or a cancel.
 - **In:** `with.json` — the step's `with` config, written into the step dir by the runner.
 - **Out:** an optional `metrics.json` (flat `{name: number}`, merged into `Run.metrics`) plus
-  any **artifact files** the step writes into its dir. `with.json` and `metrics.json` are the
-  reserved contract channels and are NOT counted as artifacts; every other file is recorded in
+  any **artifact files** the step writes into its dir. The top-level names in
+  `reservedStepFiles` (`with.json`, `metrics.json`, `reads.json`, `step.log`, `outcome.json`,
+  `pending-resources.json`) are contract or bookkeeping channels and are NOT counted as artifacts
+  (nor hashed into the output); every other file is recorded in
   `Run.artifacts` as a `runs/<id>/`-relative (step-qualified) path. A non-zero exit fails the
   step and halts the run.
 - **Ledger:** `runs/<run-id>/run.json` (the `#Run` record — the record of truth) + `record.json`
