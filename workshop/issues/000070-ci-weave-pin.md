@@ -110,3 +110,13 @@ go 1.26.3 from the pin's go.mod): `vcs.revision` equals the pin and
 generated. `weave refresh` refuses a branch ahead of main, and `weave compile`
 stopped in the sandbox at `.claude/settings.json` (not retried outside, per
 the hub); the pin stayed byte-identical (sha1 7a28a3fa) across that run.
+
+2026-10-25 metis:1: scope revision (hub-approved; the operator reviews it with
+the label). PR #52's merge-check got past the pin (it built the pinned compiler)
+and then failed in bootstrap: "git clone -- git@github.com:xianxu/ariadne.git
+... git@github.com: Permission denied (publickey)" (run 40188584381). The runner
+has no ssh key; construct/deps had carried the ssh URL since 0350013, and every
+main merge-check since failed the same way. Switched construct/deps to
+https://github.com/xianxu/ariadne.git (ariadne is public; pair uses the same
+URL). A local checkout with ../ariadne present never clones, so local slots are
+unaffected.
