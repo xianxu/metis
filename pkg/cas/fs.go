@@ -6,10 +6,12 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/xianxu/metis/internal/fsx"
 )
 
 // tmpPrefix marks in-flight atomic writes so the eviction scan skips them.
-const tmpPrefix = ".tmp-"
+const tmpPrefix = fsx.TmpPrefix
 
 // FSStore is a filesystem-backed Store: blobs live at root/<h[:2]>/<h> (sharded so
 // no single directory holds the whole pool). Writes are atomic (temp file +
@@ -95,28 +97,10 @@ func (s *FSStore) Put(data []byte) (Hash, error) {
 	return h, nil
 }
 
-// writeAtomic writes data to a temp file in p's directory, then renames it into
-// place so a concurrent reader never observes a partial blob.
+// writeAtomic writes a blob through fsx.WriteFileAtomic (temp file + rename), so a
+// concurrent reader never observes a partial blob. 0600 is the mode the store has always used.
 func (s *FSStore) writeAtomic(p string, data []byte) error {
-	tmp, err := os.CreateTemp(filepath.Dir(p), tmpPrefix+"*")
-	if err != nil {
-		return err
-	}
-	name := tmp.Name()
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		os.Remove(name)
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		os.Remove(name)
-		return err
-	}
-	if err := os.Rename(name, p); err != nil {
-		os.Remove(name)
-		return err
-	}
-	return nil
+	return fsx.WriteFileAtomic(p, data, 0o600)
 }
 
 // touch stamps p's mtime from the injected clock — the LRU recency signal, so

@@ -81,4 +81,7 @@ type RunRecord struct {
 	Started         string       `json:"started"`
 	Finished        string       `json:"finished,omitempty"`
 	Status          string       `json:"status"`
+	// Repeat is the metis#73 execution coordinate (`metis run --repeat L`): set, it makes this
+	// execution one distinct sample of its point. Empty for a plain run or a sweep point.
+	Repeat string `json:"repeat,omitempty"`
 }

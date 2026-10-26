@@ -39,7 +39,13 @@ identical on a non-Kaggle platform?* — if yes, it lives here.
   **metis#18:** a `Row` is now a **raw per-fold** row (a `Fold` coordinate); `AggregateView(l, metric)`
   reduces them read-time → per-config `(mean, SE)` (`<metric>{,.se,.n}`) — the leaderboard `ledger show
   --sort` and `promote` sort over (metis#19's 1-SE select re-reduces the same rows, no re-run). A v1
-  non-fold row passes through untouched (idempotent). **`metis ledger show <shape> [--fingerprint|--sort|--top]`**
+  non-fold row passes through untouched (idempotent). **metis#73:** repeat rows (`metis run --repeat`)
+  key on (point-address, code-fingerprint, repeat), are immutable samples, and `AggregateView` reduces
+  them to repeat families (every metric mean and n, se once n ≥ 2, plus repeat counts; `--repeat`
+  needs a tracked experiment, whose point address names the claimed dir); plain single runs publish a row
+  too; `publishRows` (flock + `internal/fsx` atomic rewrite) is the one ledger writer, and
+  `metis ledger publish` recovers a row lost after its record (see [experiment.md](experiment.md)).
+  **`metis ledger show <shape> [--fingerprint|--sort|--top]`**
   renders sorted/filtered views. **metis#39 (fingerprint visibility, `cmd/metis/fingerprints.go`):**
   every `--fingerprint` flag (select + ledger show) resolves **git-style unique prefixes** via one
   `pinFingerprint`/`resolveFingerprint`; **`metis ledger fingerprints <shape>`** lists the ledger's

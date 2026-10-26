@@ -163,4 +163,5 @@ _pipeline: {
 	started:   string
 	finished?: string
 	status:    string
+	repeat?:   string // metis#73: the execution coordinate of `metis run --repeat` (a slug)
 }

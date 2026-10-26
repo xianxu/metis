@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/xianxu/metis/internal/fsx"
 	"github.com/xianxu/metis/internal/repo"
 	"github.com/xianxu/metis/pkg/cas"
 	"github.com/xianxu/metis/pkg/experiment"
@@ -109,6 +111,10 @@ type runOpts struct {
 	leafPins        []string          // metis#48: default leaf BLAS pins, computed ONCE per top-level run in
 	//                             runExperiment (nil = not yet computed; non-nil rides nested runOpts
 	//                             copies like forkPool — an all-suppressed result is empty, not nil)
+	repeat string // metis#73: --repeat label — this execution is one distinct sample (own dir, record, row)
+	// skipPublish is a test seam (metis#73): stop after record.json, as a crash before the
+	// ledger row would, so `metis ledger publish` recovery can be exercised.
+	skipPublish bool
 }
 
 // runExperiment reads the experiment at o.expPath and dispatches: a `type:
@@ -200,9 +206,109 @@ func runExperiment(o runOpts) (experiment.Run, error) {
 		if o.runControl == nil {
 			o.runControl = newRunControl(o.maxParallel)
 		}
+		if o.repeat != "" {
+			return experiment.Run{}, fmt.Errorf("%s: --repeat is for a plain experiment; a sweep already samples through its folds and seeds", o.expPath)
+		}
 		return experiment.Run{}, runShapeSweep(o, sh, now, out)
 	}
-	return runResolvedExperiment(exp, o, singleRunID(o, exp, now), now, out)
+	return runSingleExperiment(exp, o, now, out)
+}
+
+// runSingleExperiment is the one-point path of `metis run` (metis#73): claim the run dir when
+// this is a repeat, execute and record through runResolvedExperiment, then publish the run's
+// ledger row from its final record, the last effect. The row is published for a failed run
+// too (status failed, no metrics), so every execution that began is in the ledger.
+func runSingleExperiment(exp experiment.Experiment, o runOpts, now func() time.Time, out io.Writer) (experiment.Run, error) {
+	runID := singleRunID(o, exp, now)
+	if o.repeat != "" {
+		if o.runID != "" {
+			return experiment.Run{}, fmt.Errorf("%s: --run and --repeat both name the run dir; pass one", o.expPath)
+		}
+		if _, err := experiment.ParseRepeatLabel(o.repeat); err != nil {
+			return experiment.Run{}, fmt.Errorf("%s: %w", o.expPath, err)
+		}
+		// The claim is only single-use if the dir is named from the minted point address, so
+		// the repeat path mints it directly and refuses on failure: singleRunID's timestamp
+		// fallback (an untracked experiment, an unaddressable config) would never collide.
+		sbh, err := shapeBlobHash(o.expPath)
+		if err != nil {
+			return experiment.Run{}, fmt.Errorf("%s: --repeat needs the experiment tracked in git (its content address names the repeat's run dir, which makes a label single-use): %v", o.expPath, err)
+		}
+		addr, err := pointAddressOf(exp, sbh)
+		if err != nil {
+			return experiment.Run{}, fmt.Errorf("%s: --repeat needs a point address to name the repeat's run dir: %w", o.expPath, err)
+		}
+		runID = repeatRunID(addr, o.repeat)
+		runDir, err := runDirFor(o.expPath, runID)
+		if err != nil {
+			return experiment.Run{}, err
+		}
+		if err := claimRunDir(o.expPath, runDir, o.repeat); err != nil {
+			return experiment.Run{}, err
+		}
+		if o.cache && len(experiment.UncachedSteps(exp)) == 0 {
+			fmt.Fprintf(out, "metis: warning: repeat %s: no step is declared uncached (with.cache.policy: never), so this repeat replays the cache rather than drawing a new sample\n", o.repeat)
+		}
+	}
+	run, runErr := runResolvedExperiment(exp, o, runID, now, out)
+	if run.Started == "" && o.repeat != "" {
+		// Refused before any step ran (validation): release the claim, so the label is not
+		// spent on an execution that never happened. The dir is empty; Remove refuses otherwise.
+		if dir, err := runDirFor(o.expPath, runID); err == nil {
+			os.Remove(dir)
+		}
+	}
+	if run.Started == "" || o.skipPublish {
+		return run, runErr // never started: no record, nothing to publish
+	}
+	runDir, err := runDirFor(o.expPath, runID)
+	if err == nil {
+		err = publishRunRow(o.expPath, runDir)
+	}
+	if err != nil {
+		if runErr != nil {
+			return run, fmt.Errorf("%w (and the ledger row was not published: %v)", runErr, err)
+		}
+		return run, fmt.Errorf("run %s recorded, but its ledger row was not published: %w (recover with: metis ledger publish %s %s)", runID, err, o.expPath, runDir)
+	}
+	return run, runErr
+}
+
+// repeatRunID names a repeat's run dir: the point address plus the label, so repeats of one
+// config never share a dir and the dir is derivable from a ledger row (rowRunID).
+func repeatRunID(base, label string) string { return base + ".r-" + label }
+
+// runDirFor is the physical run dir of runID (the same resolution the runner uses).
+func runDirFor(expPath, runID string) (string, error) {
+	expDir, err := physicalPath(filepath.Dir(expPath))
+	if err != nil {
+		return "", fmt.Errorf("resolve experiment dir: %w", err)
+	}
+	return filepath.Join(expDir, "runs", runID), nil
+}
+
+// claimRunDir makes a repeat's label single-use (metis#73): the exclusive mkdir IS the claim,
+// held for the dir's life, so a second run with the label (concurrent or later) refuses
+// without touching the dir. When that execution's record is final but its ledger row is
+// missing (a crash after the record), the refusal names the recovery verb.
+func claimRunDir(expPath, runDir, label string) error {
+	if err := os.MkdirAll(filepath.Dir(runDir), 0o755); err != nil {
+		return err
+	}
+	err := os.Mkdir(runDir, 0o755)
+	if err == nil {
+		return nil
+	}
+	if !os.IsExist(err) {
+		return err
+	}
+	msg := fmt.Sprintf("repeat %s already executed at %s; use a new label", label, runDir)
+	if rec, rerr := readFinalRecord(runDir); rerr == nil {
+		if present, lerr := rowPublished(expPath, rowFromRecord(rec)); lerr == nil && !present {
+			msg += fmt.Sprintf(" (its ledger row is missing: metis ledger publish %s %s)", expPath, runDir)
+		}
+	}
+	return errors.New(msg)
 }
 
 // singleRunID names a single run's dir. metis#27: content-address it by the run's
@@ -292,18 +398,21 @@ func runResolvedExperimentAdmitted(exp experiment.Experiment, o runOpts, runID s
 	if err != nil {
 		return run, err
 	}
-	if err := writeRecordJSON(runDir, rec); err != nil {
-		return run, err
-	}
+	rec.Repeat = o.repeat // metis#73: the execution coordinate (empty for a plain run or a sweep point)
 	// Capture this run's code closure + run-spec to a git side-ref (metis#14), backfilling
 	// the record with the durable SHA + capture status — so a dirty single run is
 	// reproducible (git checkout the SHA). The sweep loop sets inSweep to capture ONCE
 	// per shape-run instead (captureSweepCode), avoiding redundant per-point capture.
 	// Best-effort (like the sweep path): a backfill hiccup warns, never aborts a finished run.
+	// metis#73: the backfill is in memory, before the ONE atomic record write, so a
+	// record.json that exists is final (a failed backfill leaves an empty fingerprint).
 	if !o.inSweep {
-		if err := captureSingleRun(o, runID); err != nil {
+		if err := captureSingleRun(o, runID, &rec); err != nil {
 			fmt.Fprintf(out, "metis: warning: code-capture backfill failed for run %s: %v\n", runID, err)
 		}
+	}
+	if err := writeRecordJSON(runDir, rec); err != nil {
+		return run, err
 	}
 	// The experiment .md is IMMUTABLE input (#13): a run writes its output to
 	// runs/<id>/{run,record}.json (+ the .ledger.csv sidecar for sweeps), NEVER to the
@@ -325,7 +434,7 @@ func writeRunJSON(runDir string, run experiment.Run) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(runDir, "run.json"), append(b, '\n'), 0o644)
+	return fsx.WriteFileAtomic(filepath.Join(runDir, "run.json"), append(b, '\n'), 0o644) // metis#73: never torn
 }
 
 // orBackground is the nil-safe run context: option structs built by tests leave ctx unset.

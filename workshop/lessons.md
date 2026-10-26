@@ -99,6 +99,15 @@ work. Keep numerical and incident detail in the issue or experiment record.
   the child is scheduled misses with ESRCH, and on a loaded machine TERM and KILL both miss. A
   test that checks a reaper's work probes with `kill(pid, 0)`, never a second `waitpid` that
   races the reaper (metis#72, failed the merge-time suite under load).
+- A single-use claim (an exclusive mkdir) is only exclusive if the name it locks is the
+  identity it guards. Check every fallback path that names the dir (here, an untracked
+  experiment's timestamp fallback made a repeat label reusable, metis#73). Likewise, any row
+  or record read back from disk goes through the same validator as the writer's input, so a
+  hand edit can never produce a file the reader refuses.
+- A test that bounds a time ("runtime < X") sets X far above anything the fixture itself costs
+  under suite load. Starting an interpreter can take more than 300ms on a loaded machine, so a
+  bound of that size fails on load, not on a bug (metis#72's test, failed #73's merge-time suite).
+  When a bound is shown as a pointer, print the dereferenced value.
 
 ## Working rule
 
